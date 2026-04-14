@@ -944,7 +944,7 @@ function PricesTab({ priceDB, setPriceDB }) {
               const days=daysAgo(entry.date);
               return (
                 <div key={entry.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 14px", borderBottom:`1px solid ${C.grayLight}` }}>
-                  <span style={{ fontSize:18 }}>{store?.logo}</span>
+                  <span style={{ fontSize:18 }}>{store?.logo} {STORES.find(s=>s.id===best.storeId)?.name}</span>
                   <div style={{ flex:1 }}>
                     <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{store?.name}</div>
                     <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:stale?C.orange:C.green, fontWeight:700, marginTop:1 }}>
