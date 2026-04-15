@@ -1219,7 +1219,7 @@ export default function App() {
           supabase.from('favorites').select('items').order('id').limit(1),
         ]);
         if(list.data?.[0]) setItems(list.data[0].items || []);
-        if(prices.data) setPriceDB(prices.data.map(p=>({...p, storeId:p.storeId||p.store_id||'autre'}))); setPriceDB(prices.data);
+        if(prices.data) setPriceDB(prices.data.map(p=>({...p, storeId:p.storeId||p.store_id||'autre'})));(prices.data);
         if(arcs.data) setArchives(arcs.data);
         if(favs.data?.[0]) setFavorites(favs.data[0].items || []);
       } catch(e){ console.log("Supabase load:", e); }
