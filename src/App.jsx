@@ -1,4 +1,3 @@
-import { supabase } from "./lib/supabase";
 import { useState, useEffect, useMemo } from "react";
 
 const C = {
@@ -944,7 +943,7 @@ function PricesTab({ priceDB, setPriceDB }) {
               const days=daysAgo(entry.date);
               return (
                 <div key={entry.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 14px", borderBottom:`1px solid ${C.grayLight}` }}>
-                  <span style={{ fontSize:18 }}>{store?.logo} {STORES.find(s=>s.id===best.storeId)?.name}</span>
+                  <span style={{ fontSize:18 }}>{store?.logo}</span>
                   <div style={{ flex:1 }}>
                     <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{store?.name}</div>
                     <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:stale?C.orange:C.green, fontWeight:700, marginTop:1 }}>
@@ -1208,30 +1207,30 @@ export default function App() {
   const [favorites, setFavorites] = useState([]);
   const [loaded, setLoaded]       = useState(false);
 
-  // Charger depuis Supabase
+  // Charger les données au démarrage
   useEffect(()=>{
     (async ()=>{
       try {
-        const [list, prices, arcs, favs] = await Promise.all([
-          supabase.from('shopping_list').select('items').order('id').limit(1),
-          supabase.from('price_db').select('*'),
-          supabase.from('archives').select('*').order('date'),
-          supabase.from('favorites').select('items').order('id').limit(1),
+        const [i, p, a, f] = await Promise.all([
+          window.storage.get("pm_items"),
+          window.storage.get("pm_priceDB"),
+          window.storage.get("pm_archives"),
+          window.storage.get("pm_favorites"),
         ]);
-        if(list.data?.[0]) setItems(list.data[0].items || []);
-        if(prices.data) setPriceDB(prices.data.map(p=>({...p, storeId:p.storeId||p.store_id||'autre'})));
-        if(arcs.data) setArchives(arcs.data);
-        if(favs.data?.[0]) setFavorites(favs.data[0].items || []);
-      } catch(e){ console.log("Supabase load:", e); }
+        if(i?.value) setItems(JSON.parse(i.value));
+        if(p?.value) setPriceDB(JSON.parse(p.value));
+        if(a?.value) setArchives(JSON.parse(a.value));
+        if(f?.value) setFavorites(JSON.parse(f.value));
+      } catch(e){ console.log("Storage load:", e); }
       setLoaded(true);
     })();
   },[]);
 
-  // Sauvegarder dans Supabase
-  const saveItems     = async (v) => { setItems(v); const r=await supabase.from('shopping_list').select('id').order('id').limit(1); if(r.data?.[0]) await supabase.from('shopping_list').update({items:v}).eq('id',r.data[0].id); else await supabase.from('shopping_list').insert({items:v}); };
-  const savePriceDB   = async (v) => { setPriceDB(v); await supabase.from('price_db').delete().gt('id',0); if(v.length>0){ const clean=v.map(p=>({product:p.product,format:p.format,brand:p.brand||'',storeId:p.storeId||'',store_name:'',price:parseFloat(p.price),date:p.date||new Date().toISOString()})); await supabase.from('price_db').insert(clean); } } (v) => { setPriceDB(v); await supabase.from('price_db').delete().neq('id',0); if(v.length>0){ const clean=v.map(p=>({product:p.product,format:p.format,brand:p.brand||'',storeId:p.storeId||p.store_id||'',store_name:p.storeName||p.store_name||'',price:parseFloat(p.price),date:p.date||new Date().toISOString()})); await supabase.from('price_db').insert(clean); } };
-  const saveArchives  = async (v) => { setArchives(v); if(v.length>0){ const last=v[v.length-1]; const {id,...rest}=last; await supabase.from('archives').insert(rest); } };
-  const saveFavorites = async (v) => { setFavorites(v); const r=await supabase.from('favorites').select('id').order('id').limit(1); if(r.data?.[0]) await supabase.from('favorites').update({items:v}).eq('id',r.data[0].id); else await supabase.from('favorites').insert({items:v}); };
+  // Sauvegarder automatiquement à chaque changement
+  const saveItems     = async (v) => { setItems(v);     try { await window.storage.set("pm_items",     JSON.stringify(v)); } catch(e){} };
+  const savePriceDB   = async (v) => { setPriceDB(v);   try { await window.storage.set("pm_priceDB",   JSON.stringify(v)); } catch(e){} };
+  const saveArchives  = async (v) => { setArchives(v);  try { await window.storage.set("pm_archives",  JSON.stringify(v)); } catch(e){} };
+  const saveFavorites = async (v) => { setFavorites(v); try { await window.storage.set("pm_favorites", JSON.stringify(v)); } catch(e){} };
 
   const handleValidate = store => {
     const arc={id:Date.now(),date:new Date().toISOString(),store,total:store.total,items:[...items]};
@@ -1287,5 +1286,4 @@ export default function App() {
     </>
   );
 }
-
 
