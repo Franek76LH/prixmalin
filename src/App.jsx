@@ -454,7 +454,7 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
 
   const submit = () => {
     if(!canSubmit) return;
-    onSave({ brand:brand.trim(), product:product.trim(), format:format.trim(), storeId, price:parseFloat(price), date:new Date().toISOString() });
+   onSave({ brand:brand.trim(), product:product.trim(), format:format.trim(), storeId, store_name: storeName.trim(), price:parseFloat(price), date:new Date().toISOString() });
     onClose();
   };
 
