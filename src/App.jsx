@@ -448,6 +448,7 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
   const [product, setProduct] = useState(existingPrice?.product||"");
   const [format,  setFormat]  = useState(existingPrice?.format||"");
   const [storeId, setStoreId] = useState(existingPrice?.storeId||"");
+  const [storeName, setStoreName] = useState(existingPrice?.store_name || "");
   const [price,   setPrice]   = useState(existingPrice?.price?.toString()||"");
   const canSubmit = product&&format&&storeId&&price&&!isNaN(parseFloat(price));
 
