@@ -477,6 +477,17 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
                 style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${f.val?(f.required?C.orange:C.blue):C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }} />
             </div>
           ))}
+<div style={{ marginBottom:14 }}>
+  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>
+    Magasin précis / texte ticket
+  </div>
+  <input
+    value={storeName}
+    onChange={e=>setStoreName(e.target.value)}
+    placeholder="Ex : Carrefour Marseille B."
+    style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${storeName?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }}
+  />
+</div>
           <div style={{ marginBottom:14 }}>
             <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Magasin *</div>
             <div style={{ display:"flex", gap:7, flexWrap:"wrap" }}>
