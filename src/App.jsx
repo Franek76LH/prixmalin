@@ -1228,7 +1228,7 @@ export default function App() {
   },[]);
 
   const saveItems     = async (v) => { setItems(v); const r=await supabase.from('shopping_list').select('id').order('id').limit(1); if(r.data?.[0]) await supabase.from('shopping_list').update({items:v}).eq('id',r.data[0].id); else await supabase.from('shopping_list').insert({items:v}); };
-  const savePriceDB = async (v) => {   setPriceDB(v);    const clean = v.map(p => ({     product: p.product,     format: p.format,     brand: p.brand || '',     storeId: p.storeId || '',     store_name: '',     price: parseFloat(p.price),     date: p.date || new Date().toISOString()   }));    const { error } = await supabase     .from('price_db')     .insert(clean);    if (error) {     console.error("Erreur insertion Supabase :", error);   } };
+  const savePriceDB = async (v) => {   setPriceDB(v);    const clean = v.map(p => ({     product: p.product,     format: p.format,     brand: p.brand || '',     storeId: p.storeId || '',     store_name: '',     price: parseFloat(p.price),     date: p.date || new Date().toISOString()   }));    const { error } = await supabase     .from('price_db')     .upsert(clean);    if (error) {     console.error("Erreur insertion Supabase :", error);   } };
   const saveArchives  = async (v) => { setArchives(v); if(v.length>0){ const last=v[v.length-1]; const {id,...rest}=last; await supabase.from('archives').insert(rest); } };
   const saveFavorites = async (v) => { setFavorites(v); const r=await supabase.from('favorites').select('id').order('id').limit(1); if(r.data?.[0]) await supabase.from('favorites').update({items:v}).eq('id',r.data[0].id); else await supabase.from('favorites').insert({items:v}); };
 
