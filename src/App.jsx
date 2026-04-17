@@ -711,7 +711,7 @@ function CatalogTab({ items, setItems, setTab }) {
               <div style={{ padding:"8px 10px 10px", textAlign:"center", background:C.white }}>
                 <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, color:C.text, lineHeight:1.2 }}>{cat.name}</div>
                 <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, color:cat.color, marginTop:2, fontWeight:700 }}>
-                  {cat.products.length} produits
+                  {count} produits
                 </div>
               </div>
             </button>
