@@ -1220,16 +1220,19 @@ export default function App() {
   const [showSuccess, setShowSuccess] = useState(null);
   const [favorites, setFavorites] = useState([]);
   const [loaded, setLoaded]       = useState(false);
+  const [catalog, setCatalog] = useState([]);
 
   useEffect(()=>{
     (async ()=>{
       try {
-        const [list, prices, arcs, favs] = await Promise.all([
-          supabase.from('shopping_list').select('items').order('id').limit(1),
-          supabase.from('price_db').select('*'),
-          supabase.from('archives').select('*').order('date'),
-          supabase.from('favorites').select('items').order('id').limit(1),
-        ]);
+        const [list, prices, arcs, favs, catalogData] = await Promise.all([
+  supabase.from('shopping_list').select('items').order('id').limit(1),
+  supabase.from('price_db').select('*'),
+  supabase.from('archives').select('*').order('date'),
+  supabase.from('favorites').select('items').order('id').limit(1),
+  supabase.from('products_catalog').select('*'),
+]);
+        if (catalogData?.data) setCatalog(catalogData.data);
         if(list.data?.[0]) setItems(list.data[0].items || []);
         if(prices.data) setPriceDB(prices.data.map(p=>({...p, storeId: p.storeId || 'autre'})));
         if(arcs.data) setArchives(arcs.data);
