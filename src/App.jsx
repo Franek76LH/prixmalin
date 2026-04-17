@@ -1240,7 +1240,56 @@ export default function App() {
   },[]);
 
   const saveItems     = async (v) => { setItems(v); const r=await supabase.from('shopping_list').select('id').order('id').limit(1); if(r.data?.[0]) await supabase.from('shopping_list').update({items:v}).eq('id',r.data[0].id); else await supabase.from('shopping_list').insert({items:v}); };
-  const savePriceDB = async (v) => {   setPriceDB(v);    const clean = v.map(p => ({     product: p.product,     format: p.format,     brand: p.brand || '',     storeId: p.storeId || '',     store_name: p.store_name || '',     price: parseFloat(p.price),     date: p.date || new Date().toISOString()   }));    const { error } = await supabase     .from('price_db')     .upsert(clean);    if (error) {     console.error("Erreur insertion Supabase :", error);   } };
+  const savePriceDB = async (v) => {
+  setPriceDB(v);
+
+  const clean = v.map(p => ({
+    product: p.product,
+    format: p.format,
+    brand: p.brand || '',
+    storeId: p.storeId || '',
+    store_name: p.store_name || '',
+    price: parseFloat(p.price),
+    date: p.date || new Date().toISOString()
+  }));
+
+  // 1. Sauvegarde des prix (comme avant)
+  const { error } = await supabase
+    .from('price_db')
+    .upsert(clean);
+
+  if (error) {
+    console.error("Erreur insertion Supabase :", error);
+  }
+
+  // 2. NOUVEAU : ajout automatique dans products_catalog
+  for (const p of v) {
+    const productName = p.product?.toLowerCase().trim();
+
+    if (!productName) continue;
+
+    // Vérifie si le produit existe déjà
+    const { data: existing } = await supabase
+      .from('products_catalog')
+      .select('id')
+      .eq('product_name', productName)
+      .maybeSingle();
+
+    // Si pas trouvé → on l'ajoute
+    if (!existing) {
+      const { error: insertError } = await supabase
+        .from('products_catalog')
+        .insert({
+          product_name: productName,
+          category: null
+        });
+
+      if (insertError) {
+        console.error("Erreur ajout catalogue :", insertError);
+      }
+    }
+  }
+};
   const saveArchives  = async (v) => { setArchives(v); if(v.length>0){ const last=v[v.length-1]; const {id,...rest}=last; await supabase.from('archives').insert(rest); } };
   const saveFavorites = async (v) => { setFavorites(v); const r=await supabase.from('favorites').select('id').order('id').limit(1); if(r.data?.[0]) await supabase.from('favorites').update({items:v}).eq('id',r.data[0].id); else await supabase.from('favorites').insert({items:v}); };
 
