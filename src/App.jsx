@@ -35,6 +35,7 @@ const PRODUCT_SUGGESTIONS = [
 
 
 // ── CATALOGUE PAR CATÉGORIE ───────────────────────────────────────────────────
+/*
 const CATALOGUE = [
   {
     id:"epicerie-salee", name:"Épicerie Salée", emoji:"🍝", color:"#FF6B35",
@@ -121,6 +122,15 @@ const CATALOGUE = [
       { name:"Poisson pané",      formats:["200g","400g"],        brands:["Findus","MDD"] },
     ]
   },
+];*/
+const CATEGORY_META = [
+  { id:"epicerie-salee", name:"Épicerie Salée", emoji:"🍝", color:"#FF6B35" },
+  { id:"epicerie-sucree", name:"Épicerie Sucrée", emoji:"🍫", color:"#8B4513" },
+  { id:"produits-laitiers", name:"Produits Laitiers", emoji:"🥛", color:"#4A90E2" },
+  { id:"boissons", name:"Boissons", emoji:"🥤", color:"#E74C3C" },
+  { id:"fruits-legumes", name:"Fruits & Légumes", emoji:"🥦", color:"#27AE60" },
+  { id:"viandes-poissons", name:"Viandes & Poissons", emoji:"🥩", color:"#C0392B" },
+  { id:"surgeles", name:"Surgelés", emoji:"❄️", color:"#5DADE2" }
 ];
 const STALE_DAYS = 30;
 function isStale(d){ return d && (Date.now()-new Date(d))/86400000 > STALE_DAYS; }
@@ -671,8 +681,8 @@ function CatalogTab({ items, setItems, setTab }) {
 
       {/* Grille catégories */}
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-        {CATALOGUE.map((cat,i)=>{
-          const count = items.filter(item=>cat.products.some(p=>p.name===item.product)).length;
+        {CATEGORY_META.map((cat,i)=>
+          const count = items.filter(item => item.category === cat.name).length;
           return (
             <button key={cat.id} onClick={()=>setSelectedCat(cat)} style={{
               padding:0, background:C.white,
