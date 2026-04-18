@@ -573,9 +573,9 @@ function ProductPickerSheet({ category, onClose, onAdd, items }) {
               </div>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:16 }}>
                 {catalog.filter(p => p.category === category.name).map((p,i)=>{
-                  const inList = alreadyIn(p.name);
+                  const inList = alreadyIn(p.product_name);
                   return (
-                    <button key={i} onClick={()=>{ setSelected(p); setFormat(p.formats[0]); setBrand(""); }} style={{
+                    <button key={i} onClick={()=>{ setSelected(p); setFormat(""); setBrand(""); }} style={{
                       padding:"14px 12px", background:inList?"#F0FFF5":C.white,
                       border:`2px solid ${inList?C.green:C.grayLight}`,
                       borderRadius:14, cursor:"pointer", textAlign:"left",
@@ -584,7 +584,6 @@ function ProductPickerSheet({ category, onClose, onAdd, items }) {
                     }}>
                       {inList && <span style={{ position:"absolute", top:6, right:8, fontSize:12 }}>✓</span>}
                       <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, marginBottom:4 }}>{p.product_name}</div>
-                      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.gray }}>{p.formats.join(" · ")}</div>
                     </button>
                   );
                 })}
