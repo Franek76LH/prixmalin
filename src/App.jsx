@@ -601,14 +601,6 @@ function ProductPickerSheet({ category, onClose, onAdd, items }) {
               <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:20, color:C.text, marginBottom:4 }}>{selected.name}</div>
               <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.gray, marginBottom:20 }}>{category.name}</div>
 
-              {/* Format */}
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Format</div>
-              <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:18 }}>
-                {selected.formats.map(f=>(
-                  <button key={f} onClick={()=>setFormat(f)} style={{ padding:"9px 16px", background:format===f?"#CC0000":C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:format===f?C.white:C.text, cursor:"pointer" }}>{f}</button>
-                ))}
-              </div>
-
               {/* Marque */}
               <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Marque</div>
               <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:18 }}>
