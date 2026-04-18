@@ -635,7 +635,7 @@ function ProductPickerSheet({ category, onClose, onAdd, items }) {
   );
 }
 
-function CatalogTab({ items, setItems, setTab }) {
+function CatalogTab({ items, setItems, setTab, catalog }) {
   const [selectedCat, setSelectedCat] = useState(null);
   const totalInList = items.filter(i=>!i.checked).length;
 
