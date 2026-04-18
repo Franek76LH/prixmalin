@@ -572,7 +572,7 @@ function ProductPickerSheet({ category, onClose, onAdd, items }) {
                 Choisis un produit
               </div>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:16 }}>
-                {category.products.map((p,i)=>{
+                {catalog.filter(p => p.category === category.name).map((p,i)=>{
                   const inList = alreadyIn(p.name);
                   return (
                     <button key={i} onClick={()=>{ setSelected(p); setFormat(p.formats[0]); setBrand(""); }} style={{
