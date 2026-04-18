@@ -673,7 +673,7 @@ function CatalogTab({ items, setItems, setTab }) {
       {/* Grille catégories */}
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
        {CATEGORY_META.map((cat,i)=>{
-          const count = items.filter(item => item.category === cat.name).length;
+          const count = catalog.filter(p => p.category === cat.name).length;
           return (
             <button key={cat.id} onClick={()=>setSelectedCat(cat)} style={{
               padding:0, background:C.white,
