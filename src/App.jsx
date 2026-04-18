@@ -722,9 +722,10 @@ function CatalogTab({ items, setItems, setTab }) {
       {selectedCat && (
         <ProductPickerSheet
           category={selectedCat}
-          onClose={()=>setSelectedCat(null)}
-          onAdd={addItem}
-          items={items}
+  onClose={()=>setSelectedCat(null)}
+  onAdd={addItem}
+  items={items}
+  catalog={catalog}
         />
       )}
     </div>
