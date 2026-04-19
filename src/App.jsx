@@ -536,7 +536,7 @@ function ProductPickerSheet({ category, onClose, onAdd, items }) {
   const [added,    setAdded]    = useState([]);
 
   const submit = () => {
-    if(!selected || !format) return;
+    if(!selected) return;
     const item = { id:Date.now()+Math.random(), product:selected.product_name, format, brand:brandFixed?brand:"", qty, checked:false };
     onAdd(item);
     setAdded(prev=>[...prev,item]);
