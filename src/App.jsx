@@ -598,21 +598,8 @@ function ProductPickerSheet({ category, onClose, onAdd, items }) {
                 ← Retour
               </button>
 
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:20, color:C.text, marginBottom:4 }}>{selected.name}</div>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:20, color:C.text, marginBottom:4 }}>{selected.product_name}</div>
               <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.gray, marginBottom:20 }}>{category.name}</div>
-
-              {/* Marque */}
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Marque</div>
-              <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:18 }}>
-                <button onClick={()=>{setBrandFixed(false);setBrand("");}} style={{ padding:"9px 16px", background:!brandFixed?C.orange:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:!brandFixed?"#111111":C.text, cursor:"pointer" }}>
-                  Peu importe
-                </button>
-                {selected.brands.map(b=>(
-                  <button key={b} onClick={()=>{setBrandFixed(true);setBrand(b==="MDD"?"":b);}} style={{ padding:"9px 16px", background:(brandFixed&&brand===(b==="MDD"?"":b))?"#CC0000":C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:(brandFixed&&brand===(b==="MDD"?"":b))?C.white:C.text, cursor:"pointer" }}>
-                    {b==="MDD"?"Marque Distrib.":b}
-                  </button>
-                ))}
-              </div>
 
               {/* Quantité */}
               <div style={{ display:"flex", alignItems:"center", background:C.grayLight, borderRadius:12, padding:"10px 16px", marginBottom:20 }}>
