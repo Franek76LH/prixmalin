@@ -537,7 +537,7 @@ function ProductPickerSheet({ category, onClose, onAdd, items }) {
 
   const submit = () => {
     if(!selected || !format) return;
-    const item = { id:Date.now()+Math.random(), product:selected.name, format, brand:brandFixed?brand:"", qty, checked:false };
+    const item = { id:Date.now()+Math.random(), product:selected.product_name, format, brand:brandFixed?brand:"", qty, checked:false };
     onAdd(item);
     setAdded(prev=>[...prev,item]);
     setSelected(null); setFormat(""); setBrand(""); setQty(1); setBrandFixed(false);
