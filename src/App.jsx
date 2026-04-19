@@ -1330,7 +1330,7 @@ export default function App() {
             </div>
           )}
           {loaded && tab==="list"    && <ListTab    items={items} setItems={saveItems} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites}/>}
-          {loaded && tab==="catalog" && <CatalogTab items={items} setItems={saveItems} setTab={setTab}/>}
+          {loaded && tab==="catalog" && <CatalogTab items={items} setItems={saveItems} setTab={setTab} catalog={catalog}/>}
           {loaded && tab==="compare" && <CompareTab items={items} priceDB={priceDB} onValidate={handleValidate}/>}
           {loaded && tab==="prices"  && <PricesTab  priceDB={priceDB} setPriceDB={savePriceDB}/>}
           {loaded && tab==="archive" && <ArchiveTab archives={archives}/>}
