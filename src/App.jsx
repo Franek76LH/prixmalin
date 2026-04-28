@@ -1259,7 +1259,7 @@ export default function App() {
   // 1. Sauvegarde des prix (comme avant)
   const { error } = await supabase
     .from('price_db')
-    .upsert(clean);
+   .upsert(clean, { onConflict: 'product,format,brand,storeId' });
 
   if (error) {
     console.error("Erreur insertion Supabase :", error);
