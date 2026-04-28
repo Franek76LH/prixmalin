@@ -877,13 +877,13 @@ function PricesTab({ priceDB, setPriceDB }) {
     entries.forEach(e=>{ updated=[...updated.filter(p=>priceKey(p)!==priceKey(e)),e]; });
     setPriceDB(updated);
   };
-  const deletePrice = async (id) => {
-  setPriceDB(priceDB.filter(p => p.id !== id));
+  const deletePrice = async (entry) => {
+  setPriceDB(priceDB.filter(p => p.id !== entry.id));
 
   const { error } = await supabase
     .from('price_db')
     .delete()
-    .eq('id', id);
+    .eq('id', entry.id);
 
   if (error) {
     console.error("Erreur suppression Supabase :", error);
@@ -964,7 +964,7 @@ function PricesTab({ priceDB, setPriceDB }) {
                   </div>
                   <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:17, color:entry.price===best.price?C.green:C.text }}>{entry.price.toFixed(2)} €</div>
                   <button onClick={()=>{setEditPrice(entry);setShowEntry(true);}} style={{ background:C.grayLight, border:"none", borderRadius:8, padding:"5px 8px", fontSize:12, cursor:"pointer" }}>✏️</button>
-                  <button onClick={()=>deletePrice(entry.id)} style={{ background:"none", border:"none", fontSize:14, cursor:"pointer", color:C.gray }}>✕</button>
+                 <button onClick={()=>deletePrice(entry)} style={{ background:"none", border:"none", fontSize:14, cursor:"pointer", color:C.gray }}>✕</button>
                 </div>
               );
             })}
