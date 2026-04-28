@@ -886,8 +886,11 @@ function PricesTab({ priceDB, setPriceDB }) {
     .eq('id', entry.id);
 
   if (error) {
-    console.error("Erreur suppression Supabase :", error);
-  }
+  alert("Erreur suppression Supabase : " + error.message);
+  console.error("Erreur suppression Supabase :", error);
+} else {
+  alert("Suppression Supabase OK");
+}
 };
 
   const grouped = useMemo(()=>{
