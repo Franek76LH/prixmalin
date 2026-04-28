@@ -1269,8 +1269,7 @@ console.log("DATA AVANT SAVE:", v);
   // 1. Sauvegarde des prix (comme avant)
   const { error } = await supabase
     .from('price_db')
-   .upsert(clean, { onConflict: 'product,format,brand,storeId' });
-
+  .insert(clean);
   if (error) {
     console.error("Erreur insertion Supabase :", error);
   }
