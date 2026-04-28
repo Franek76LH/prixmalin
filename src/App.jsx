@@ -880,10 +880,15 @@ function PricesTab({ priceDB, setPriceDB }) {
   const deletePrice = async (entry) => {
   setPriceDB(priceDB.filter(p => p.id !== entry.id));
 
-  const { error } = await supabase
-    .from('price_db')
-    .delete()
-    .eq('id', entry.id);
+ alert("ID à supprimer : " + entry.id);
+
+const { data, error } = await supabase
+  .from('price_db')
+  .delete()
+  .eq('id', entry.id)
+  .select();
+
+alert("Lignes supprimées : " + (data ? data.length : 0));
 
   if (error) {
   alert("Erreur suppression Supabase : " + error.message);
