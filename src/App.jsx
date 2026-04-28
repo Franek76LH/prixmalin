@@ -1242,7 +1242,10 @@ export default function App() {
 ]);
         if (catalogData?.data) setCatalog(catalogData.data);
         if(list.data?.[0]) setItems(list.data[0].items || []);
-        if(prices.data) setPriceDB(prices.data.map(p=>({...p, storeId: p.storeId || 'autre'})));
+        if (prices.data) {
+  console.log("DATA SUPABASE:", prices.data.length);
+  setPriceDB(prices.data.map(p => ({ ...p, storeId: p.storeId || 'autre' })));
+}
         if(arcs.data) setArchives(arcs.data);
         if(favs.data?.[0]) setFavorites(favs.data[0].items || []);
       } catch(e){ console.log("Supabase load:", e); }
