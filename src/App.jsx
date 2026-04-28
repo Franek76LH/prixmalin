@@ -877,7 +877,18 @@ function PricesTab({ priceDB, setPriceDB }) {
     entries.forEach(e=>{ updated=[...updated.filter(p=>priceKey(p)!==priceKey(e)),e]; });
     setPriceDB(updated);
   };
-  const deletePrice = id => setPriceDB(priceDB.filter(p=>p.id!==id));
+  const deletePrice = async (id) => {
+  setPriceDB(priceDB.filter(p => p.id !== id));
+
+  const { error } = await supabase
+    .from('price_db')
+    .delete()
+    .eq('id', id);
+
+  if (error) {
+    console.error("Erreur suppression Supabase :", error);
+  }
+};
 
   const grouped = useMemo(()=>{
     const filtered=filterStore==="all"?priceDB:priceDB.filter(p=>p.storeId===filterStore);
