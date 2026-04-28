@@ -1242,8 +1242,7 @@ export default function App() {
 ]);
         if (catalogData?.data) setCatalog(catalogData.data);
         if(list.data?.[0]) setItems(list.data[0].items || []);
-        if (prices.data) {
-  console.log("DATA SUPABASE:", prices.data.length);
+       if (prices.data) {
   setPriceDB(prices.data.map(p => ({ ...p, storeId: p.storeId || 'autre' })));
 }
         if(arcs.data) setArchives(arcs.data);
