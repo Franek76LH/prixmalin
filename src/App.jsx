@@ -527,7 +527,7 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
 
 
 // ── CATALOG TAB ───────────────────────────────────────────────────────────────
-function ProductPickerSheet({ category, onClose, onAdd, items }) {
+function ProductPickerSheet({ category, onClose, onAdd, items, catalog = [] }) {
   const [selected, setSelected] = useState(null); // produit sélectionné
   const [format,   setFormat]   = useState("");
   const [brand,    setBrand]    = useState("");
@@ -543,7 +543,7 @@ function ProductPickerSheet({ category, onClose, onAdd, items }) {
     setSelected(null); setFormat(""); setBrand(""); setQty(1); setBrandFixed(false);
   };
 
-  const alreadyIn = (name) => items.some(i=>i.product===name);
+  const alreadyIn = (name) => items.some(i => i.product.toLowerCase().trim() === name.toLowerCase().trim());
 
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", zIndex:300, animation:"fadeIn 0.2s ease" }} onClick={onClose}>
