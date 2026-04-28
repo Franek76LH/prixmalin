@@ -1255,7 +1255,7 @@ export default function App() {
   const saveItems     = async (v) => { setItems(v); const r=await supabase.from('shopping_list').select('id').order('id').limit(1); if(r.data?.[0]) await supabase.from('shopping_list').update({items:v}).eq('id',r.data[0].id); else await supabase.from('shopping_list').insert({items:v}); };
   const savePriceDB = async (v) => {
   setPriceDB(v);
-
+console.log("DATA AVANT SAVE:", v);
   const clean = v.map(p => ({
     product: p.product,
     format: p.format,
