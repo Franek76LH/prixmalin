@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { STORES, CATEGORY_META, PRODUCT_SUGGESTIONS, STALE_DAYS } from "./constants";
 
 const C = {
   blue:      "#CC0000",   blueLight:  "#FFF0F0",
