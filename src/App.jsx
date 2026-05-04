@@ -197,7 +197,7 @@ function ImportTicketSheet({ onClose, onImport }) {
   const [selectedStore, setSelectedStore] = useState("");
   const [editableProducts, setEditableProducts] = useState([]);
   const [scanning, setScanning] = useState(false);
-  const fileInputRef = React.useRef(null);
+  const fileInputRef = useRef(null);
   const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
 
   const EXAMPLE = `{
