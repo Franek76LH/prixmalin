@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { scanTicketWithClaude } from "./scanTicket";
 import { STORES, CATEGORY_META, PRODUCT_SUGGESTIONS, STALE_DAYS } from "./constants";
 
 const C = {
@@ -195,6 +196,9 @@ function ImportTicketSheet({ onClose, onImport }) {
   const [result,   setResult]   = useState(null);
   const [selectedStore, setSelectedStore] = useState("");
   const [editableProducts, setEditableProducts] = useState([]);
+  const [scanning, setScanning] = useState(false);
+  const fileInputRef = React.useRef(null);
+  const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
 
   const EXAMPLE = `{
   "store": "Intermarché",
@@ -276,6 +280,22 @@ function ImportTicketSheet({ onClose, onImport }) {
               </button>
               <button onClick={loadExample} style={{ width:"100%", padding:"13px", border:`2px solid ${C.blue}`, borderRadius:12, background:C.blueLight, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.blue, cursor:"pointer" }}>
                 🧪 Tester avec ticket Intermarché
+              </button>
+              <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={async (e) => {
+                const file = e.target.files[0];
+                if(!file) return;
+                setScanning(true); setError("");
+                try {
+                  const base64 = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.readAsDataURL(file); });
+                  const parsed = await scanTicketWithClaude(base64, apiKey);
+                  setResult(parsed); setSelectedStore(storeIdFromName(parsed.store));
+                  setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true})));
+                  setStatus("preview");
+                } catch(e) { setError("Erreur scan : " + e.message); }
+                setScanning(false);
+              }} style={{ display:"none" }} />
+              <button onClick={()=>fileInputRef.current?.click()} disabled={scanning} style={{ width:"100%", padding:"15px", marginTop:10, border:"none", borderRadius:12, background:scanning?"#999":"#00B341", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:"white", cursor:scanning?"default":"pointer" }}>
+                {scanning ? "⏳ Analyse en cours..." : "📷 Scanner un ticket"}
               </button>
             </>
           )}
