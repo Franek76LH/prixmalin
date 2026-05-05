@@ -259,9 +259,9 @@ function ImportTicketSheet({ onClose, onImport }) {
               <div style={{ background:C.blueLight, borderRadius:14, padding:"16px", marginBottom:16 }}>
                 <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.blue, marginBottom:10 }}>Comment ça marche :</div>
                 {[
-                  {n:"1",t:"Envoie une photo de ton ticket à Claude dans le chat"},
-                  {n:"2",t:"Claude répond avec un JSON (marque + produit + format + prix)"},
-                  {n:"3",t:"Copie le JSON et colle-le ici"},
+                  {n:"1",t:"📷 Appuie sur Scanner un ticket"},
+                  {n:"2",t:"Prends une photo de ton ticket de caisse"},
+                  {n:"3",t:"Les produits s'importent automatiquement !"},
                 ].map(s=>(
                   <div key={s.n} style={{ display:"flex", gap:10, alignItems:"flex-start", marginBottom:8 }}>
                     <div style={{ width:24, height:24, borderRadius:99, background:C.orange, color:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>{s.n}</div>
