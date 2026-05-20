@@ -782,9 +782,13 @@ function PricesTab({ priceDB, setPriceDB }) {
     setPriceDB(updated);
   };
   const deletePrice = async (entry) => {
+    const previous = priceDB;
     setPriceDB(priceDB.filter(p => p.id !== entry.id));
     const { error } = await supabase.from('price_db').delete().eq('id', entry.id);
-    if (error) console.error("Erreur suppression Supabase :", error);
+    if (error) {
+      console.error("Erreur suppression Supabase :", error);
+      setPriceDB(previous);
+    }
   };
 
   const grouped = useMemo(()=>{
@@ -1116,30 +1120,38 @@ export default function App() {
   const [favorites, setFavorites] = useState([]);
   const [loaded, setLoaded]       = useState(false);
   const [catalog, setCatalog] = useState([]);
+  const listRowId = useRef(null);
+  const favRowId  = useRef(null);
 
   useEffect(()=>{
     (async ()=>{
       try {
         const [list, prices, arcs, favs, catalogData] = await Promise.all([
-  supabase.from('shopping_list').select('items').order('id').limit(1),
-  supabase.from('price_db').select('*'),
-  supabase.from('archives').select('*').order('date'),
-  supabase.from('favorites').select('items').order('id').limit(1),
-  supabase.from('products_catalog').select('*'),
-]);
+          supabase.from('shopping_list').select('id, items').order('id').limit(1),
+          supabase.from('price_db').select('*'),
+          supabase.from('archives').select('*').order('date'),
+          supabase.from('favorites').select('id, items').order('id').limit(1),
+          supabase.from('products_catalog').select('*'),
+        ]);
         if (catalogData?.data) setCatalog(catalogData.data);
-        if(list.data?.[0]) setItems(list.data[0].items || []);
-       if (prices.data) {
-  setPriceDB(prices.data.map(p => ({ ...p, storeId: p.storeId || 'autre' })));
-}
-        if(arcs.data) setArchives(arcs.data);
-        if(favs.data?.[0]) setFavorites(favs.data[0].items || []);
+        if (list.data?.[0]) { setItems(list.data[0].items || []); listRowId.current = list.data[0].id; }
+        if (prices.data) setPriceDB(prices.data.map(p => ({ ...p, storeId: p.storeId || 'autre' })));
+        if (arcs.data) setArchives(arcs.data);
+        if (favs.data?.[0]) { setFavorites(favs.data[0].items || []); favRowId.current = favs.data[0].id; }
       } catch(e){ console.log("Supabase load:", e); }
       setLoaded(true);
     })();
   },[]);
 
-  const saveItems     = async (v) => { setItems(v); const r=await supabase.from('shopping_list').select('id').order('id').limit(1); if(r.data?.[0]) await supabase.from('shopping_list').update({items:v}).eq('id',r.data[0].id); else await supabase.from('shopping_list').insert({items:v}); };
+  const saveItems = async (v) => {
+    setItems(v);
+    if (listRowId.current) {
+      await supabase.from('shopping_list').update({items:v}).eq('id', listRowId.current);
+    } else {
+      const { data } = await supabase.from('shopping_list').insert({items:v}).select('id').single();
+      if (data) listRowId.current = data.id;
+    }
+  };
   const savePriceDB = async (v) => {
     setPriceDB(v);
     const clean = v.map(p => ({
@@ -1163,12 +1175,12 @@ export default function App() {
     }
 
     for (const p of v) {
-      const productName = p.product?.toLowerCase().trim();
+      const productName = p.product?.trim();
       if (!productName) continue;
       const { data: existing } = await supabase
         .from('products_catalog')
         .select('id')
-        .eq('product_name', productName)
+        .ilike('product_name', productName)
         .maybeSingle();
       if (!existing) {
         const { error: insertError } = await supabase
@@ -1179,7 +1191,15 @@ export default function App() {
     }
   };
   const saveArchives  = async (v) => { setArchives(v); if(v.length>0){ const last=v[v.length-1]; const {id,...rest}=last; await supabase.from('archives').insert(rest); } };
-  const saveFavorites = async (v) => { setFavorites(v); const r=await supabase.from('favorites').select('id').order('id').limit(1); if(r.data?.[0]) await supabase.from('favorites').update({items:v}).eq('id',r.data[0].id); else await supabase.from('favorites').insert({items:v}); };
+  const saveFavorites = async (v) => {
+    setFavorites(v);
+    if (favRowId.current) {
+      await supabase.from('favorites').update({items:v}).eq('id', favRowId.current);
+    } else {
+      const { data } = await supabase.from('favorites').insert({items:v}).select('id').single();
+      if (data) favRowId.current = data.id;
+    }
+  };
 
   const handleValidate = store => {
     const arc={id:Date.now(),date:new Date().toISOString(),store,total:store.total,items:[...items]};

@@ -8,7 +8,7 @@ export async function scanTicketWithClaude(imageBase64, apiKey) {
       "anthropic-dangerous-direct-browser-access": "true",
     },
     body: JSON.stringify({
-      model: "claude-opus-4-5",
+      model: "claude-haiku-4-5-20251001",
       max_tokens: 1024,
       messages: [
         {
