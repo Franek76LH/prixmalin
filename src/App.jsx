@@ -894,12 +894,13 @@ function ListTab({ items, setItems, setTab, favorites, saveFavorites }) {
 
 // ── PRICES TAB ────────────────────────────────────────────────────────────────
 function PricesTab({ priceDB, setPriceDB }) {
-  const [showImport,  setShowImport]  = useState(false);
-  const [showEntry,   setShowEntry]   = useState(false);
-  const [editPrice,   setEditPrice]   = useState(null);
-  const [filterStore, setFilterStore] = useState("all");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [toast,       setToast]       = useState(null);
+  const [showImport,    setShowImport]    = useState(false);
+  const [showEntry,     setShowEntry]     = useState(false);
+  const [editPrice,     setEditPrice]     = useState(null);
+  const [filterStore,   setFilterStore]   = useState("all");
+  const [searchQuery,   setSearchQuery]   = useState("");
+  const [toast,         setToast]         = useState(null);
+  const [pendingDelete, setPendingDelete] = useState(null);
 
   const showToast = (msg, ok=true) => { setToast({msg,ok}); setTimeout(()=>setToast(null),2500); };
   const savePrice = entry => {
@@ -1003,7 +1004,14 @@ function PricesTab({ priceDB, setPriceDB }) {
                   </div>
                   <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:17, color:entry.price===best.price?C.green:C.text }}>{entry.price.toFixed(2)} €</div>
                   <button onClick={()=>{setEditPrice(entry);setShowEntry(true);}} style={{ background:C.grayLight, border:"none", borderRadius:8, padding:"5px 8px", fontSize:12, cursor:"pointer" }}>✏️</button>
-                 <button onClick={()=>deletePrice(entry)} style={{ background:"none", border:"none", fontSize:14, cursor:"pointer", color:C.gray }}>✕</button>
+                 {pendingDelete === entry.id ? (
+                    <div style={{ display:"flex", gap:4 }}>
+                      <button onClick={()=>setPendingDelete(null)} style={{ background:C.grayLight, border:"none", borderRadius:6, padding:"3px 8px", fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:11, cursor:"pointer", color:C.text }}>Non</button>
+                      <button onClick={()=>{ deletePrice(entry); setPendingDelete(null); }} style={{ background:C.red, border:"none", borderRadius:6, padding:"3px 8px", fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:11, cursor:"pointer", color:C.white }}>Oui</button>
+                    </div>
+                  ) : (
+                    <button onClick={()=>setPendingDelete(entry.id)} style={{ background:"none", border:"none", fontSize:14, cursor:"pointer", color:C.gray }}>✕</button>
+                  )}
                 </div>
               );
             })}
@@ -1261,6 +1269,8 @@ export default function App() {
   const [catalog, setCatalog] = useState([]);
   const listRowId = useRef(null);
   const favRowId  = useRef(null);
+  const [appToast, setAppToast] = useState(null);
+  const showAppToast = (msg, ok=true) => { setAppToast({msg,ok}); setTimeout(()=>setAppToast(null),3000); };
 
   useEffect(()=>{
     (async ()=>{
@@ -1284,11 +1294,18 @@ export default function App() {
 
   const saveItems = async (v) => {
     setItems(v);
-    if (listRowId.current) {
-      await supabase.from('shopping_list').update({items:v}).eq('id', listRowId.current);
-    } else {
-      const { data } = await supabase.from('shopping_list').insert({items:v}).select('id').single();
-      if (data) listRowId.current = data.id;
+    try {
+      if (listRowId.current) {
+        const { error } = await supabase.from('shopping_list').update({items:v}).eq('id', listRowId.current);
+        if (error) throw error;
+      } else {
+        const { data, error } = await supabase.from('shopping_list').insert({items:v}).select('id').single();
+        if (error) throw error;
+        if (data) listRowId.current = data.id;
+      }
+    } catch(e) {
+      console.error("Erreur sauvegarde liste :", e);
+      showAppToast("⚠️ Sauvegarde échouée, vérifie ta connexion", false);
     }
   };
   const savePriceDB = async (v) => {
@@ -1326,14 +1343,32 @@ export default function App() {
       }
     }
   };
-  const saveArchives  = async (v) => { setArchives(v); if(v.length>0){ const last=v[v.length-1]; const {id,...rest}=last; await supabase.from('archives').insert(rest); } };
+  const saveArchives = async (v) => {
+    setArchives(v);
+    if (v.length > 0) {
+      const last = v[v.length-1];
+      const {id, ...rest} = last;
+      const { error } = await supabase.from('archives').insert(rest);
+      if (error) {
+        console.error("Erreur sauvegarde historique :", error);
+        showAppToast("⚠️ Historique non sauvegardé, vérifie ta connexion", false);
+      }
+    }
+  };
   const saveFavorites = async (v) => {
     setFavorites(v);
-    if (favRowId.current) {
-      await supabase.from('favorites').update({items:v}).eq('id', favRowId.current);
-    } else {
-      const { data } = await supabase.from('favorites').insert({items:v}).select('id').single();
-      if (data) favRowId.current = data.id;
+    try {
+      if (favRowId.current) {
+        const { error } = await supabase.from('favorites').update({items:v}).eq('id', favRowId.current);
+        if (error) throw error;
+      } else {
+        const { data, error } = await supabase.from('favorites').insert({items:v}).select('id').single();
+        if (error) throw error;
+        if (data) favRowId.current = data.id;
+      }
+    } catch(e) {
+      console.error("Erreur sauvegarde favoris :", e);
+      showAppToast("⚠️ Favoris non sauvegardés, vérifie ta connexion", false);
     }
   };
 
@@ -1375,6 +1410,7 @@ export default function App() {
           {loaded && tab==="archive" && <ArchiveTab archives={archives}/>}
         </div>
         <TabBar tab={tab} setTab={setTab}/>
+        {appToast && <Toast msg={appToast.msg} ok={appToast.ok}/>}
         {showSuccess && (
           <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:300, animation:"fadeIn 0.2s ease" }}>
             <div style={{ background:C.white, borderRadius:20, padding:"36px 32px", textAlign:"center", maxWidth:300, width:"90%", animation:"popIn 0.35s ease", boxShadow:"0 20px 60px rgba(0,0,0,0.25)" }}>
