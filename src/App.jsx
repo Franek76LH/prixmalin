@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { scanTicketWithClaude } from "./scanTicket";
 import { STORES, CATEGORY_META, PRODUCT_SUGGESTIONS, STALE_DAYS } from "./constants";
+import { supabase } from "./lib/supabase";
 
 const C = {
   blue:      "#CC0000",   blueLight:  "#FFF0F0",
@@ -248,7 +249,7 @@ function ImportTicketSheet({ onClose, onImport }) {
         <div style={{ background:C.orange, padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0 }}>
           <div>
             <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:17, color:C.white }}>🧾 Importer un ticket</div>
-            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:"rgba(255,255,255,0.75)" }}>Envoie la photo à Claude → colle le JSON ici</div>
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:"rgba(255,255,255,0.75)" }}>📷 Scanne ton ticket → import automatique</div>
           </div>
           <button onClick={onClose} style={{ background:"rgba(255,255,255,0.2)", border:"none", borderRadius:99, width:28, height:28, color:C.white, fontSize:14, cursor:"pointer" }}>✕</button>
         </div>
@@ -326,7 +327,7 @@ function ImportTicketSheet({ onClose, onImport }) {
                   <div key={p.id} style={{ display:"flex", alignItems:"center", gap:10, background:p.keep?C.white:C.grayLight, borderRadius:12, padding:"10px 14px", border:`1px solid ${p.keep?C.blue:C.grayLight}`, opacity:p.keep?1:0.5 }}>
                     <button onClick={()=>toggleProduct(p.id)} style={{ width:24, height:24, borderRadius:6, flexShrink:0, cursor:"pointer", border:`2px solid ${p.keep?C.blue:C.gray}`, background:p.keep?C.blue:C.white, color:C.white, fontSize:13, display:"flex", alignItems:"center", justifyContent:"center" }}>{p.keep?"✓":""}</button>
                     <div style={{ flex:1 }}>
-                      <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{p.brand?`${p.brand} · `:""}{p.product_name}</div>
+                      <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{p.brand?`${p.brand} · `:""}{p.name}</div>
                       <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>{p.format}</div>
                     </div>
                     <input type="number" step="0.01" min="0" value={p.price} onChange={e=>updatePrice(p.id,e.target.value)}
@@ -434,8 +435,8 @@ function ProductPickerSheet({ category, onClose, onAdd, items, catalog = [] }) {
   const [added,    setAdded]    = useState([]);
 
   const submit = () => {
-    if(!selected) return;
-    const item = { id:Date.now()+Math.random(), product:selected.product_name, format, brand:brandFixed?brand:"", qty, checked:false };
+    if(!selected || !format.trim()) return;
+    const item = { id:Date.now()+Math.random(), product:selected.product_name, format:format.trim(), brand:brandFixed?brand:"", qty, checked:false };
     onAdd(item);
     setAdded(prev=>[...prev,item]);
     setSelected(null); setFormat(""); setBrand(""); setQty(1); setBrandFixed(false);
@@ -499,6 +500,11 @@ function ProductPickerSheet({ category, onClose, onAdd, items, catalog = [] }) {
               <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:20, color:C.text, marginBottom:4 }}>{selected.product_name}</div>
               <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.gray, marginBottom:20 }}>{category.name}</div>
 
+              {/* Format */}
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Format / Volume *</div>
+              <input value={format} onChange={e=>setFormat(e.target.value)} placeholder="Ex : 1L, 500g, 1kg, x6..."
+                style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${format?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:15, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:20 }} />
+
               {/* Quantité */}
               <div style={{ display:"flex", alignItems:"center", background:C.grayLight, borderRadius:12, padding:"10px 16px", marginBottom:20 }}>
                 <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, flex:1 }}>Quantité</span>
@@ -509,7 +515,7 @@ function ProductPickerSheet({ category, onClose, onAdd, items, catalog = [] }) {
                 </div>
               </div>
 
-              <button onClick={submit} style={{ width:"100%", padding:"15px", border:"none", borderRadius:12, background:C.orange, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:"#111111", cursor:"pointer", boxShadow:"0 6px 16px rgba(200,160,0,0.4)" }}>
+              <button onClick={submit} disabled={!format.trim()} style={{ width:"100%", padding:"15px", border:"none", borderRadius:12, background:format.trim()?C.orange:C.grayLight, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:format.trim()?"#111111":C.gray, cursor:format.trim()?"pointer":"default", boxShadow:format.trim()?"0 6px 16px rgba(200,160,0,0.4)":"none" }}>
                 + Ajouter à ma liste
               </button>
             </>
@@ -776,25 +782,10 @@ function PricesTab({ priceDB, setPriceDB }) {
     setPriceDB(updated);
   };
   const deletePrice = async (entry) => {
-  setPriceDB(priceDB.filter(p => p.id !== entry.id));
-
- alert("ID à supprimer : " + entry.id);
-
-const { data, error } = await supabase
-  .from('price_db')
-  .delete()
-  .eq('id', entry.id)
-  .select();
-
-alert("Lignes supprimées : " + (data ? data.length : 0));
-
-  if (error) {
-  alert("Erreur suppression Supabase : " + error.message);
-  console.error("Erreur suppression Supabase :", error);
-} else {
-  alert("Suppression Supabase OK");
-}
-};
+    setPriceDB(priceDB.filter(p => p.id !== entry.id));
+    const { error } = await supabase.from('price_db').delete().eq('id', entry.id);
+    if (error) console.error("Erreur suppression Supabase :", error);
+  };
 
   const grouped = useMemo(()=>{
     const filtered=filterStore==="all"?priceDB:priceDB.filter(p=>p.storeId===filterStore);
@@ -1116,8 +1107,6 @@ function ArchiveTab({ archives }) {
 }
 
 // ── ROOT ──────────────────────────────────────────────────────────────────────
-import { supabase } from "./lib/supabase";
-
 export default function App() {
   const [tab, setTab]           = useState("list");
   const [items, setItems]       = useState([]);
@@ -1152,54 +1141,43 @@ export default function App() {
 
   const saveItems     = async (v) => { setItems(v); const r=await supabase.from('shopping_list').select('id').order('id').limit(1); if(r.data?.[0]) await supabase.from('shopping_list').update({items:v}).eq('id',r.data[0].id); else await supabase.from('shopping_list').insert({items:v}); };
   const savePriceDB = async (v) => {
-  setPriceDB(v);
-console.log("DATA AVANT SAVE:", v);
-  const clean = v.map(p => ({
-    product: p.product,
-    format: p.format,
-    brand: p.brand || '',
-    storeId: p.storeId || '',
-    store_name: p.store_name || '',
-    price: parseFloat(p.price),
-    date: p.date || new Date().toISOString()
-  }));
+    setPriceDB(v);
+    const clean = v.map(p => ({
+      product: p.product,
+      format: p.format,
+      brand: p.brand || '',
+      storeId: p.storeId || '',
+      store_name: p.store_name || '',
+      price: parseFloat(p.price),
+      date: p.date || new Date().toISOString()
+    }));
 
-  // 1. Sauvegarde des prix (comme avant)
-  const { error } = await supabase
-    .from('price_db')
- .upsert(clean, { onConflict: 'product,format,brand,storeId' });
-  if (error) {
-    console.error("Erreur insertion Supabase :", error);
-  }
+    const { error } = await supabase
+      .from('price_db')
+      .upsert(clean, { onConflict: 'product,format,brand,storeId' });
+    if (error) {
+      console.error("Erreur insertion Supabase :", error);
+    } else {
+      const { data } = await supabase.from('price_db').select('*');
+      if (data) setPriceDB(data.map(p => ({ ...p, storeId: p.storeId || 'autre' })));
+    }
 
-  // 2. NOUVEAU : ajout automatique dans products_catalog
-  for (const p of v) {
-    const productName = p.product?.toLowerCase().trim();
-
-    if (!productName) continue;
-
-    // Vérifie si le produit existe déjà
-    const { data: existing } = await supabase
-      .from('products_catalog')
-      .select('id')
-      .eq('product_name', productName)
-      .maybeSingle();
-
-    // Si pas trouvé → on l'ajoute
-    if (!existing) {
-      const { error: insertError } = await supabase
+    for (const p of v) {
+      const productName = p.product?.toLowerCase().trim();
+      if (!productName) continue;
+      const { data: existing } = await supabase
         .from('products_catalog')
-        .insert({
-          product_name: productName,
-          category: null
-        });
-
-      if (insertError) {
-        console.error("Erreur ajout catalogue :", insertError);
+        .select('id')
+        .eq('product_name', productName)
+        .maybeSingle();
+      if (!existing) {
+        const { error: insertError } = await supabase
+          .from('products_catalog')
+          .insert({ product_name: productName, category: null });
+        if (insertError) console.error("Erreur ajout catalogue :", insertError);
       }
     }
-  }
-};
+  };
   const saveArchives  = async (v) => { setArchives(v); if(v.length>0){ const last=v[v.length-1]; const {id,...rest}=last; await supabase.from('archives').insert(rest); } };
   const saveFavorites = async (v) => { setFavorites(v); const r=await supabase.from('favorites').select('id').order('id').limit(1); if(r.data?.[0]) await supabase.from('favorites').update({items:v}).eq('id',r.data[0].id); else await supabase.from('favorites').insert({items:v}); };
 
