@@ -81,6 +81,23 @@ function TabBar({ tab, setTab }) {
   );
 }
 
+// ── TOAST ─────────────────────────────────────────────────────────────────────
+function Toast({ msg, ok = true }) {
+  return (
+    <div style={{
+      position:"fixed", bottom:76, left:"50%", transform:"translateX(-50%)",
+      background:ok?C.green:C.red, color:C.white,
+      padding:"10px 22px", borderRadius:99,
+      fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14,
+      zIndex:500, animation:"popIn 0.3s ease",
+      boxShadow:"0 4px 16px rgba(0,0,0,0.2)",
+      whiteSpace:"nowrap", pointerEvents:"none",
+    }}>
+      {msg}
+    </div>
+  );
+}
+
 // ── ADD ITEM SHEET ────────────────────────────────────────────────────────────
 function AddItemSheet({ onClose, onAdd }) {
   const [product, setProduct] = useState("");
@@ -427,12 +444,13 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
 
 // ── CATALOG TAB ───────────────────────────────────────────────────────────────
 function ProductPickerSheet({ category, onClose, onAdd, items, catalog = [] }) {
-  const [selected, setSelected] = useState(null); // produit sélectionné
-  const [format,   setFormat]   = useState("");
-  const [brand,    setBrand]    = useState("");
-  const [brandFixed, setBrandFixed] = useState(false);
-  const [qty,      setQty]      = useState(1);
-  const [added,    setAdded]    = useState([]);
+  const [selected,    setSelected]    = useState(null);
+  const [format,      setFormat]      = useState("");
+  const [brand,       setBrand]       = useState("");
+  const [brandFixed,  setBrandFixed]  = useState(false);
+  const [qty,         setQty]         = useState(1);
+  const [added,       setAdded]       = useState([]);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const submit = () => {
     if(!selected || !format.trim()) return;
@@ -470,11 +488,13 @@ function ProductPickerSheet({ category, onClose, onAdd, items, catalog = [] }) {
               <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:12 }}>
                 Choisis un produit
               </div>
+              <input value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="🔍 Chercher..."
+                style={{ width:"100%", padding:"10px 14px", borderRadius:10, border:`2px solid ${searchQuery?category.color:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:12 }} />
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:16 }}>
-                {catalog.filter(p => p.category === category?.name).map((p,i)=>{
+                {catalog.filter(p => p.category === category?.name && (!searchQuery || p.product_name.toLowerCase().includes(searchQuery.toLowerCase()))).map((p,i)=>{
                   const inList = alreadyIn(p.product_name);
                   return (
-                    <button key={i} onClick={()=>{ setSelected(p); setFormat(""); setBrand(""); }} style={{
+                    <button key={i} onClick={()=>{ setSelected(p); setFormat(""); setBrand(""); setSearchQuery(""); }} style={{
                       padding:"14px 12px", background:inList?"#F0FFF5":C.white,
                       border:`2px solid ${inList?C.green:C.grayLight}`,
                       borderRadius:14, cursor:"pointer", textAlign:"left",
@@ -614,14 +634,85 @@ function CatalogTab({ items, setItems, setTab, catalog }) {
   );
 }
 
+// ── EDIT ITEM SHEET ───────────────────────────────────────────────────────────
+function EditItemSheet({ item, onClose, onSave }) {
+  const [product,    setProduct]    = useState(item.product);
+  const [format,     setFormat]     = useState(item.format);
+  const [brand,      setBrand]      = useState(item.brand || "");
+  const [brandFixed, setBrandFixed] = useState(!!item.brand);
+  const [qty,        setQty]        = useState(item.qty);
+  const canSubmit = product.trim() && format.trim();
+
+  const submit = () => {
+    if (!canSubmit) return;
+    onSave({ ...item, product:product.trim(), format:format.trim(), brand:brandFixed?brand.trim():"", qty });
+    onClose();
+  };
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"flex-end", zIndex:200, animation:"fadeIn 0.2s ease" }} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{ background:C.white, borderRadius:"20px 20px 0 0", width:"100%", maxHeight:"90vh", overflowY:"auto", animation:"slideUp 0.3s ease" }}>
+        <div style={{ background:"linear-gradient(135deg,#CC0000,#FF1A1A)", padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:17, color:C.white }}>Modifier l'article</div>
+          <button onClick={onClose} style={{ background:"rgba(255,255,255,0.2)", border:"none", borderRadius:99, width:28, height:28, color:C.white, fontSize:14, cursor:"pointer" }}>✕</button>
+        </div>
+        <div style={{ padding:"20px 20px 44px" }}>
+          {[
+            {label:"Produit *", val:product, set:setProduct, ph:"Ex : Cola Zéro, Lait..."},
+            {label:"Format *",  val:format,  set:setFormat,  ph:"Ex : 1L, 500g, x6..."},
+          ].map(f=>(
+            <div key={f.label} style={{ marginBottom:14 }}>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>{f.label}</div>
+              <input value={f.val} onChange={e=>f.set(e.target.value)} placeholder={f.ph}
+                style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${f.val?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:15, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }} />
+            </div>
+          ))}
+          <div style={{ background:C.grayLight, borderRadius:12, padding:"12px 16px", marginBottom:18 }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:brandFixed?12:0 }}>
+              <div>
+                <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>Marque imposée ?</div>
+                <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, marginTop:2 }}>
+                  {brandFixed ? "Oui — une marque précise" : "Non — peu importe la marque"}
+                </div>
+              </div>
+              <button onClick={()=>setBrandFixed(v=>!v)} style={{ width:44, height:26, borderRadius:99, border:"none", background:brandFixed?C.blue:C.gray, cursor:"pointer", position:"relative", transition:"background 0.2s", flexShrink:0 }}>
+                <div style={{ width:20, height:20, borderRadius:99, background:C.white, position:"absolute", top:3, transition:"left 0.2s", left:brandFixed?21:3 }} />
+              </button>
+            </div>
+            {brandFixed && (
+              <input value={brand} onChange={e=>setBrand(e.target.value)} placeholder="Ex : Look, Coca-Cola..."
+                style={{ width:"100%", padding:"11px 14px", borderRadius:10, border:`2px solid ${brand?C.orange:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }} />
+            )}
+          </div>
+          <div style={{ display:"flex", alignItems:"center", background:C.grayLight, borderRadius:12, padding:"10px 16px", marginBottom:22 }}>
+            <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, flex:1 }}>Quantité</span>
+            <div style={{ display:"flex", alignItems:"center", gap:14 }}>
+              <button onClick={()=>setQty(q=>Math.max(1,q-1))} style={{ width:32, height:32, borderRadius:99, border:`2px solid ${C.blue}`, background:C.white, cursor:"pointer", color:C.blue, fontWeight:900, fontSize:18, display:"flex", alignItems:"center", justifyContent:"center" }}>−</button>
+              <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:20, color:C.blue, minWidth:24, textAlign:"center" }}>{qty}</span>
+              <button onClick={()=>setQty(q=>q+1)} style={{ width:32, height:32, borderRadius:99, border:"none", background:C.blue, cursor:"pointer", color:C.white, fontSize:18, display:"flex", alignItems:"center", justifyContent:"center" }}>+</button>
+            </div>
+          </div>
+          <button onClick={submit} disabled={!canSubmit} style={{ width:"100%", padding:"15px", border:"none", borderRadius:12, background:canSubmit?C.orange:C.grayLight, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:canSubmit?"#111111":C.gray, cursor:canSubmit?"pointer":"default" }}>
+            💾 Enregistrer les modifications
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── LIST TAB ──────────────────────────────────────────────────────────────────
 function ListTab({ items, setItems, setTab, favorites, saveFavorites }) {
   const [showAdd,      setShowAdd]      = useState(false);
   const [showFavModal, setShowFavModal] = useState(false);
+  const [editItem,     setEditItem]     = useState(null);
+  const [toast,        setToast]        = useState(null);
 
-  const addItem     = item => setItems([...items, item]);
+  const showToast = (msg, ok=true) => { setToast({msg,ok}); setTimeout(()=>setToast(null),2500); };
+  const addItem     = item => { setItems([...items, item]); showToast(`✓ ${item.product} ajouté`); };
   const toggleCheck = id  => setItems(items.map(i=>i.id===id?{...i,checked:!i.checked}:i));
   const removeItem  = id  => setItems(items.filter(i=>i.id!==id));
+  const updateItem  = updated => setItems(items.map(i=>i.id===updated.id?updated:i));
   const unchecked = items.filter(i=>!i.checked);
   const checked   = items.filter(i=>i.checked);
 
@@ -660,6 +751,7 @@ function ListTab({ items, setItems, setTab, favorites, saveFavorites }) {
         </div>
       </div>
       <div style={{ background:done?C.gray:C.blue, color:C.white, borderRadius:8, padding:"3px 9px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13 }}>×{item.qty}</div>
+      {!done && <button onClick={()=>setEditItem(item)} style={{ background:C.grayLight, border:"none", borderRadius:8, padding:"4px 7px", fontSize:12, cursor:"pointer" }}>✏️</button>}
       <button onClick={()=>removeItem(item.id)} style={{ background:"none", border:"none", fontSize:15, cursor:"pointer", color:C.gray }}>✕</button>
     </div>
   );
@@ -713,6 +805,8 @@ function ListTab({ items, setItems, setTab, favorites, saveFavorites }) {
       )}
 
       {showAdd && <AddItemSheet onClose={()=>setShowAdd(false)} onAdd={addItem}/>}
+      {editItem && <EditItemSheet item={editItem} onClose={()=>setEditItem(null)} onSave={updated=>{updateItem(updated);setEditItem(null);}}/>}
+      {toast && <Toast msg={toast.msg} ok={toast.ok}/>}
 
       {/* Modal favoris */}
       {showFavModal && (
@@ -767,19 +861,24 @@ function ListTab({ items, setItems, setTab, favorites, saveFavorites }) {
 
 // ── PRICES TAB ────────────────────────────────────────────────────────────────
 function PricesTab({ priceDB, setPriceDB }) {
-  const [showImport, setShowImport] = useState(false);
-  const [showEntry,  setShowEntry]  = useState(false);
-  const [editPrice,  setEditPrice]  = useState(null);
-  const [filterStore,setFilterStore]= useState("all");
+  const [showImport,  setShowImport]  = useState(false);
+  const [showEntry,   setShowEntry]   = useState(false);
+  const [editPrice,   setEditPrice]   = useState(null);
+  const [filterStore, setFilterStore] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [toast,       setToast]       = useState(null);
 
+  const showToast = (msg, ok=true) => { setToast({msg,ok}); setTimeout(()=>setToast(null),2500); };
   const savePrice = entry => {
     const updated=[...priceDB.filter(p=>priceKey(p)!==priceKey(entry)),{...entry,id:Date.now()}];
     setPriceDB(updated);
+    showToast("✓ Prix enregistré");
   };
   const importPrices = entries => {
     let updated=[...priceDB];
     entries.forEach(e=>{ updated=[...updated.filter(p=>priceKey(p)!==priceKey(e)),e]; });
     setPriceDB(updated);
+    showToast(`✓ ${entries.length} prix importé${entries.length>1?"s":""}`);
   };
   const deletePrice = async (entry) => {
     const previous = priceDB;
@@ -792,14 +891,16 @@ function PricesTab({ priceDB, setPriceDB }) {
   };
 
   const grouped = useMemo(()=>{
-    const filtered=filterStore==="all"?priceDB:priceDB.filter(p=>p.storeId===filterStore);
+    const q = searchQuery.toLowerCase().trim();
+    const filtered = (filterStore==="all"?priceDB:priceDB.filter(p=>p.storeId===filterStore))
+      .filter(p=>!q || p.product.toLowerCase().includes(q) || (p.brand||"").toLowerCase().includes(q) || p.format.toLowerCase().includes(q));
     return filtered.reduce((acc,p)=>{
       const key=`${p.brand||""}_${p.product}_${p.format}`.toLowerCase();
       if(!acc[key]) acc[key]={brand:p.brand, product:p.product, format:p.format, entries:[]};
       acc[key].entries.push(p);
       return acc;
     },{});
-  },[priceDB,filterStore]);
+  },[priceDB,filterStore,searchQuery]);
 
   return (
     <div style={{ padding:"16px 16px 110px" }}>
@@ -818,6 +919,10 @@ function PricesTab({ priceDB, setPriceDB }) {
         <span style={{ fontSize:22 }}>🧾</span> Importer un ticket de caisse
       </button>
 
+      {priceDB.length>0 && (
+        <input value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="🔍 Chercher un produit..."
+          style={{ width:"100%", padding:"11px 14px", borderRadius:10, border:`2px solid ${searchQuery?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:10 }} />
+      )}
       {priceDB.length>0 && (
         <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:14 }}>
           <button onClick={()=>setFilterStore("all")} style={{ padding:"6px 12px", background:filterStore==="all"?C.blue:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, color:filterStore==="all"?C.white:C.text, cursor:"pointer" }}>Tous</button>
@@ -879,6 +984,7 @@ function PricesTab({ priceDB, setPriceDB }) {
 
       {showImport && <ImportTicketSheet onClose={()=>setShowImport(false)} onImport={importPrices}/>}
       {showEntry  && <PriceEntrySheet  onClose={()=>{setShowEntry(false);setEditPrice(null);}} onSave={savePrice} existingPrice={editPrice}/>}
+      {toast && <Toast msg={toast.msg} ok={toast.ok}/>}
     </div>
   );
 }
