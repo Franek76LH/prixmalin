@@ -43,6 +43,19 @@ function normFormat(s) {
 // Clé unique d'un article de prix : marque+produit+format+magasin
 function priceKey(p){ return `${normName(p.brand)}_${normName(p.product)}_${normFormat(p.format)}_${p.storeId}`; }
 
+// Devine la catégorie d'un produit à partir de mots-clés dans son nom
+function guessCategory(name) {
+  const n = (name || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  if (/\b(lait|beurre|fromage|yaourt|creme fraiche|creme|oeuf|emmental|gruyere|camembert|mozzarella|ricotta|parmesan|raclette|reblochon|feta|chevre)\b/.test(n)) return "Produits Laitiers";
+  if (/\b(cola|jus|eau|biere|vin|sirop|cafe|the|limonade|soda|nectar|cidre|champagne|whisky|vodka|rhum|orangina|schweppes|boisson|infusion|kombucha|smoothie)\b/.test(n)) return "Boissons";
+  if (/\b(pomme|poire|banane|orange|tomate|carotte|salade|courgette|oignon|ail|poireau|celeri|brocoli|poivron|aubergine|concombre|champignon|fraise|framboise|raisin|peche|abricot|melon|citron|kiwi|mangue|ananas|pamplemousse|legume|fruit|epinard|chou|navet|fenouil|radis|betterave|pastèque)\b/.test(n)) return "Fruits & Légumes";
+  if (/\b(poulet|boeuf|porc|saumon|thon|jambon|viande|poisson|merlan|cabillaud|steak|filet|escalope|dinde|lapin|agneau|canard|veau|lardons|chorizo|saucisse|merguez|crevette|moule|truite|sardine|maquereau|lieu|bar|dorade|andouille|rillettes|pate campagne)\b/.test(n)) return "Viandes & Poissons";
+  if (/surgel/.test(n)) return "Surgelés";
+  if (/\b(sucre|chocolat|bonbon|confiture|miel|gateau|biscuit|cereale|compote|caramel|nougat|nutella|dessert|speculoos|madeleine|financier|brownie|macaron|praline|pate tartiner)\b/.test(n)) return "Épicerie Sucrée";
+  if (/\b(pates|riz|farine|huile|sel|poivre|sauce|conserve|soupe|chips|moutarde|mayonnaise|ketchup|vinaigre|lentilles|haricots|pois chiche|quinoa|couscous|pain|crackers|biscottes|bouillon|levure|chapelure|grissini)\b/.test(n)) return "Épicerie Salée";
+  return null;
+}
+
 // Clé de matching pour la liste : produit+format+(marque si précisée)
 function itemMatchesPrice(item, price) {
   const sameProduct = normName(price.product) === normName(item.product);
@@ -1309,7 +1322,20 @@ export default function App() {
           supabase.from('favorites').select('id, items').order('id').limit(1),
           supabase.from('products_catalog').select('*'),
         ]);
-        if (catalogData?.data) setCatalog(catalogData.data);
+        if (catalogData?.data) {
+          // Corriger les produits sans catégorie (ajoutés depuis Mes Prix avant fix)
+          const toFix = catalogData.data
+            .filter(p => !p.category)
+            .map(p => ({ ...p, category: guessCategory(p.product_name) }))
+            .filter(p => p.category);
+          if (toFix.length > 0) {
+            await supabase.from('products_catalog').upsert(toFix, { onConflict: 'product_name' });
+            const { data: fixed } = await supabase.from('products_catalog').select('*');
+            setCatalog(fixed || catalogData.data);
+          } else {
+            setCatalog(catalogData.data);
+          }
+        }
         if (list.data?.[0]) { setItems(list.data[0].items || []); listRowId.current = list.data[0].id; }
         if (prices.data) setPriceDB(prices.data.map(p => ({ ...p, storeId: p.storeId || 'autre' })));
         if (arcs.data) setArchives(arcs.data);
@@ -1364,7 +1390,7 @@ export default function App() {
       const existingSet = new Set((existingCatalog || []).map(p => p.product_name.toLowerCase()));
       const toInsert = productNames
         .filter(name => !existingSet.has(name.toLowerCase()))
-        .map(name => ({ product_name: name, category: null }));
+        .map(name => ({ product_name: name, category: guessCategory(name) }));
       if (toInsert.length > 0) {
         const { error: insertError } = await supabase.from('products_catalog').insert(toInsert);
         if (insertError) console.error("Erreur ajout catalogue :", insertError);
