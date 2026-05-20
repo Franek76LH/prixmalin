@@ -1352,6 +1352,7 @@ export default function App() {
       .upsert(clean, { onConflict: 'product,format,brand,storeId' });
     if (error) {
       console.error("Erreur insertion Supabase :", error);
+      showAppToast("⚠️ Sauvegarde des prix échouée, vérifie ta connexion", false);
     } else {
       const { data } = await supabase.from('price_db').select('*');
       if (data) setPriceDB(data.map(p => ({ ...p, storeId: p.storeId || 'autre' })));
