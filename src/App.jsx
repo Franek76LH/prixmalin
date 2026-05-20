@@ -27,14 +27,27 @@ function storeIdFromName(n){
   return "autre";
 }
 
+// Normalise un nom de produit ou marque : minuscules + sans accents
+function normName(s) {
+  return (s||"").toLowerCase().trim()
+    .normalize("NFD").replace(/[̀-ͯ]/g,"")
+    .replace(/\s+/g," ");
+}
+// Normalise un format : minuscules + sans accents + sans espaces + virgule→point
+function normFormat(s) {
+  return (s||"").toLowerCase().trim()
+    .normalize("NFD").replace(/[̀-ͯ]/g,"")
+    .replace(/,/g,".").replace(/\s+/g,"");
+}
+
 // Clé unique d'un article de prix : marque+produit+format+magasin
-function priceKey(p){ return `${(p.brand||"").toLowerCase()}_${p.product.toLowerCase()}_${(p.format||"").toLowerCase()}_${p.storeId}`; }
+function priceKey(p){ return `${normName(p.brand)}_${normName(p.product)}_${normFormat(p.format)}_${p.storeId}`; }
 
 // Clé de matching pour la liste : produit+format+(marque si précisée)
 function itemMatchesPrice(item, price) {
-  const sameProduct = price.product.toLowerCase().trim() === item.product.toLowerCase().trim();
-  const sameFormat  = price.format.toLowerCase().trim() === item.format.toLowerCase().trim();
-  const brandOk     = !item.brand || item.brand.toLowerCase().trim() === (price.brand||"").toLowerCase().trim();
+  const sameProduct = normName(price.product) === normName(item.product);
+  const sameFormat  = normFormat(price.format) === normFormat(item.format);
+  const brandOk     = !item.brand || normName(item.brand) === normName(price.brand||"");
   return sameProduct && sameFormat && brandOk;
 }
 
@@ -1093,7 +1106,7 @@ function CompareTab({ items, priceDB, onValidate }) {
         <div style={{ background:C.orangeLight, borderRadius:14, padding:"24px 20px", textAlign:"center", border:`2px dashed ${C.orange}`, marginBottom:16 }}>
           <div style={{ fontSize:40, marginBottom:10 }}>💰</div>
           <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.orange, marginBottom:6 }}>Aucun prix correspondant</div>
-          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>Les produits de ta liste doivent avoir le même <strong>nom + format + marque</strong> que ceux dans "Mes prix"</div>
+          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>Aucun prix trouvé pour les produits de ta liste. Vérifie le <strong>nom</strong> et le <strong>format</strong> dans "Mes prix".</div>
         </div>
       )}
 
