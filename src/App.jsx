@@ -1174,18 +1174,15 @@ export default function App() {
       if (data) setPriceDB(data.map(p => ({ ...p, storeId: p.storeId || 'autre' })));
     }
 
-    for (const p of v) {
-      const productName = p.product?.trim();
-      if (!productName) continue;
-      const { data: existing } = await supabase
-        .from('products_catalog')
-        .select('id')
-        .ilike('product_name', productName)
-        .maybeSingle();
-      if (!existing) {
-        const { error: insertError } = await supabase
-          .from('products_catalog')
-          .insert({ product_name: productName, category: null });
+    const productNames = [...new Set(v.map(p => p.product?.trim()).filter(Boolean))];
+    if (productNames.length > 0) {
+      const { data: existingCatalog } = await supabase.from('products_catalog').select('product_name');
+      const existingSet = new Set((existingCatalog || []).map(p => p.product_name.toLowerCase()));
+      const toInsert = productNames
+        .filter(name => !existingSet.has(name.toLowerCase()))
+        .map(name => ({ product_name: name, category: null }));
+      if (toInsert.length > 0) {
+        const { error: insertError } = await supabase.from('products_catalog').insert(toInsert);
         if (insertError) console.error("Erreur ajout catalogue :", insertError);
       }
     }

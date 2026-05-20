@@ -41,7 +41,20 @@ Normalise les noms abrégés (ex: LT DEMI ECR → Lait demi-écrémé). Ignore l
   });
 
   const data = await response.json();
+
+  if (!response.ok) {
+    const msg = data?.error?.message || `Erreur HTTP ${response.status}`;
+    throw new Error(msg);
+  }
+
   const text = data.content?.[0]?.text || "";
   const clean = text.replace(/```json|```/g, "").trim();
-  return JSON.parse(clean);
+
+  if (!clean) throw new Error("Réponse vide du modèle");
+
+  try {
+    return JSON.parse(clean);
+  } catch {
+    throw new Error("Le modèle n'a pas retourné un JSON valide");
+  }
 }
