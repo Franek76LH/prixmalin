@@ -443,14 +443,13 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
 
 
 // ── CATALOG TAB ───────────────────────────────────────────────────────────────
-function ProductPickerSheet({ category, onClose, onAdd, items, catalog = [] }) {
-  const [selected,    setSelected]    = useState(null);
-  const [format,      setFormat]      = useState("");
-  const [brand,       setBrand]       = useState("");
-  const [brandFixed,  setBrandFixed]  = useState(false);
-  const [qty,         setQty]         = useState(1);
-  const [added,       setAdded]       = useState([]);
-  const [searchQuery, setSearchQuery] = useState("");
+function ProductPickerSheet({ category, onClose, onAdd, items, catalog = [], openProduct = null }) {
+  const [selected,   setSelected]   = useState(openProduct);
+  const [format,     setFormat]     = useState("");
+  const [brand,      setBrand]      = useState("");
+  const [brandFixed, setBrandFixed] = useState(false);
+  const [qty,        setQty]        = useState(1);
+  const [added,      setAdded]      = useState([]);
 
   const submit = () => {
     if(!selected || !format.trim()) return;
@@ -488,13 +487,11 @@ function ProductPickerSheet({ category, onClose, onAdd, items, catalog = [] }) {
               <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:12 }}>
                 Choisis un produit
               </div>
-              <input value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="🔍 Chercher..."
-                style={{ width:"100%", padding:"10px 14px", borderRadius:10, border:`2px solid ${searchQuery?category.color:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:12 }} />
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:16 }}>
-                {catalog.filter(p => p.category === category?.name && (!searchQuery || p.product_name.toLowerCase().includes(searchQuery.toLowerCase()))).map((p,i)=>{
+                {catalog.filter(p => p.category === category?.name).map((p,i)=>{
                   const inList = alreadyIn(p.product_name);
                   return (
-                    <button key={i} onClick={()=>{ setSelected(p); setFormat(""); setBrand(""); setSearchQuery(""); }} style={{
+                    <button key={i} onClick={()=>{ setSelected(p); setFormat(""); setBrand(""); }} style={{
                       padding:"14px 12px", background:inList?"#F0FFF5":C.white,
                       border:`2px solid ${inList?C.green:C.grayLight}`,
                       borderRadius:14, cursor:"pointer", textAlign:"left",
@@ -547,10 +544,16 @@ function ProductPickerSheet({ category, onClose, onAdd, items, catalog = [] }) {
 }
 
 function CatalogTab({ items, setItems, setTab, catalog }) {
-  const [selectedCat, setSelectedCat] = useState(null);
+  const [selectedCat,  setSelectedCat]  = useState(null);
+  const [openProduct,  setOpenProduct]  = useState(null);
+  const [searchQuery,  setSearchQuery]  = useState("");
   const totalInList = items.filter(i=>!i.checked).length;
 
   const addItem = item => setItems([...items, item]);
+
+  const searchResults = searchQuery.trim()
+    ? catalog.filter(p => p.product_name?.toLowerCase().includes(searchQuery.toLowerCase()))
+    : [];
 
   return (
     <div style={{ padding:"16px 16px 110px" }}>
@@ -564,6 +567,35 @@ function CatalogTab({ items, setItems, setTab, catalog }) {
           Parcours les rayons et ajoute tes produits
         </div>
       </div>
+
+      {/* Barre de recherche */}
+      <input value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="🔍 Chercher un produit..."
+        style={{ width:"100%", padding:"12px 16px", borderRadius:12, border:`2px solid ${searchQuery?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:16 }} />
+
+      {/* Résultats de recherche */}
+      {searchResults.length > 0 && (
+        <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:20 }}>
+          {searchResults.map((p,i) => {
+            const cat = CATEGORY_META.find(c => c.name === p.category);
+            return (
+              <button key={i} onClick={()=>{ setSelectedCat(cat||CATEGORY_META[0]); setOpenProduct(p); setSearchQuery(""); }}
+                style={{ display:"flex", alignItems:"center", gap:12, background:C.white, border:`1px solid ${C.grayLight}`, borderRadius:12, padding:"12px 14px", cursor:"pointer", textAlign:"left", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+                <span style={{ fontSize:22 }}>{cat?.emoji||"🛍️"}</span>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{p.product_name}</div>
+                  {cat && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:cat.color, fontWeight:700, marginTop:2 }}>{cat.name}</div>}
+                </div>
+                <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:20, color:C.blue }}>+</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {searchQuery.trim() && searchResults.length === 0 && (
+        <div style={{ background:C.grayLight, borderRadius:12, padding:"16px", textAlign:"center", marginBottom:16 }}>
+          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.gray }}>Aucun produit trouvé pour « {searchQuery} »</div>
+        </div>
+      )}
 
       {/* Bouton voir liste si articles en cours */}
       {totalInList>0 && (
@@ -624,10 +656,11 @@ function CatalogTab({ items, setItems, setTab, catalog }) {
       {selectedCat && (
         <ProductPickerSheet
           category={selectedCat}
-  onClose={()=>setSelectedCat(null)}
-  onAdd={addItem}
-  items={items}
-  catalog={catalog}
+          onClose={()=>{ setSelectedCat(null); setOpenProduct(null); }}
+          onAdd={addItem}
+          items={items}
+          catalog={catalog}
+          openProduct={openProduct}
         />
       )}
     </div>
