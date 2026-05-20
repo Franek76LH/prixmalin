@@ -742,10 +742,11 @@ function ListTab({ items, setItems, setTab, favorites, saveFavorites }) {
   const [toast,        setToast]        = useState(null);
 
   const showToast = (msg, ok=true) => { setToast({msg,ok}); setTimeout(()=>setToast(null),2500); };
-  const addItem     = item => { setItems([...items, item]); showToast(`✓ ${item.product} ajouté`); };
-  const toggleCheck = id  => setItems(items.map(i=>i.id===id?{...i,checked:!i.checked}:i));
-  const removeItem  = id  => setItems(items.filter(i=>i.id!==id));
-  const updateItem  = updated => setItems(items.map(i=>i.id===updated.id?updated:i));
+  const addItem       = item => { setItems([...items, item]); showToast(`✓ ${item.product} ajouté`); };
+  const toggleCheck   = id  => setItems(items.map(i=>i.id===id?{...i,checked:!i.checked}:i));
+  const removeItem    = id  => setItems(items.filter(i=>i.id!==id));
+  const updateItem    = updated => setItems(items.map(i=>i.id===updated.id?updated:i));
+  const removeFavorite = i  => saveFavorites(favorites.filter((_,idx)=>idx!==i));
   const unchecked = items.filter(i=>!i.checked);
   const checked   = items.filter(i=>i.checked);
 
@@ -859,9 +860,10 @@ function ListTab({ items, setItems, setTab, favorites, saveFavorites }) {
                   </div>
                   <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
                     {favorites.map((f,i)=>(
-                      <span key={i} style={{ background:C.white, borderRadius:99, padding:"4px 12px", fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:700, color:C.text, border:`1px solid ${C.grayLight}` }}>
-                        {f.brand?`${f.brand} · `:""}{f.product} <span style={{ color:C.gray }}>{f.format}</span> ×{f.qty}
-                      </span>
+                      <div key={i} style={{ display:"flex", alignItems:"center", gap:4, background:C.white, borderRadius:99, padding:"4px 6px 4px 12px", fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:700, color:C.text, border:`1px solid ${C.grayLight}` }}>
+                        <span>{f.brand?`${f.brand} · `:""}{f.product} <span style={{ color:C.gray }}>{f.format}</span> ×{f.qty}</span>
+                        <button onClick={()=>removeFavorite(i)} style={{ background:"#EFEFEF", border:"none", borderRadius:99, width:18, height:18, fontSize:10, cursor:"pointer", color:C.gray, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>✕</button>
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -1212,7 +1214,9 @@ function CompareTab({ items, priceDB, onValidate }) {
 }
 
 // ── ARCHIVE TAB ───────────────────────────────────────────────────────────────
-function ArchiveTab({ archives }) {
+function ArchiveTab({ archives, onDelete }) {
+  const [pendingDeleteArc, setPendingDeleteArc] = useState(null);
+
   if(archives.length===0) return (
     <div style={{ padding:"40px 20px 100px", textAlign:"center" }}>
       <div style={{ fontSize:60, marginBottom:14 }}>📦</div>
@@ -1241,7 +1245,17 @@ function ArchiveTab({ archives }) {
                 <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.blue }}>{arc.store.logo} {arc.store.name}</div>
                 <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, marginTop:1 }}>{new Date(arc.date).toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}</div>
               </div>
-              <div style={{ background:C.blue, borderRadius:10, padding:"6px 14px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:18, color:C.white }}>{arc.total.toFixed(2)} €</div>
+              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                <div style={{ background:C.blue, borderRadius:10, padding:"6px 14px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:18, color:C.white }}>{arc.total.toFixed(2)} €</div>
+                {pendingDeleteArc === arc.id ? (
+                  <div style={{ display:"flex", gap:4 }}>
+                    <button onClick={()=>setPendingDeleteArc(null)} style={{ background:C.grayLight, border:"none", borderRadius:6, padding:"4px 9px", fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:11, cursor:"pointer", color:C.text }}>Non</button>
+                    <button onClick={()=>{ onDelete(arc); setPendingDeleteArc(null); }} style={{ background:C.red, border:"none", borderRadius:6, padding:"4px 9px", fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:11, cursor:"pointer", color:C.white }}>Oui</button>
+                  </div>
+                ) : (
+                  <button onClick={()=>setPendingDeleteArc(arc.id)} style={{ background:"none", border:"none", fontSize:14, cursor:"pointer", color:C.gray, padding:"4px" }}>✕</button>
+                )}
+              </div>
             </div>
             <div style={{ padding:"10px 16px 14px", display:"flex", flexWrap:"wrap", gap:6 }}>
               {arc.items.map((item,j)=>(
@@ -1352,7 +1366,20 @@ export default function App() {
       if (error) {
         console.error("Erreur sauvegarde historique :", error);
         showAppToast("⚠️ Historique non sauvegardé, vérifie ta connexion", false);
+      } else {
+        const { data } = await supabase.from('archives').select('*').order('date');
+        if (data) setArchives(data);
       }
+    }
+  };
+  const deleteArchive = async (arc) => {
+    const previous = archives;
+    setArchives(archives.filter(a => a.id !== arc.id));
+    const { error } = await supabase.from('archives').delete().eq('id', arc.id);
+    if (error) {
+      console.error("Erreur suppression archive :", error);
+      setArchives(previous);
+      showAppToast("⚠️ Suppression échouée, vérifie ta connexion", false);
     }
   };
   const saveFavorites = async (v) => {
@@ -1407,7 +1434,7 @@ export default function App() {
           {loaded && tab==="catalog" && <CatalogTab items={items} setItems={saveItems} setTab={setTab} catalog={catalog}/>}
           {loaded && tab==="compare" && <CompareTab items={items} priceDB={priceDB} onValidate={handleValidate}/>}
           {loaded && tab==="prices"  && <PricesTab  priceDB={priceDB} setPriceDB={savePriceDB}/>}
-          {loaded && tab==="archive" && <ArchiveTab archives={archives}/>}
+          {loaded && tab==="archive" && <ArchiveTab archives={archives} onDelete={deleteArchive}/>}
         </div>
         <TabBar tab={tab} setTab={setTab}/>
         {appToast && <Toast msg={appToast.msg} ok={appToast.ok}/>}
