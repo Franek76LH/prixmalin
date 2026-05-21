@@ -17,6 +17,7 @@ export const CATEGORY_META = [
   { id:"viandes-poissons",  name:"Viandes & Poissons",emoji:"🥩", color:"#C0392B" },
   { id:"surgeles",          name:"Surgelés",           emoji:"❄️", color:"#5DADE2" },
   { id:"hygiene-maison",    name:"Hygiène & Maison",  emoji:"🧴", color:"#8E44AD" },
+  { id:"autres",            name:"Autres",             emoji:"📦", color:"#95A5A6" },
 ];
 
 

@@ -54,7 +54,7 @@ function guessCategory(name) {
   if (/\b(papier toilette|lessive|vaisselle|shampooing|shampoing|dentifrice|deodorant|savon|gel douche|rasoir|coton|essuie.tout|sac poubelle|nettoyant|desinfectant|lingette|brosse a dents|after.shave|mousse a raser)\b/.test(n)) return "Hygiène & Maison";
   if (/\b(sucre|chocolat|bonbon|confiture|miel|gateau|biscuit|cereale|compote|caramel|nougat|nutella|dessert|speculoos|madeleine|financier|brownie|macaron|praline|pate tartiner)\b/.test(n)) return "Épicerie Sucrée";
   if (/\b(pates|riz|farine|huile|sel|poivre|sauce|conserve|soupe|chips|moutarde|mayonnaise|ketchup|vinaigre|lentilles|haricots|pois chiche|quinoa|couscous|pain|crackers|biscottes|bouillon|levure|chapelure|grissini)\b/.test(n)) return "Épicerie Salée";
-  return null;
+  return "Autres";
 }
 
 // Clé de matching pour la liste : produit+format+(marque si précisée)
@@ -1307,7 +1307,14 @@ export default function App() {
   const [showSuccess, setShowSuccess] = useState(null);
   const [favorites, setFavorites] = useState([]);
   const [loaded, setLoaded]       = useState(false);
-  const [catalog, setCatalog] = useState([]);
+  const catalog = useMemo(() => {
+    const seen = new Set();
+    return priceDB
+      .filter(p => p.product?.trim())
+      .map(p => ({ product_name: p.product.trim(), category: p.category || guessCategory(p.product) }))
+      .filter(p => { const k = p.product_name.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
+  }, [priceDB]);
+
   const listRowId = useRef(null);
   const favRowId  = useRef(null);
   const [appToast, setAppToast] = useState(null);
@@ -1316,29 +1323,20 @@ export default function App() {
   useEffect(()=>{
     (async ()=>{
       try {
-        const [list, prices, arcs, favs, catalogData] = await Promise.all([
+        const [list, prices, arcs, favs] = await Promise.all([
           supabase.from('shopping_list').select('id, items').order('id').limit(1),
           supabase.from('price_db').select('*'),
           supabase.from('archives').select('*').order('date'),
           supabase.from('favorites').select('id, items').order('id').limit(1),
-          supabase.from('products_catalog').select('*'),
         ]);
-        if (catalogData?.data) {
-          // Corriger les produits sans catégorie (ajoutés depuis Mes Prix avant fix)
-          const toFix = catalogData.data
-            .filter(p => !p.category)
-            .map(p => ({ ...p, category: guessCategory(p.product_name) }))
-            .filter(p => p.category);
+        if (list.data?.[0]) { setItems(list.data[0].items || []); listRowId.current = list.data[0].id; }
+        if (prices.data) {
+          setPriceDB(prices.data.map(p => ({ ...p, storeId: p.storeId || 'autre', category: p.category || guessCategory(p.product) })));
+          const toFix = prices.data.filter(p => !p.category);
           if (toFix.length > 0) {
-            await supabase.from('products_catalog').upsert(toFix, { onConflict: 'product_name' });
-            const { data: fixed } = await supabase.from('products_catalog').select('*');
-            setCatalog(fixed || catalogData.data);
-          } else {
-            setCatalog(catalogData.data);
+            supabase.from('price_db').upsert(toFix.map(p => ({ ...p, category: guessCategory(p.product) })));
           }
         }
-        if (list.data?.[0]) { setItems(list.data[0].items || []); listRowId.current = list.data[0].id; }
-        if (prices.data) setPriceDB(prices.data.map(p => ({ ...p, storeId: p.storeId || 'autre' })));
         if (arcs.data) setArchives(arcs.data);
         if (favs.data?.[0]) { setFavorites(favs.data[0].items || []); favRowId.current = favs.data[0].id; }
       } catch(e){ console.log("Supabase load:", e); }
@@ -1371,7 +1369,8 @@ export default function App() {
       storeId: p.storeId || '',
       store_name: p.store_name || '',
       price: parseFloat(p.price),
-      date: p.date || new Date().toISOString()
+      date: p.date || new Date().toISOString(),
+      category: p.category || guessCategory(p.product),
     }));
 
     const { error } = await supabase
@@ -1385,18 +1384,6 @@ export default function App() {
       if (data) setPriceDB(data.map(p => ({ ...p, storeId: p.storeId || 'autre' })));
     }
 
-    const productNames = [...new Set(v.map(p => p.product?.trim()).filter(Boolean))];
-    if (productNames.length > 0) {
-      const { data: existingCatalog } = await supabase.from('products_catalog').select('product_name');
-      const existingSet = new Set((existingCatalog || []).map(p => p.product_name.toLowerCase()));
-      const toInsert = productNames
-        .filter(name => !existingSet.has(name.toLowerCase()))
-        .map(name => ({ product_name: name, category: guessCategory(name) }));
-      if (toInsert.length > 0) {
-        const { error: insertError } = await supabase.from('products_catalog').insert(toInsert);
-        if (insertError) console.error("Erreur ajout catalogue :", insertError);
-      }
-    }
   };
   const saveArchives = async (v) => {
     setArchives(v);
