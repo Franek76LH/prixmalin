@@ -561,20 +561,32 @@ function ProductPickerSheet({ category, onClose, onAdd, items, catalog = [], ope
                   <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>
                     Marque <span style={{ fontWeight:600, textTransform:"none", color:C.gray }}>· optionnel</span>
                   </div>
-                  <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                  <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom: brandFixed&&brand==="MDD" && filterMDD(selected.marques_distributeurs||[]).length>0 ? 8 : 0 }}>
                     {selected.marques_nationales?.map((m,i) => (
                       <button key={i} onClick={()=>{ brandFixed&&brand===m?(setBrand(""),setBrandFixed(false)):(setBrand(m),setBrandFixed(true)); }}
                         style={{ padding:"10px 16px", background:brandFixed&&brand===m?C.orange:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:brandFixed&&brand===m?"#111":C.text, cursor:"pointer" }}>
                         {m}
                       </button>
                     ))}
-                    {filterMDD(selected.marques_distributeurs||[]).map((m,i) => (
-                      <button key={i} onClick={()=>{ brandFixed&&brand===m?(setBrand(""),setBrandFixed(false)):(setBrand(m),setBrandFixed(true)); }}
-                        style={{ padding:"10px 16px", background:brandFixed&&brand===m?C.blue:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:brandFixed&&brand===m?C.white:C.text, cursor:"pointer" }}>
-                        {m}
+                    {filterMDD(selected.marques_distributeurs||[]).length > 0 && (
+                      <button onClick={()=>{ brandFixed&&brand==="MDD"?(setBrand(""),setBrandFixed(false)):(setBrand("MDD"),setBrandFixed(true)); }}
+                        style={{ padding:"10px 16px", background:brandFixed&&brand==="MDD"?C.blue:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:brandFixed&&brand==="MDD"?C.white:C.text, cursor:"pointer" }}>
+                        MDD
                       </button>
-                    ))}
+                    )}
                   </div>
+                  {brandFixed && brand==="MDD" && filterMDD(selected.marques_distributeurs||[]).length > 0 && (
+                    <select
+                      defaultValue=""
+                      onChange={e=>{ if(e.target.value) setBrand(e.target.value); else setBrand("MDD"); }}
+                      style={{ width:"100%", padding:"10px 12px", borderRadius:10, border:`2px solid ${C.blue}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", cursor:"pointer" }}
+                    >
+                      <option value="">Choisir une MDD spécifique…</option>
+                      {filterMDD(selected.marques_distributeurs).map((m,i) => (
+                        <option key={i} value={m}>{m}</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
               )}
 
