@@ -560,32 +560,20 @@ function ProductPickerSheet({ category, onClose, onAdd, items, catalog = [], ope
                   <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>
                     Marque <span style={{ fontWeight:600, textTransform:"none", color:C.gray }}>· optionnel</span>
                   </div>
-                  {selected.marques_nationales?.length > 0 && (
-                    <div style={{ marginBottom:8 }}>
-                      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight, marginBottom:5 }}>Marques nationales</div>
-                      <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-                        {selected.marques_nationales.map((m,i) => (
-                          <button key={i} onClick={()=>{ brandFixed&&brand===m?( setBrand(""),setBrandFixed(false)):(setBrand(m),setBrandFixed(true)); }}
-                            style={{ padding:"10px 16px", background:brandFixed&&brand===m?C.orange:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:brandFixed&&brand===m?"#111":C.text, cursor:"pointer" }}>
-                            {m}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {filterMDD(selected.marques_distributeurs||[]).length > 0 && (
-                    <div>
-                      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight, marginBottom:5 }}>Marques distributeurs</div>
-                      <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-                        {filterMDD(selected.marques_distributeurs).map((m,i) => (
-                          <button key={i} onClick={()=>{ brandFixed&&brand===m?(setBrand(""),setBrandFixed(false)):(setBrand(m),setBrandFixed(true)); }}
-                            style={{ padding:"10px 16px", background:brandFixed&&brand===m?C.blue:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:brandFixed&&brand===m?C.white:C.text, cursor:"pointer" }}>
-                            {m}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                    {selected.marques_nationales?.map((m,i) => (
+                      <button key={i} onClick={()=>{ brandFixed&&brand===m?(setBrand(""),setBrandFixed(false)):(setBrand(m),setBrandFixed(true)); }}
+                        style={{ padding:"10px 16px", background:brandFixed&&brand===m?C.orange:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:brandFixed&&brand===m?"#111":C.text, cursor:"pointer" }}>
+                        {m}
+                      </button>
+                    ))}
+                    {filterMDD(selected.marques_distributeurs||[]).map((m,i) => (
+                      <button key={i} onClick={()=>{ brandFixed&&brand===m?(setBrand(""),setBrandFixed(false)):(setBrand(m),setBrandFixed(true)); }}
+                        style={{ padding:"10px 16px", background:brandFixed&&brand===m?C.blue:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:brandFixed&&brand===m?C.white:C.text, cursor:"pointer" }}>
+                        {m}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
 
