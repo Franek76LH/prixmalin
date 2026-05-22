@@ -1207,14 +1207,17 @@ function CompareTab({ items, priceDB, onValidate }) {
         </div>
       )}
 
-      {/* Détail par produit — marque libre : affiche toutes les options */}
-      {analysis.filter(({item})=>!item.brand && Object.keys(analysis.find(a=>a.item.id===item.id)?.byStore||{}).length>0).map(({item,byStore})=>{
+      {/* Détail par produit — affiche les prix connus pour chaque article */}
+      {analysis.filter(({byStore})=>Object.keys(byStore).length>0).map(({item,byStore})=>{
         const options=Object.values(byStore).sort((a,b)=>a.price-b.price);
-        if(options.length<=1) return null;
+        const multi=options.length>1;
         return (
           <div key={item.id} style={{ background:C.white, borderRadius:14, border:`1px solid ${C.grayLight}`, overflow:"hidden", marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
-            <div style={{ background:C.blueLight, padding:"10px 14px" }}>
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.blue }}>{item.product} {item.format} <span style={{ fontSize:11, color:C.orange, fontWeight:700 }}>· toutes marques</span></div>
+            <div style={{ background:C.blueLight, padding:"10px 14px", display:"flex", alignItems:"center", gap:8 }}>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.blue, flex:1 }}>
+                {item.product} <span style={{ fontWeight:700, color:C.gray }}>{item.format}</span>
+              </div>
+              {!item.brand && <span style={{ fontSize:11, color:C.orange, fontWeight:700 }}>toutes marques</span>}
             </div>
             {options.map((p,i)=>{
               const store=STORES.find(s=>s.id===p.storeId);
@@ -1224,8 +1227,8 @@ function CompareTab({ items, priceDB, onValidate }) {
                   <div style={{ flex:1 }}>
                     <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:C.text }}>{p.brand||"Sans marque"} · {store?.name}</div>
                   </div>
-                  <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:i===0?C.green:C.text }}>{p.price.toFixed(2)} €</div>
-                  {i===0 && <span style={{ fontSize:10, background:C.green, color:C.white, borderRadius:99, padding:"2px 7px", fontFamily:"'Nunito',sans-serif", fontWeight:800 }}>MOINS CHER</span>}
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:multi&&i===0?C.green:C.text }}>{p.price.toFixed(2)} €</div>
+                  {multi && i===0 && <span style={{ fontSize:10, background:C.green, color:C.white, borderRadius:99, padding:"2px 7px", fontFamily:"'Nunito',sans-serif", fontWeight:800 }}>MOINS CHER</span>}
                 </div>
               );
             })}
