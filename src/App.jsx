@@ -59,6 +59,14 @@ function guessCategory(name) {
   return "Autres";
 }
 
+const PURE_STORES = new Set(['auchan','carrefour','casino','intermarche','leclerc','e.leclerc','monoprix','lidl','u']);
+function filterMDD(brands) {
+  return brands.filter(m => {
+    const n = m.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();
+    return !PURE_STORES.has(n);
+  });
+}
+
 // Clé de matching pour la liste : produit+format+(marque si précisée)
 function itemMatchesPrice(item, price) {
   const sameProduct = normName(price.product) === normName(item.product);
@@ -543,35 +551,35 @@ function ProductPickerSheet({ category, onClose, onAdd, items, catalog = [], ope
                 ← Retour
               </button>
 
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:20, color:C.text, marginBottom:4 }}>{selected.product_name}</div>
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.gray, marginBottom:20 }}>{category.name}</div>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:18, color:C.text, marginBottom:2 }}>{selected.product_name}</div>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.gray, marginBottom:14 }}>{category.name}</div>
 
               {/* Marque */}
-              {(selected.marques_nationales?.length > 0 || selected.marques_distributeurs?.length > 0) && (
-                <div style={{ marginBottom:20 }}>
-                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:10 }}>
-                    Marque <span style={{ fontWeight:600, textTransform:"none", fontSize:11, color:C.gray }}>· optionnel</span>
+              {(selected.marques_nationales?.length > 0 || filterMDD(selected.marques_distributeurs||[]).length > 0) && (
+                <div style={{ marginBottom:14 }}>
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>
+                    Marque <span style={{ fontWeight:600, textTransform:"none", color:C.gray }}>· optionnel</span>
                   </div>
                   {selected.marques_nationales?.length > 0 && (
                     <div style={{ marginBottom:8 }}>
-                      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight, marginBottom:6 }}>Marques nationales</div>
-                      <div style={{ display:"flex", gap:7, flexWrap:"wrap" }}>
+                      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight, marginBottom:5 }}>Marques nationales</div>
+                      <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
                         {selected.marques_nationales.map((m,i) => (
-                          <button key={i} onClick={()=>{ if(brandFixed&&brand===m){setBrand("");setBrandFixed(false);}else{setBrand(m);setBrandFixed(true);} }}
-                            style={{ padding:"7px 14px", background:brandFixed&&brand===m?C.orange:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:brandFixed&&brand===m?"#111":C.text, cursor:"pointer" }}>
+                          <button key={i} onClick={()=>{ brandFixed&&brand===m?( setBrand(""),setBrandFixed(false)):(setBrand(m),setBrandFixed(true)); }}
+                            style={{ padding:"10px 16px", background:brandFixed&&brand===m?C.orange:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:brandFixed&&brand===m?"#111":C.text, cursor:"pointer" }}>
                             {m}
                           </button>
                         ))}
                       </div>
                     </div>
                   )}
-                  {selected.marques_distributeurs?.length > 0 && (
+                  {filterMDD(selected.marques_distributeurs||[]).length > 0 && (
                     <div>
-                      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight, marginBottom:6 }}>Marques distributeurs</div>
-                      <div style={{ display:"flex", gap:7, flexWrap:"wrap" }}>
-                        {selected.marques_distributeurs.map((m,i) => (
-                          <button key={i} onClick={()=>{ if(brandFixed&&brand===m){setBrand("");setBrandFixed(false);}else{setBrand(m);setBrandFixed(true);} }}
-                            style={{ padding:"7px 14px", background:brandFixed&&brand===m?C.blue:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:brandFixed&&brand===m?C.white:C.text, cursor:"pointer" }}>
+                      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight, marginBottom:5 }}>Marques distributeurs</div>
+                      <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                        {filterMDD(selected.marques_distributeurs).map((m,i) => (
+                          <button key={i} onClick={()=>{ brandFixed&&brand===m?(setBrand(""),setBrandFixed(false)):(setBrand(m),setBrandFixed(true)); }}
+                            style={{ padding:"10px 16px", background:brandFixed&&brand===m?C.blue:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:brandFixed&&brand===m?C.white:C.text, cursor:"pointer" }}>
                             {m}
                           </button>
                         ))}
@@ -584,22 +592,22 @@ function ProductPickerSheet({ category, onClose, onAdd, items, catalog = [], ope
               {/* Format */}
               <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Format / Volume *</div>
               {selected.formats?.length > 0 && (
-                <div style={{ display:"flex", gap:7, flexWrap:"wrap", marginBottom:10 }}>
-                  {selected.formats.map((f, i) => (
-                    <button key={i} onClick={() => setFormat(f)} style={{
-                      padding:"7px 14px", background:format===f?C.blue:C.grayLight,
+                <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:8 }}>
+                  {selected.formats.map((f,i) => (
+                    <button key={i} onClick={()=>setFormat(f)} style={{
+                      padding:"10px 16px", background:format===f?C.blue:C.grayLight,
                       border:"none", borderRadius:99,
-                      fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13,
+                      fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14,
                       color:format===f?C.white:C.text, cursor:"pointer",
                     }}>{f}</button>
                   ))}
                 </div>
               )}
               <input value={format} onChange={e=>setFormat(e.target.value)} placeholder="Ex : 1L, 500g, 1kg, x6..."
-                style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${format?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:15, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:20 }} />
+                style={{ width:"100%", padding:"12px 16px", borderRadius:10, border:`2px solid ${format?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:15, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:14 }} />
 
               {/* Quantité */}
-              <div style={{ display:"flex", alignItems:"center", background:C.grayLight, borderRadius:12, padding:"10px 16px", marginBottom:20 }}>
+              <div style={{ display:"flex", alignItems:"center", background:C.grayLight, borderRadius:12, padding:"10px 16px", marginBottom:14 }}>
                 <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, flex:1 }}>Quantité</span>
                 <div style={{ display:"flex", alignItems:"center", gap:14 }}>
                   <button onClick={()=>setQty(q=>Math.max(1,q-1))} style={{ width:32, height:32, borderRadius:99, border:"2px solid #CC0000", background:C.white, cursor:"pointer", color:"#CC0000", fontWeight:900, fontSize:18, display:"flex", alignItems:"center", justifyContent:"center" }}>−</button>
