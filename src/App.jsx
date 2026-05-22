@@ -46,14 +46,16 @@ function priceKey(p){ return `${normName(p.brand)}_${normName(p.product)}_${norm
 // Devine la catégorie d'un produit à partir de mots-clés dans son nom
 function guessCategory(name) {
   const n = (name || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
-  if (/\b(lait|beurre|fromage|yaourt|creme fraiche|creme|oeuf|emmental|gruyere|camembert|mozzarella|ricotta|parmesan|raclette|reblochon|feta|chevre)\b/.test(n)) return "Produits Laitiers";
-  if (/\b(cola|jus|eau|biere|vin|sirop|cafe|the|limonade|soda|nectar|cidre|champagne|whisky|vodka|rhum|orangina|schweppes|boisson|infusion|kombucha|smoothie)\b/.test(n)) return "Boissons";
-  if (/\b(pomme|poire|banane|orange|tomate|carotte|salade|courgette|oignon|ail|poireau|celeri|brocoli|poivron|aubergine|concombre|champignon|fraise|framboise|raisin|peche|abricot|melon|citron|kiwi|mangue|ananas|pamplemousse|legume|fruit|epinard|chou|navet|fenouil|radis|betterave|pastèque)\b/.test(n)) return "Fruits & Légumes";
-  if (/\b(poulet|boeuf|porc|saumon|thon|jambon|viande|poisson|merlan|cabillaud|steak|filet|escalope|dinde|lapin|agneau|canard|veau|lardons|chorizo|saucisse|merguez|crevette|moule|truite|sardine|maquereau|lieu|bar|dorade|andouille|rillettes|pate campagne)\b/.test(n)) return "Viandes & Poissons";
-  if (/surgel/.test(n)) return "Surgelés";
+  if (/\b(lait|beurre|fromage|yaourt|creme fraiche|creme|oeuf|emmental|gruyere|camembert|mozzarella|ricotta|parmesan|raclette|reblochon|feta|chevre)\b/.test(n)) return "Produits laitiers, œufs & fromages";
+  if (/\b(biere|vin|cidre|champagne|whisky|vodka|rhum)\b/.test(n)) return "Boissons alcoolisées";
+  if (/\b(cola|jus|eau|sirop|cafe|the|limonade|soda|nectar|orangina|schweppes|boisson|infusion|kombucha|smoothie)\b/.test(n)) return "Boissons non alcoolisées";
+  if (/\b(pomme|poire|banane|orange|tomate|carotte|salade|courgette|oignon|ail|poireau|celeri|brocoli|poivron|aubergine|concombre|champignon|fraise|framboise|raisin|peche|abricot|melon|citron|kiwi|mangue|ananas|pamplemousse|legume|fruit|epinard|chou|navet|fenouil|radis|betterave|pasteque)\b/.test(n)) return "Fruits et légumes";
+  if (/\b(saumon|thon|poisson|merlan|cabillaud|lieu|bar|dorade|sardine|maquereau|truite|crevette|moule|fruit de mer)\b/.test(n)) return "Poissons & fruits de mer";
+  if (/\b(poulet|boeuf|porc|jambon|viande|steak|filet|escalope|dinde|lapin|agneau|canard|veau|lardons|chorizo|saucisse|merguez|andouille|rillettes|pate campagne)\b/.test(n)) return "Viandes & charcuterie";
+  if (/surgel/.test(n)) return "Légumes surgelés";
   if (/\b(papier toilette|lessive|vaisselle|shampooing|shampoing|dentifrice|deodorant|savon|gel douche|rasoir|coton|essuie.tout|sac poubelle|nettoyant|desinfectant|lingette|brosse a dents|after.shave|mousse a raser)\b/.test(n)) return "Hygiène & Maison";
-  if (/\b(sucre|chocolat|bonbon|confiture|miel|gateau|biscuit|cereale|compote|caramel|nougat|nutella|dessert|speculoos|madeleine|financier|brownie|macaron|praline|pate tartiner)\b/.test(n)) return "Épicerie Sucrée";
-  if (/\b(pates|riz|farine|huile|sel|poivre|sauce|conserve|soupe|chips|moutarde|mayonnaise|ketchup|vinaigre|lentilles|haricots|pois chiche|quinoa|couscous|pain|crackers|biscottes|bouillon|levure|chapelure|grissini)\b/.test(n)) return "Épicerie Salée";
+  if (/\b(sucre|chocolat|bonbon|confiture|miel|gateau|biscuit|cereale|compote|caramel|nougat|nutella|dessert|speculoos|madeleine|financier|brownie|macaron|praline|pate tartiner)\b/.test(n)) return "Épicerie sucrée & petit déjeuner";
+  if (/\b(pates|riz|farine|huile|sel|poivre|sauce|conserve|soupe|chips|moutarde|mayonnaise|ketchup|vinaigre|lentilles|haricots|pois chiche|quinoa|couscous|pain|crackers|biscottes|bouillon|levure|chapelure|grissini)\b/.test(n)) return "Épicerie salée";
   return "Autres";
 }
 
@@ -1302,18 +1304,21 @@ function ArchiveTab({ archives, onDelete }) {
 export default function App() {
   const [tab, setTab]           = useState("list");
   const [items, setItems]       = useState([]);
-  const [priceDB, setPriceDB]   = useState([]);
-  const [archives, setArchives] = useState([]);
+  const [priceDB, setPriceDB]     = useState([]);
+  const [archives, setArchives]   = useState([]);
   const [showSuccess, setShowSuccess] = useState(null);
   const [favorites, setFavorites] = useState([]);
   const [loaded, setLoaded]       = useState(false);
+  const [produitsRef, setProduitsRef] = useState([]);
   const catalog = useMemo(() => {
-    const seen = new Set();
-    return priceDB
-      .filter(p => p.product?.trim())
+    const refProducts = produitsRef.map(p => ({ product_name: p.produit_generique, category: p.sous_categorie }));
+    const seen = new Set(refProducts.map(p => p.product_name.toLowerCase()));
+    const priceProducts = priceDB
+      .filter(p => p.product?.trim() && !seen.has(p.product.trim().toLowerCase()))
       .map(p => ({ product_name: p.product.trim(), category: p.category || guessCategory(p.product) }))
       .filter(p => { const k = p.product_name.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
-  }, [priceDB]);
+    return [...refProducts, ...priceProducts];
+  }, [produitsRef, priceDB]);
 
   const listRowId = useRef(null);
   const favRowId  = useRef(null);
@@ -1323,12 +1328,14 @@ export default function App() {
   useEffect(()=>{
     (async ()=>{
       try {
-        const [list, prices, arcs, favs] = await Promise.all([
+        const [list, prices, arcs, favs, refs] = await Promise.all([
           supabase.from('shopping_list').select('id, items').order('id').limit(1),
           supabase.from('price_db').select('*'),
           supabase.from('archives').select('*').order('date'),
           supabase.from('favorites').select('id, items').order('id').limit(1),
+          supabase.from('produits_ref').select('produit_generique, sous_categorie').order('id'),
         ]);
+        if (refs.data) setProduitsRef(refs.data);
         if (list.data?.[0]) { setItems(list.data[0].items || []); listRowId.current = list.data[0].id; }
         if (prices.data) {
           setPriceDB(prices.data.map(p => ({ ...p, storeId: p.storeId || 'autre', category: p.category || guessCategory(p.product) })));

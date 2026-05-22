@@ -9,15 +9,25 @@ export const STORES = [
 ];
 
 export const CATEGORY_META = [
-  { id:"epicerie-salee",    name:"Épicerie Salée",    emoji:"🍝", color:"#FF6B35" },
-  { id:"epicerie-sucree",   name:"Épicerie Sucrée",   emoji:"🍫", color:"#8B4513" },
-  { id:"produits-laitiers", name:"Produits Laitiers", emoji:"🥛", color:"#4A90E2" },
-  { id:"boissons",          name:"Boissons",           emoji:"🥤", color:"#E74C3C" },
-  { id:"fruits-legumes",    name:"Fruits & Légumes",  emoji:"🥦", color:"#27AE60" },
-  { id:"viandes-poissons",  name:"Viandes & Poissons",emoji:"🥩", color:"#C0392B" },
-  { id:"surgeles",          name:"Surgelés",           emoji:"❄️", color:"#5DADE2" },
-  { id:"hygiene-maison",    name:"Hygiène & Maison",  emoji:"🧴", color:"#8E44AD" },
-  { id:"autres",            name:"Autres",             emoji:"📦", color:"#95A5A6" },
+  { id:"fruits-legumes",    name:"Fruits et légumes",                   emoji:"🥦", color:"#27AE60" },
+  { id:"viandes",           name:"Viandes & charcuterie",               emoji:"🥩", color:"#C0392B" },
+  { id:"poissons",          name:"Poissons & fruits de mer",            emoji:"🐟", color:"#2980B9" },
+  { id:"produits-laitiers", name:"Produits laitiers, œufs & fromages",  emoji:"🥛", color:"#4A90E2" },
+  { id:"pain-boulangerie",  name:"Pain, boulangerie & viennoiseries",   emoji:"🥐", color:"#E67E22" },
+  { id:"plats-frais",       name:"Plats préparés frais et traiteur",    emoji:"🥘", color:"#E74C3C" },
+  { id:"epicerie-salee",    name:"Épicerie salée",                      emoji:"🧂", color:"#FF6B35" },
+  { id:"epicerie-sucree",   name:"Épicerie sucrée & petit déjeuner",    emoji:"🍫", color:"#8B4513" },
+  { id:"snacks",            name:"Snacks & apéritifs",                  emoji:"🥨", color:"#F39C12" },
+  { id:"boissons-soft",     name:"Boissons non alcoolisées",            emoji:"🥤", color:"#E74C3C" },
+  { id:"boissons-alcool",   name:"Boissons alcoolisées",                emoji:"🍷", color:"#8E44AD" },
+  { id:"legumes-surgeles",  name:"Légumes surgelés",                    emoji:"❄️", color:"#5DADE2" },
+  { id:"plats-surgeles",    name:"Plats cuisinés surgelés",             emoji:"🥶", color:"#2471A3" },
+  { id:"glaces",            name:"Glaces et desserts surgelés",         emoji:"🍦", color:"#85C1E9" },
+  { id:"mer-surgeles",      name:"Produits de la mer surgelés",         emoji:"🦐", color:"#1ABC9C" },
+  { id:"dietetique",        name:"Produits diététiques et biologiques", emoji:"🌿", color:"#2ECC71" },
+  { id:"monde",             name:"Produits du monde",                   emoji:"🌍", color:"#F39C12" },
+  { id:"hygiene-maison",    name:"Hygiène & Maison",                    emoji:"🧴", color:"#8E44AD" },
+  { id:"autres",            name:"Autres",                              emoji:"📦", color:"#95A5A6" },
 ];
 
 
