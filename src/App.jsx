@@ -487,15 +487,14 @@ function ProductPickerSheet({ category, onClose, onAdd, items, catalog = [], ope
   const [brandFixed,    setBrandFixed]    = useState(false);
   const [showMddPicker, setShowMddPicker] = useState(false);
   const [qty,           setQty]           = useState(1);
-  const [price,         setPrice]         = useState("");
   const [added,         setAdded]         = useState([]);
 
   const submit = () => {
     if(!selected || !format.trim()) return;
-    const item = { id:Date.now()+Math.random(), product:selected.product_name, format:format.trim(), brand:brandFixed?brand:"", qty, price:price?parseFloat(price):null, checked:false };
+    const item = { id:Date.now()+Math.random(), product:selected.product_name, format:format.trim(), brand:brandFixed?brand:"", qty, checked:false };
     onAdd(item);
     setAdded(prev=>[...prev,item]);
-    setSelected(null); setFormat(""); setBrand(""); setQty(1); setBrandFixed(false); setPrice(""); setShowMddPicker(false);
+    setSelected(null); setFormat(""); setBrand(""); setQty(1); setBrandFixed(false); setShowMddPicker(false);
   };
 
   const alreadyIn = (name) => items.some(i => i.product.toLowerCase().trim() === name.toLowerCase().trim());
@@ -628,16 +627,6 @@ function ProductPickerSheet({ category, onClose, onAdd, items, catalog = [], ope
                   <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:20, color:"#CC0000", minWidth:24, textAlign:"center" }}>{qty}</span>
                   <button onClick={()=>setQty(q=>q+1)} style={{ width:32, height:32, borderRadius:99, border:"none", background:"#CC0000", cursor:"pointer", color:C.white, fontSize:18, display:"flex", alignItems:"center", justifyContent:"center" }}>+</button>
                 </div>
-              </div>
-
-              {/* Prix */}
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>
-                Prix <span style={{ fontWeight:600, textTransform:"none", color:C.gray }}>· optionnel</span>
-              </div>
-              <div style={{ position:"relative", marginBottom:14 }}>
-                <input type="number" step="0.01" min="0" value={price} onChange={e=>setPrice(e.target.value)} placeholder="0.00"
-                  style={{ width:"100%", padding:"12px 44px 12px 16px", borderRadius:10, border:`2px solid ${price?C.orange:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:20, fontWeight:900, color:C.text, outline:"none", boxSizing:"border-box" }} />
-                <span style={{ position:"absolute", right:14, top:"50%", transform:"translateY(-50%)", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:20, color:price?C.orange:C.gray }}>€</span>
               </div>
 
               <button onClick={submit} disabled={!format.trim()} style={{ width:"100%", padding:"15px", border:"none", borderRadius:12, background:format.trim()?C.orange:C.grayLight, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:format.trim()?"#111111":C.gray, cursor:format.trim()?"pointer":"default", boxShadow:format.trim()?"0 6px 16px rgba(200,160,0,0.4)":"none" }}>
