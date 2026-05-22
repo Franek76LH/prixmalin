@@ -546,6 +546,41 @@ function ProductPickerSheet({ category, onClose, onAdd, items, catalog = [], ope
               <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:20, color:C.text, marginBottom:4 }}>{selected.product_name}</div>
               <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.gray, marginBottom:20 }}>{category.name}</div>
 
+              {/* Marque */}
+              {(selected.marques_nationales?.length > 0 || selected.marques_distributeurs?.length > 0) && (
+                <div style={{ marginBottom:20 }}>
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:10 }}>
+                    Marque <span style={{ fontWeight:600, textTransform:"none", fontSize:11, color:C.gray }}>· optionnel</span>
+                  </div>
+                  {selected.marques_nationales?.length > 0 && (
+                    <div style={{ marginBottom:8 }}>
+                      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight, marginBottom:6 }}>Marques nationales</div>
+                      <div style={{ display:"flex", gap:7, flexWrap:"wrap" }}>
+                        {selected.marques_nationales.map((m,i) => (
+                          <button key={i} onClick={()=>{ if(brandFixed&&brand===m){setBrand("");setBrandFixed(false);}else{setBrand(m);setBrandFixed(true);} }}
+                            style={{ padding:"7px 14px", background:brandFixed&&brand===m?C.orange:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:brandFixed&&brand===m?"#111":C.text, cursor:"pointer" }}>
+                            {m}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {selected.marques_distributeurs?.length > 0 && (
+                    <div>
+                      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight, marginBottom:6 }}>Marques distributeurs</div>
+                      <div style={{ display:"flex", gap:7, flexWrap:"wrap" }}>
+                        {selected.marques_distributeurs.map((m,i) => (
+                          <button key={i} onClick={()=>{ if(brandFixed&&brand===m){setBrand("");setBrandFixed(false);}else{setBrand(m);setBrandFixed(true);} }}
+                            style={{ padding:"7px 14px", background:brandFixed&&brand===m?C.blue:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:brandFixed&&brand===m?C.white:C.text, cursor:"pointer" }}>
+                            {m}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Format */}
               <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Format / Volume *</div>
               {selected.formats?.length > 0 && (
@@ -1323,10 +1358,13 @@ export default function App() {
   const [loaded, setLoaded]       = useState(false);
   const [produitsRef, setProduitsRef] = useState([]);
   const catalog = useMemo(() => {
+    const split = s => s ? s.split(';').map(x => x.trim()).filter(Boolean) : [];
     const refProducts = produitsRef.map(p => ({
       product_name: p.produit_generique,
       category: p.sous_categorie,
-      formats: p.formats_courants ? p.formats_courants.split(';').map(f => f.trim()).filter(Boolean) : [],
+      formats: split(p.formats_courants),
+      marques_nationales: split(p.marques_nationales),
+      marques_distributeurs: split(p.marques_distributeurs),
     }));
     const seen = new Set(refProducts.map(p => p.product_name.toLowerCase()));
     const priceProducts = priceDB
@@ -1349,7 +1387,7 @@ export default function App() {
           supabase.from('price_db').select('*'),
           supabase.from('archives').select('*').order('date'),
           supabase.from('favorites').select('id, items').order('id').limit(1),
-          supabase.from('produits_ref').select('produit_generique, sous_categorie, formats_courants').order('id'),
+          supabase.from('produits_ref').select('produit_generique, sous_categorie, formats_courants, marques_nationales, marques_distributeurs').order('id'),
         ]);
         if (refs.data) setProduitsRef(refs.data);
         if (list.data?.[0]) { setItems(list.data[0].items || []); listRowId.current = list.data[0].id; }
