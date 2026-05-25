@@ -290,6 +290,7 @@ function ImportTicketSheet({ onClose, onImport }) {
       product:p.name,
       format: p.format||"",
       storeId:selectedStore||"autre",
+      store_name: result?.store||"",
       price:  p.price,
       date:   result?.date?new Date(result.date).toISOString():new Date().toISOString(),
     }));
