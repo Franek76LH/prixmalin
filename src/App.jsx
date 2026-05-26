@@ -79,7 +79,7 @@ function itemMatchesPrice(item, price) {
 
 // ── HEADER ────────────────────────────────────────────────────────────────────
 function Header({ tab, itemCount }) {
-  const titles = { list:"Ma liste", catalog:"Catalogue", compare:"Comparer", prices:"Mes prix", archive:"Historique" };
+  const titles = { list:"Ma liste", catalog:"Catalogue", compare:"Comparer", prices:"Mes prix", archive:"Historique", economies:"Mes économies" };
   // petit indicateur visuel sauvegarde auto
   return (
     <div style={{ background:C.blue, padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", boxShadow:"0 4px 20px rgba(204,0,0,0.4)" }}>
@@ -102,11 +102,12 @@ function Header({ tab, itemCount }) {
 // ── TAB BAR ───────────────────────────────────────────────────────────────────
 function TabBar({ tab, setTab }) {
   const tabs = [
-    { id:"list",    icon:"📋", label:"Liste"     },
-    { id:"catalog", icon:"🛍️", label:"Catalogue" },
-    { id:"compare", icon:"🏪", label:"Comparer"  },
-    { id:"prices",  icon:"💰", label:"Mes prix"  },
-    { id:"archive", icon:"📦", label:"Historique"},
+    { id:"list",      icon:"📋", label:"Liste"     },
+    { id:"catalog",   icon:"🛍️", label:"Catalogue" },
+    { id:"compare",   icon:"🏪", label:"Comparer"  },
+    { id:"prices",    icon:"🏷️", label:"Mes prix"  },
+    { id:"archive",   icon:"📦", label:"Historique"},
+    { id:"economies", icon:"💰", label:"Économies" },
   ];
   return (
     <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:430, background:C.white, borderTop:`3px solid #CC0000`, display:"flex", zIndex:50 }}>
@@ -1259,10 +1260,181 @@ function EconomiesSheet({ priceDB, onClose }) {
   );
 }
 
+// ── ECONOMIES TAB ─────────────────────────────────────────────────────────────
+function EconomiesTab({ priceDB }) {
+  const { thisMonth, monthly, topSavings, totalGroups, thisMonthStr } = useMemo(() => {
+    const now = new Date();
+    const thisMonthStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+
+    const groups = {};
+    priceDB.forEach(p => {
+      const key = `${normName(p.brand||'')}_${normName(p.product)}_${normFormat(p.format)}`;
+      if (!groups[key]) groups[key] = { product:p.product, brand:p.brand, format:p.format, entries:[] };
+      groups[key].entries.push(p);
+    });
+
+    const comparableGroups = Object.values(groups)
+      .filter(g => new Set(g.entries.map(e=>e.storeId)).size >= 2)
+      .map(g => {
+        const prices = g.entries.map(e=>e.price);
+        const minPrice = Math.min(...prices);
+        const maxPrice = Math.max(...prices);
+        const avgPrice = prices.reduce((a,b)=>a+b,0) / prices.length;
+        return {
+          ...g, minPrice, maxPrice, avgPrice,
+          savedVsMax: maxPrice - minPrice,
+          savedVsAvg: avgPrice - minPrice,
+          bestStoreId:  g.entries.find(e=>e.price===minPrice)?.storeId,
+          worstStoreId: g.entries.find(e=>e.price===maxPrice)?.storeId,
+        };
+      }).filter(g => g.savedVsMax >= 0.01);
+
+    const thisMonthGroups = comparableGroups.filter(g =>
+      g.entries.some(e => (e.date||'').substring(0,7) === thisMonthStr)
+    );
+    const thisMonth = {
+      vsMax: thisMonthGroups.reduce((s,g)=>s+g.savedVsMax, 0),
+      vsAvg: thisMonthGroups.reduce((s,g)=>s+g.savedVsAvg, 0),
+      count: thisMonthGroups.length,
+    };
+
+    const monthMap = {};
+    comparableGroups.forEach(g => {
+      const seen = new Set();
+      g.entries.forEach(e => {
+        const m = (e.date||'').substring(0,7);
+        if (!m || seen.has(m)) return;
+        seen.add(m);
+        if (!monthMap[m]) monthMap[m] = { vsMax:0, vsAvg:0, count:0 };
+        monthMap[m].vsMax  += g.savedVsMax;
+        monthMap[m].vsAvg  += g.savedVsAvg;
+        monthMap[m].count  += 1;
+      });
+    });
+    const monthly = Object.entries(monthMap)
+      .sort((a,b) => b[0].localeCompare(a[0]))
+      .slice(0, 6)
+      .map(([m, d]) => ({ month:m, label:formatMonth(m), ...d }));
+
+    const topSavings = [...comparableGroups].sort((a,b)=>b.savedVsMax-a.savedVsMax).slice(0,5);
+
+    return { thisMonth, monthly, topSavings, totalGroups:comparableGroups.length, thisMonthStr };
+  }, [priceDB]);
+
+  const sLabel = { fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:10 };
+
+  return (
+    <div style={{ padding:"16px 16px 110px" }}>
+      {/* Stats header */}
+      <div style={{ display:"flex", gap:10, marginBottom:20 }}>
+        <div style={{ flex:1, background:"linear-gradient(135deg,#00B341,#00C850)", borderRadius:12, padding:"12px 14px" }}>
+          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:800, color:"rgba(255,255,255,0.65)", textTransform:"uppercase", letterSpacing:"0.06em" }}>Produits comparés</div>
+          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:24, color:C.white }}>{totalGroups}</div>
+        </div>
+        <div style={{ flex:1, background:C.green, borderRadius:12, padding:"12px 14px" }}>
+          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:800, color:"rgba(255,255,255,0.65)", textTransform:"uppercase", letterSpacing:"0.06em" }}>Ce mois · max</div>
+          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:24, color:C.white }}>
+            {thisMonth.count > 0 ? `+${thisMonth.vsMax.toFixed(2)} €` : "—"}
+          </div>
+        </div>
+      </div>
+
+      {totalGroups === 0 ? (
+        <div style={{ textAlign:"center", padding:"40px 20px" }}>
+          <div style={{ fontSize:56, marginBottom:14 }}>💡</div>
+          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.text, marginBottom:8 }}>Pas encore de comparaison</div>
+          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight, lineHeight:1.6 }}>
+            Enregistre le même produit dans au moins 2 magasins différents pour voir tes économies potentielles.
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Ce mois */}
+          <div style={sLabel}>Ce mois · {formatMonth(thisMonthStr)}</div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:24 }}>
+            <div style={{ background:C.green, borderRadius:14, padding:"16px" }}>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:800, color:"rgba(255,255,255,0.7)", textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>vs prix moyen</div>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:26, color:C.white, lineHeight:1 }}>
+                {thisMonth.count > 0 ? `+${thisMonth.vsAvg.toFixed(2)} €` : "—"}
+              </div>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:6 }}>
+                {thisMonth.count > 0 ? `${thisMonth.count} produit${thisMonth.count>1?"s":""}` : "Aucun relevé ce mois"}
+              </div>
+            </div>
+            <div style={{ background:"#009E3A", borderRadius:14, padding:"16px" }}>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:800, color:"rgba(255,255,255,0.7)", textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>vs prix le + cher</div>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:26, color:C.white, lineHeight:1 }}>
+                {thisMonth.count > 0 ? `+${thisMonth.vsMax.toFixed(2)} €` : "—"}
+              </div>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:6 }}>
+                {thisMonth.count > 0 ? "si acheté le + cher" : "Aucun relevé ce mois"}
+              </div>
+            </div>
+          </div>
+
+          {/* Récapitulatif mensuel */}
+          {monthly.length > 0 && (
+            <>
+              <div style={sLabel}>Récapitulatif mensuel</div>
+              <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:24 }}>
+                {monthly.map(m => (
+                  <div key={m.month} style={{ display:"flex", alignItems:"center", background:m.month===thisMonthStr?"#F0FFF5":C.white, borderRadius:12, padding:"13px 14px", border:`1.5px solid ${m.month===thisMonthStr?C.green:C.grayLight}` }}>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{m.label}</div>
+                      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight, marginTop:2 }}>{m.count} produit{m.count>1?"s":""} comparé{m.count>1?"s":""}</div>
+                    </div>
+                    <div style={{ textAlign:"right" }}>
+                      <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.green }}>+{m.vsMax.toFixed(2)} €</div>
+                      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, color:C.textLight }}>vs le + cher</div>
+                      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, color:C.textLight }}>+{m.vsAvg.toFixed(2)} € vs moy.</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* Top économies */}
+          {topSavings.length > 0 && (
+            <>
+              <div style={sLabel}>Top économies par produit</div>
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                {topSavings.map((g,i) => {
+                  const bestStore  = STORES.find(s=>s.id===g.bestStoreId);
+                  const worstStore = STORES.find(s=>s.id===g.worstStoreId);
+                  return (
+                    <div key={i} style={{ background:C.white, borderRadius:12, padding:"13px 14px", border:`1px solid ${C.grayLight}` }}>
+                      <div style={{ display:"flex", alignItems:"flex-start", gap:10 }}>
+                        <div style={{ width:28, height:28, borderRadius:99, background:i===0?"#FFD700":C.grayLight, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, color:i===0?"#7A6000":C.gray, flexShrink:0 }}>{i+1}</div>
+                        <div style={{ flex:1 }}>
+                          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:C.text }}>{g.brand?`${g.brand} · `:""}{g.product}</div>
+                          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight, marginTop:2 }}>{g.format}</div>
+                          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight, marginTop:4 }}>
+                            <span style={{ color:C.green, fontWeight:800 }}>{bestStore?.logo} {g.minPrice.toFixed(2)} €</span>
+                            {" → "}
+                            <span style={{ color:"#CC3300" }}>{worstStore?.logo} {g.maxPrice.toFixed(2)} €</span>
+                          </div>
+                        </div>
+                        <div style={{ textAlign:"right", flexShrink:0 }}>
+                          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:17, color:C.green }}>+{g.savedVsMax.toFixed(2)} €</div>
+                          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, color:C.textLight }}>économisé</div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function PricesTab({ priceDB, setPriceDB }) {
   const [showImport,    setShowImport]    = useState(false);
   const [showEntry,     setShowEntry]     = useState(false);
-  const [showEconomies, setShowEconomies] = useState(false);
   const [editPrice,     setEditPrice]     = useState(null);
   const [filterStore,    setFilterStore]    = useState("all");
   const [filterCategory, setFilterCategory] = useState("all");
@@ -1351,11 +1523,8 @@ function PricesTab({ priceDB, setPriceDB }) {
         </div>
       </div>
 
-      <button onClick={()=>setShowImport(true)} style={{ width:"100%", padding:"18px", marginBottom:10, background:"linear-gradient(135deg,#CC0000,#FF1A1A)", border:"none", borderRadius:14, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:10, boxShadow:"0 6px 24px rgba(204,0,0,0.45)" }}>
+      <button onClick={()=>setShowImport(true)} style={{ width:"100%", padding:"18px", marginBottom:12, background:"linear-gradient(135deg,#CC0000,#FF1A1A)", border:"none", borderRadius:14, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:10, boxShadow:"0 6px 24px rgba(204,0,0,0.45)" }}>
         <span style={{ fontSize:22 }}>🧾</span> Importer un ticket de caisse
-      </button>
-      <button onClick={()=>setShowEconomies(true)} style={{ width:"100%", padding:"14px", marginBottom:12, background:"linear-gradient(135deg,#00B341,#00C850)", border:"none", borderRadius:14, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:10, boxShadow:"0 4px 16px rgba(0,179,65,0.35)" }}>
-        <span style={{ fontSize:20 }}>💰</span> Mes économies
       </button>
 
       {priceDB.length>0 && (
@@ -1480,7 +1649,6 @@ function PricesTab({ priceDB, setPriceDB }) {
 
       {showImport    && <ImportTicketSheet onClose={()=>setShowImport(false)} onImport={importPrices}/>}
       {showEntry     && <PriceEntrySheet  onClose={()=>{setShowEntry(false);setEditPrice(null);}} onSave={savePrice} existingPrice={editPrice}/>}
-      {showEconomies && <EconomiesSheet   priceDB={priceDB} onClose={()=>setShowEconomies(false)}/>}
       {toast && <Toast msg={toast.msg} ok={toast.ok}/>}
     </div>
   );
@@ -1901,11 +2069,12 @@ export default function App() {
               <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:14, color:"#999" }}>Chargement...</div>
             </div>
           )}
-          {loaded && tab==="list"    && <ListTab    items={items} setItems={saveItems} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites}/>}
-          {loaded && tab==="catalog" && <CatalogTab items={items} setItems={saveItems} setTab={setTab} catalog={catalog} priceDB={priceDB}/>}
-          {loaded && tab==="compare" && <CompareTab items={items} priceDB={priceDB} onValidate={handleValidate}/>}
-          {loaded && tab==="prices"  && <PricesTab  priceDB={priceDB} setPriceDB={savePriceDB}/>}
-          {loaded && tab==="archive" && <ArchiveTab archives={archives} onDelete={deleteArchive}/>}
+          {loaded && tab==="list"      && <ListTab      items={items} setItems={saveItems} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites}/>}
+          {loaded && tab==="catalog"   && <CatalogTab   items={items} setItems={saveItems} setTab={setTab} catalog={catalog} priceDB={priceDB}/>}
+          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate}/>}
+          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB}/>}
+          {loaded && tab==="archive"   && <ArchiveTab   archives={archives} onDelete={deleteArchive}/>}
+          {loaded && tab==="economies" && <EconomiesTab priceDB={priceDB}/>}
         </div>
         <TabBar tab={tab} setTab={setTab}/>
         {appToast && <Toast msg={appToast.msg} ok={appToast.ok}/>}
