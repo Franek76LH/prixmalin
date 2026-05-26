@@ -254,8 +254,33 @@ function ImportTicketSheet({ onClose, onImport }) {
   const [scanning, setScanning] = useState(false);
   const [storeNameEdit, setStoreNameEdit] = useState("");
   const [storeLocation, setStoreLocation] = useState("");
+  const [showAddressSearch, setShowAddressSearch] = useState(false);
+  const [addressSearch, setAddressSearch] = useState("");
+  const [addressSuggestions, setAddressSuggestions] = useState([]);
+  const [addressSearching, setAddressSearching] = useState(false);
   const fileInputRef = useRef(null);
   const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
+  const placesKey = import.meta.env.VITE_GOOGLE_PLACES_KEY;
+
+  const searchPlaces = async (query) => {
+    if (!query.trim()) return;
+    setAddressSearching(true);
+    setAddressSuggestions([]);
+    try {
+      const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Key": placesKey || "",
+          "X-Goog-FieldMask": "places.displayName,places.formattedAddress",
+        },
+        body: JSON.stringify({ textQuery: query, languageCode: "fr", maxResultCount: 5 }),
+      });
+      const data = await res.json();
+      setAddressSuggestions(data.places || []);
+    } catch { setAddressSuggestions([]); }
+    setAddressSearching(false);
+  };
 
   const EXAMPLE = `{
   "store": "Intermarché",
@@ -277,7 +302,10 @@ function ImportTicketSheet({ onClose, onImport }) {
       setSelectedStore(storeIdFromName(parsed.store));
       setEditableProducts(parsed.products.map((p,i)=>({...p,id:i,keep:true})));
       setStoreNameEdit(parsed.store||"");
-      setStoreLocation("");
+      setStoreLocation(parsed.address||"");
+      setAddressSearch(parsed.store||"");
+      setShowAddressSearch(!parsed.address);
+      setAddressSuggestions([]);
       setError("");
       setStatus("store");
     } catch(e) { setError("JSON invalide : "+e.message); }
@@ -352,7 +380,10 @@ function ImportTicketSheet({ onClose, onImport }) {
                   setResult(parsed); setSelectedStore(storeIdFromName(parsed.store));
                   setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true})));
                   setStoreNameEdit(parsed.store||"");
-                  setStoreLocation("");
+                  setStoreLocation(parsed.address||"");
+                  setAddressSearch(parsed.store||"");
+                  setShowAddressSearch(!parsed.address);
+                  setAddressSuggestions([]);
                   setStatus("store");
                 } catch(e) { setError("Erreur scan : " + e.message); }
                 setScanning(false);
@@ -380,13 +411,59 @@ function ImportTicketSheet({ onClose, onImport }) {
                 style={{ width:"100%", padding:"13px 14px", borderRadius:12, border:`2px solid ${storeNameEdit.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:15, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:14 }}
               />
 
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Adresse ou quartier (optionnel)</div>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Adresse</div>
               <input
                 value={storeLocation}
-                onChange={e=>setStoreLocation(e.target.value)}
-                placeholder="Ex : Rue de la Paix, Centre-ville..."
-                style={{ width:"100%", padding:"13px 14px", borderRadius:12, border:`2px solid ${storeLocation.trim()?C.blue:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:15, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:20 }}
+                onChange={e=>{ setStoreLocation(e.target.value); setAddressSuggestions([]); }}
+                placeholder="Ex : 12 Rue de la Paix, 75001 Paris"
+                style={{ width:"100%", padding:"13px 14px", borderRadius:12, border:`2px solid ${storeLocation.trim()?C.blue:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:15, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:8 }}
               />
+              <button
+                onClick={()=>{ setShowAddressSearch(!showAddressSearch); setAddressSuggestions([]); }}
+                style={{ background:"none", border:"none", padding:"0 0 16px 0", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.blue, fontWeight:800, cursor:"pointer", textDecoration:"underline" }}
+              >
+                {showAddressSearch ? "Masquer la recherche" : "Rechercher une adresse via Google Places"}
+              </button>
+              {showAddressSearch && (
+                <div style={{ background:C.grayLight, borderRadius:14, padding:"14px", marginBottom:20 }}>
+                  {!placesKey && (
+                    <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.red, fontWeight:700, marginBottom:10 }}>
+                      ⚠️ Clé VITE_GOOGLE_PLACES_KEY manquante dans les variables d'environnement
+                    </div>
+                  )}
+                  <div style={{ display:"flex", gap:8, marginBottom:8 }}>
+                    <input
+                      value={addressSearch}
+                      onChange={e=>setAddressSearch(e.target.value)}
+                      onKeyDown={e=>{ if(e.key==="Enter") searchPlaces(addressSearch); }}
+                      placeholder={`Ex : ${storeNameEdit} 75001`}
+                      style={{ flex:1, padding:"11px 13px", borderRadius:10, border:`2px solid ${C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", background:C.white }}
+                    />
+                    <button
+                      onClick={()=>searchPlaces(addressSearch)}
+                      disabled={!addressSearch.trim()||addressSearching||!placesKey}
+                      style={{ padding:"11px 16px", borderRadius:10, border:"none", background:(addressSearch.trim()&&placesKey)?C.blue:C.gray, color:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, cursor:"pointer", whiteSpace:"nowrap" }}
+                    >
+                      {addressSearching ? "..." : "Chercher"}
+                    </button>
+                  </div>
+                  {addressSuggestions.length > 0 && (
+                    <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                      {addressSuggestions.map((s,i)=>(
+                        <button key={i} onClick={()=>{ setStoreLocation(s.formattedAddress||""); setAddressSuggestions([]); setShowAddressSearch(false); }}
+                          style={{ width:"100%", textAlign:"left", padding:"10px 13px", borderRadius:10, border:`1.5px solid ${C.blue}`, background:C.white, cursor:"pointer" }}>
+                          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:C.text }}>{s.displayName?.text}</div>
+                          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, marginTop:2 }}>{s.formattedAddress}</div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {addressSuggestions.length===0 && !addressSearching && addressSearch.trim() && (
+                    <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.gray, textAlign:"center", paddingTop:4 }}>Lance une recherche pour voir les suggestions</div>
+                  )}
+                </div>
+              )}
+              {!showAddressSearch && <div style={{ marginBottom:12 }} />}
 
               <div style={{ marginBottom:20 }}>
                 <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Enseigne</div>

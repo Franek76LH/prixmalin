@@ -24,6 +24,7 @@ export async function scanTicketWithClaude(imageBase64, apiKey) {
 {
   "store": "nom du magasin",
   "date": "YYYY-MM-DD",
+  "address": "adresse complète du magasin si présente sur le ticket (numéro, rue, code postal, ville), sinon chaîne vide",
   "products": [
     { "brand": "marque ou vide", "name": "nom du produit normalisé", "format": "format ou vide", "price": 0.00 }
   ]
