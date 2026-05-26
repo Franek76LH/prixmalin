@@ -1133,39 +1133,36 @@ function PricesTab({ priceDB, setPriceDB }) {
         <input value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="🔍 Chercher un produit..."
           style={{ width:"100%", padding:"11px 14px", borderRadius:10, border:`2px solid ${searchQuery?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:10 }} />
       )}
-      {priceDB.length>0 && (
-        <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:10 }}>
-          <button onClick={()=>setFilterStore("all")} style={{ padding:"6px 12px", background:filterStore==="all"?C.blue:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, color:filterStore==="all"?C.white:C.text, cursor:"pointer" }}>Tous</button>
-          {STORES.filter(s=>priceDB.some(p=>p.storeId===s.id)).map(s=>(
-            <button key={s.id} onClick={()=>setFilterStore(s.id)} style={{ padding:"6px 12px", background:filterStore===s.id?C.blue:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, color:filterStore===s.id?C.white:C.text, cursor:"pointer" }}>
-              {s.logo} {s.name}
+      {priceDB.length>0 && (() => {
+        const sel = { width:"100%", padding:"10px 12px", borderRadius:10, border:`1.5px solid ${C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:700, color:C.text, background:C.white, outline:"none", cursor:"pointer", boxSizing:"border-box" };
+        const priceActive = sortBy==="price_asc"||sortBy==="price_desc";
+        return (
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:16 }}>
+            <select value={filterStore} onChange={e=>setFilterStore(e.target.value)} style={sel}>
+              <option value="all">Tous les magasins</option>
+              {STORES.filter(s=>priceDB.some(p=>p.storeId===s.id)).map(s=>(
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+            <select value={filterCategory} onChange={e=>setFilterCategory(e.target.value)} style={sel}>
+              <option value="all">Toutes catégories</option>
+              {categories.map(cat=><option key={cat} value={cat}>{cat}</option>)}
+            </select>
+            <select value={filterPeriod} onChange={e=>setFilterPeriod(e.target.value)} style={sel}>
+              <option value="all">Toute période</option>
+              <option value="7d">7 derniers jours</option>
+              <option value="30d">30 derniers jours</option>
+              <option value="90d">3 derniers mois</option>
+            </select>
+            <button
+              onClick={()=>setSortBy(s=>s==="price_asc"?"price_desc":s==="price_desc"?"date":"price_asc")}
+              style={{ padding:"10px 12px", borderRadius:10, border:"none", background:priceActive?C.blue:C.grayLight, color:priceActive?C.white:C.text, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, cursor:"pointer" }}
+            >
+              {sortBy==="price_desc" ? "Prix ↓" : "Prix ↑"}
             </button>
-          ))}
-        </div>
-      )}
-      {priceDB.length>0 && categories.length>1 && (
-        <div style={{ display:"flex", gap:6, overflowX:"auto", marginBottom:10, paddingBottom:2, scrollbarWidth:"none" }}>
-          <button onClick={()=>setFilterCategory("all")} style={{ padding:"6px 12px", background:filterCategory==="all"?C.orange:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, color:filterCategory==="all"?C.white:C.text, cursor:"pointer", whiteSpace:"nowrap", flexShrink:0 }}>Toutes</button>
-          {categories.map(cat=>(
-            <button key={cat} onClick={()=>setFilterCategory(cat)} style={{ padding:"6px 12px", background:filterCategory===cat?C.orange:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, color:filterCategory===cat?C.white:C.text, cursor:"pointer", whiteSpace:"nowrap", flexShrink:0 }}>
-              {cat}
-            </button>
-          ))}
-        </div>
-      )}
-      {priceDB.length>0 && (
-        <div style={{ display:"flex", gap:6, alignItems:"center", marginBottom:14 }}>
-          {[["all","Tout"],["7d","7j"],["30d","30j"],["90d","3 mois"]].map(([v,l])=>(
-            <button key={v} onClick={()=>setFilterPeriod(v)} style={{ padding:"6px 11px", background:filterPeriod===v?C.blue:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, color:filterPeriod===v?C.white:C.text, cursor:"pointer" }}>{l}</button>
-          ))}
-          <div style={{ flex:1 }}/>
-          <select value={sortBy} onChange={e=>setSortBy(e.target.value)} style={{ padding:"6px 10px", borderRadius:99, border:`1.5px solid ${C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:800, color:C.text, background:C.white, outline:"none", cursor:"pointer" }}>
-            <option value="date">Récent d'abord</option>
-            <option value="price">Prix croissant</option>
-            <option value="name">Nom A→Z</option>
-          </select>
-        </div>
-      )}
+          </div>
+        );
+      })()}
 
       {priceDB.length===0 && (
         <div style={{ background:C.orangeLight, borderRadius:16, padding:"28px 24px", textAlign:"center", marginBottom:16, border:`2px dashed ${C.orange}` }}>
