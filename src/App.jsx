@@ -288,16 +288,14 @@ function ImportTicketSheet({ onClose, onImport }) {
   const updatePrice = (id,val) => setEditableProducts(prev=>prev.map(p=>p.id===id?{...p,price:parseFloat(val)||0}:p));
 
   const confirm = () => {
-    const storeFull = storeLocation.trim()
-      ? `${storeNameEdit.trim()} – ${storeLocation.trim()}`
-      : storeNameEdit.trim() || result?.store || "";
     const toImport=editableProducts.filter(p=>p.keep&&p.name&&p.price>0).map(p=>({
       id:Date.now()+p.id,
       brand:  p.brand||"",
       product:p.name,
       format: p.format||"",
       storeId:selectedStore||"autre",
-      store_name: storeFull,
+      store_name: storeNameEdit.trim() || result?.store || "",
+      store_address: storeLocation.trim(),
       price:  p.price,
       date:   result?.date?new Date(result.date).toISOString():new Date().toISOString(),
     }));
@@ -462,12 +460,13 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
   const [format,  setFormat]  = useState(existingPrice?.format||"");
   const [storeId, setStoreId] = useState(existingPrice?.storeId||"");
   const [storeName, setStoreName] = useState(existingPrice?.store_name || "");
+  const [storeAddress, setStoreAddress] = useState(existingPrice?.store_address || "");
   const [price,   setPrice]   = useState(existingPrice?.price?.toString()||"");
   const canSubmit = product&&format&&storeId&&price&&!isNaN(parseFloat(price));
 
   const submit = () => {
     if(!canSubmit) return;
-   onSave({ brand:brand.trim(), product:product.trim(), format:format.trim(), storeId, store_name: storeName.trim(), price:parseFloat(price), date:new Date().toISOString() });
+    onSave({ brand:brand.trim(), product:product.trim(), format:format.trim(), storeId, store_name: storeName.trim(), store_address: storeAddress.trim(), price:parseFloat(price), date:new Date().toISOString() });
     onClose();
   };
 
@@ -492,13 +491,24 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
           ))}
 <div style={{ marginBottom:14 }}>
   <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>
-    Magasin précis / texte ticket
+    Nom précis du magasin
   </div>
   <input
     value={storeName}
     onChange={e=>setStoreName(e.target.value)}
     placeholder="Ex : Carrefour Marseille B."
     style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${storeName?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }}
+  />
+</div>
+<div style={{ marginBottom:14 }}>
+  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>
+    Adresse / quartier (optionnel)
+  </div>
+  <input
+    value={storeAddress}
+    onChange={e=>setStoreAddress(e.target.value)}
+    placeholder="Ex : Rue de la Paix, Centre-ville..."
+    style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${storeAddress?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }}
   />
 </div>
           <div style={{ marginBottom:14 }}>
@@ -1503,6 +1513,7 @@ export default function App() {
       brand: p.brand || '',
       storeId: p.storeId || '',
       store_name: p.store_name || '',
+      store_address: p.store_address || '',
       price: parseFloat(p.price),
       date: p.date || new Date().toISOString(),
       category: p.category || guessCategory(p.product),
