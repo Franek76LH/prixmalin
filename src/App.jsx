@@ -1061,6 +1061,7 @@ function PricesTab({ priceDB, setPriceDB }) {
   const [filterPeriod,   setFilterPeriod]   = useState("all");
   const [sortBy,         setSortBy]         = useState("date");
   const [searchQuery,    setSearchQuery]    = useState("");
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const [toast,         setToast]         = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
 
@@ -1089,6 +1090,23 @@ function PricesTab({ priceDB, setPriceDB }) {
   const categories = useMemo(()=>
     [...new Set(priceDB.map(p=>p.category||"Autres"))].sort()
   ,[priceDB]);
+
+  const suggestions = useMemo(()=>{
+    const q=searchQuery.toLowerCase().trim();
+    if(!q||q.length<2) return [];
+    const seen=new Set(), result=[];
+    for(const p of priceDB){
+      if(p.product.toLowerCase().includes(q)||(p.brand||"").toLowerCase().includes(q)){
+        const key=`${p.brand||""}_${p.product}`.toLowerCase();
+        if(!seen.has(key)){
+          seen.add(key);
+          result.push({ label:p.brand?`${p.brand} · ${p.product}`:p.product, value:p.product });
+          if(result.length>=6) break;
+        }
+      }
+    }
+    return result;
+  },[priceDB,searchQuery]);
 
   const grouped = useMemo(()=>{
     const periodDays = {"7d":7,"30d":30,"90d":90};
@@ -1130,8 +1148,27 @@ function PricesTab({ priceDB, setPriceDB }) {
       </button>
 
       {priceDB.length>0 && (
-        <input value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="🔍 Chercher un produit..."
-          style={{ width:"100%", padding:"11px 14px", borderRadius:10, border:`2px solid ${searchQuery?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:10 }} />
+        <div style={{ position:"relative", marginBottom:10 }}>
+          <input
+            value={searchQuery}
+            onChange={e=>{ setSearchQuery(e.target.value); setShowSuggestions(true); }}
+            onFocus={()=>setShowSuggestions(true)}
+            onBlur={()=>setTimeout(()=>setShowSuggestions(false),150)}
+            onKeyDown={e=>e.key==="Escape"&&setShowSuggestions(false)}
+            placeholder="🔍 Chercher un produit..."
+            style={{ width:"100%", padding:"11px 14px", borderRadius:10, border:`2px solid ${searchQuery?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }}
+          />
+          {showSuggestions && suggestions.length>0 && (
+            <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0, right:0, background:C.white, borderRadius:10, border:`1.5px solid ${C.blue}`, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", zIndex:50, overflow:"hidden" }}>
+              {suggestions.map((s,i)=>(
+                <button key={i} onMouseDown={()=>{ setSearchQuery(s.value); setShowSuggestions(false); }}
+                  style={{ width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderBottom:i<suggestions.length-1?`1px solid ${C.grayLight}`:"none", background:"none", fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:700, color:C.text, cursor:"pointer" }}>
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       )}
       {priceDB.length>0 && (() => {
         const sel = { width:"100%", padding:"10px 12px", borderRadius:10, border:`1.5px solid ${C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:700, color:C.text, background:C.white, outline:"none", cursor:"pointer", boxSizing:"border-box" };
