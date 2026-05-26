@@ -540,7 +540,7 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
 
 
 // ── CATALOG TAB ───────────────────────────────────────────────────────────────
-function ProductPickerSheet({ category, onClose, onAdd, items, catalog = [], openProduct = null }) {
+function ProductPickerSheet({ category, onClose, onAdd, items, catalog = [], openProduct = null, priceDB = [] }) {
   const [selected,      setSelected]      = useState(openProduct);
   const [format,        setFormat]        = useState("");
   const [brand,         setBrand]         = useState("");
@@ -548,6 +548,17 @@ function ProductPickerSheet({ category, onClose, onAdd, items, catalog = [], ope
   const [showMddPicker, setShowMddPicker] = useState(false);
   const [qty,           setQty]           = useState(1);
   const [added,         setAdded]         = useState([]);
+
+  const knownFormats = useMemo(()=>{
+    if(!selected||!priceDB.length) return [];
+    const name = normName(selected.product_name);
+    return [...new Set(priceDB.filter(p=>normName(p.product)===name).map(p=>p.format).filter(Boolean))];
+  },[selected,priceDB]);
+
+  useEffect(()=>{
+    if(knownFormats.length===1) setFormat(knownFormats[0]);
+    else setFormat("");
+  },[knownFormats]);
 
   const submit = () => {
     if(!selected || !format.trim()) return;
@@ -663,12 +674,26 @@ function ProductPickerSheet({ category, onClose, onAdd, items, catalog = [], ope
               )}
 
               {/* Format */}
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Format / Volume *</div>
-              {selected.formats?.length > 0 && (
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Format / Volume *</div>
+
+              {knownFormats.length > 0 && (
+                <div style={{ background:"#F0FFF5", borderRadius:12, padding:"10px 12px", marginBottom:10, border:`1.5px solid ${C.green}` }}>
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.green, marginBottom:8 }}>
+                    {knownFormats.length===1 ? "✓ Format pré-rempli depuis tes prix" : "✓ Formats déjà dans tes prix"}
+                  </div>
+                  <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                    {knownFormats.map((f,i)=>(
+                      <button key={i} onClick={()=>setFormat(f)} style={{ padding:"9px 16px", background:format===f?C.green:"#fff", border:`2px solid ${C.green}`, borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:format===f?C.white:C.green, cursor:"pointer" }}>{f}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {selected.formats?.filter(f=>!knownFormats.includes(f)).length > 0 && (
                 <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:8 }}>
-                  {selected.formats.map((f,i) => (
+                  {selected.formats.filter(f=>!knownFormats.includes(f)).map((f,i) => (
                     <button key={i} onClick={()=>setFormat(f)} style={{
-                      padding:"10px 16px", background:format===f?C.blue:C.grayLight,
+                      padding:"9px 16px", background:format===f?C.blue:C.grayLight,
                       border:"none", borderRadius:99,
                       fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14,
                       color:format===f?C.white:C.text, cursor:"pointer",
@@ -676,6 +701,7 @@ function ProductPickerSheet({ category, onClose, onAdd, items, catalog = [], ope
                   ))}
                 </div>
               )}
+
               <input value={format} onChange={e=>setFormat(e.target.value)} placeholder="Ex : 1L, 500g, 1kg, x6..."
                 style={{ width:"100%", padding:"12px 16px", borderRadius:10, border:`2px solid ${format?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:15, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:14 }} />
 
@@ -700,7 +726,7 @@ function ProductPickerSheet({ category, onClose, onAdd, items, catalog = [], ope
   );
 }
 
-function CatalogTab({ items, setItems, setTab, catalog }) {
+function CatalogTab({ items, setItems, setTab, catalog, priceDB }) {
   const [selectedCat,  setSelectedCat]  = useState(null);
   const [openProduct,  setOpenProduct]  = useState(null);
   const [searchQuery,  setSearchQuery]  = useState("");
@@ -818,6 +844,7 @@ function CatalogTab({ items, setItems, setTab, catalog }) {
           items={items}
           catalog={catalog}
           openProduct={openProduct}
+          priceDB={priceDB}
         />
       )}
     </div>
@@ -1690,7 +1717,7 @@ export default function App() {
             </div>
           )}
           {loaded && tab==="list"    && <ListTab    items={items} setItems={saveItems} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites}/>}
-          {loaded && tab==="catalog" && <CatalogTab items={items} setItems={saveItems} setTab={setTab} catalog={catalog}/>}
+          {loaded && tab==="catalog" && <CatalogTab items={items} setItems={saveItems} setTab={setTab} catalog={catalog} priceDB={priceDB}/>}
           {loaded && tab==="compare" && <CompareTab items={items} priceDB={priceDB} onValidate={handleValidate}/>}
           {loaded && tab==="prices"  && <PricesTab  priceDB={priceDB} setPriceDB={savePriceDB}/>}
           {loaded && tab==="archive" && <ArchiveTab archives={archives} onDelete={deleteArchive}/>}
