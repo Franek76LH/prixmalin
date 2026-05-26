@@ -1136,31 +1136,42 @@ function PricesTab({ priceDB, setPriceDB }) {
       {priceDB.length>0 && (() => {
         const sel = { width:"100%", padding:"10px 12px", borderRadius:10, border:`1.5px solid ${C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:700, color:C.text, background:C.white, outline:"none", cursor:"pointer", boxSizing:"border-box" };
         const priceActive = sortBy==="price_asc"||sortBy==="price_desc";
+        const filtersActive = filterStore!=="all"||filterCategory!=="all"||filterPeriod!=="all"||priceActive||searchQuery.trim();
+        const resetFilters = () => { setFilterStore("all"); setFilterCategory("all"); setFilterPeriod("all"); setSortBy("date"); setSearchQuery(""); };
         return (
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:16 }}>
-            <select value={filterStore} onChange={e=>setFilterStore(e.target.value)} style={sel}>
-              <option value="all">Tous les magasins</option>
-              {STORES.filter(s=>priceDB.some(p=>p.storeId===s.id)).map(s=>(
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-            <select value={filterCategory} onChange={e=>setFilterCategory(e.target.value)} style={sel}>
-              <option value="all">Toutes catégories</option>
-              {categories.map(cat=><option key={cat} value={cat}>{cat}</option>)}
-            </select>
-            <select value={filterPeriod} onChange={e=>setFilterPeriod(e.target.value)} style={sel}>
-              <option value="all">Toute période</option>
-              <option value="7d">7 derniers jours</option>
-              <option value="30d">30 derniers jours</option>
-              <option value="90d">3 derniers mois</option>
-            </select>
-            <button
-              onClick={()=>setSortBy(s=>s==="price_asc"?"price_desc":s==="price_desc"?"date":"price_asc")}
-              style={{ padding:"10px 12px", borderRadius:10, border:"none", background:priceActive?C.blue:C.grayLight, color:priceActive?C.white:C.text, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, cursor:"pointer" }}
-            >
-              {sortBy==="price_desc" ? "Prix ↓" : "Prix ↑"}
-            </button>
-          </div>
+          <>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:filtersActive?6:16 }}>
+              <select value={filterStore} onChange={e=>setFilterStore(e.target.value)} style={sel}>
+                <option value="all">Tous les magasins</option>
+                {STORES.filter(s=>priceDB.some(p=>p.storeId===s.id)).map(s=>(
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+              <select value={filterCategory} onChange={e=>setFilterCategory(e.target.value)} style={sel}>
+                <option value="all">Toutes catégories</option>
+                {categories.map(cat=><option key={cat} value={cat}>{cat}</option>)}
+              </select>
+              <select value={filterPeriod} onChange={e=>setFilterPeriod(e.target.value)} style={sel}>
+                <option value="all">Toute période</option>
+                <option value="7d">7 derniers jours</option>
+                <option value="30d">30 derniers jours</option>
+                <option value="90d">3 derniers mois</option>
+              </select>
+              <button
+                onClick={()=>setSortBy(s=>s==="price_asc"?"price_desc":s==="price_desc"?"date":"price_asc")}
+                style={{ padding:"10px 12px", borderRadius:10, border:"none", background:priceActive?C.blue:C.grayLight, color:priceActive?C.white:C.text, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, cursor:"pointer" }}
+              >
+                {sortBy==="price_desc" ? "Prix ↓" : "Prix ↑"}
+              </button>
+            </div>
+            {filtersActive && (
+              <div style={{ textAlign:"right", marginBottom:14 }}>
+                <button onClick={resetFilters} style={{ background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:800, color:C.gray, cursor:"pointer", textDecoration:"underline" }}>
+                  Réinitialiser les filtres
+                </button>
+              </div>
+            )}
+          </>
         );
       })()}
 
