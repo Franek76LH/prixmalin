@@ -252,6 +252,8 @@ function ImportTicketSheet({ onClose, onImport }) {
   const [selectedStore, setSelectedStore] = useState("");
   const [editableProducts, setEditableProducts] = useState([]);
   const [scanning, setScanning] = useState(false);
+  const [storeNameEdit, setStoreNameEdit] = useState("");
+  const [storeLocation, setStoreLocation] = useState("");
   const fileInputRef = useRef(null);
   const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
 
@@ -274,8 +276,10 @@ function ImportTicketSheet({ onClose, onImport }) {
       setResult(parsed);
       setSelectedStore(storeIdFromName(parsed.store));
       setEditableProducts(parsed.products.map((p,i)=>({...p,id:i,keep:true})));
+      setStoreNameEdit(parsed.store||"");
+      setStoreLocation("");
       setError("");
-      setStatus("preview");
+      setStatus("store");
     } catch(e) { setError("JSON invalide : "+e.message); }
   };
 
@@ -284,13 +288,16 @@ function ImportTicketSheet({ onClose, onImport }) {
   const updatePrice = (id,val) => setEditableProducts(prev=>prev.map(p=>p.id===id?{...p,price:parseFloat(val)||0}:p));
 
   const confirm = () => {
+    const storeFull = storeLocation.trim()
+      ? `${storeNameEdit.trim()} – ${storeLocation.trim()}`
+      : storeNameEdit.trim() || result?.store || "";
     const toImport=editableProducts.filter(p=>p.keep&&p.name&&p.price>0).map(p=>({
       id:Date.now()+p.id,
       brand:  p.brand||"",
       product:p.name,
       format: p.format||"",
       storeId:selectedStore||"autre",
-      store_name: result?.store||"",
+      store_name: storeFull,
       price:  p.price,
       date:   result?.date?new Date(result.date).toISOString():new Date().toISOString(),
     }));
@@ -346,12 +353,59 @@ function ImportTicketSheet({ onClose, onImport }) {
                   const parsed = await scanTicketWithClaude(base64, apiKey);
                   setResult(parsed); setSelectedStore(storeIdFromName(parsed.store));
                   setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true})));
-                  setStatus("preview");
+                  setStoreNameEdit(parsed.store||"");
+                  setStoreLocation("");
+                  setStatus("store");
                 } catch(e) { setError("Erreur scan : " + e.message); }
                 setScanning(false);
               }} style={{ display:"none" }} />
               <button onClick={()=>fileInputRef.current?.click()} disabled={scanning} style={{ width:"100%", padding:"15px", marginTop:10, border:"none", borderRadius:12, background:scanning?"#999":"#00B341", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:"white", cursor:scanning?"default":"pointer" }}>
                 {scanning ? "⏳ Analyse en cours..." : "📷 Scanner un ticket"}
+              </button>
+            </>
+          )}
+
+          {status==="store" && result && (
+            <>
+              <div style={{ background:C.blueLight, borderRadius:12, padding:"12px 16px", marginBottom:20 }}>
+                <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:C.blue, marginBottom:4 }}>
+                  ✅ {editableProducts.length} produit{editableProducts.length>1?"s":""} détecté{editableProducts.length>1?"s":""}
+                </div>
+                {result.date && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>📅 {new Date(result.date).toLocaleDateString("fr-FR",{day:"numeric",month:"long",year:"numeric"})}</div>}
+              </div>
+
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Nom du magasin *</div>
+              <input
+                value={storeNameEdit}
+                onChange={e=>setStoreNameEdit(e.target.value)}
+                placeholder="Ex : Intermarché, Lidl..."
+                style={{ width:"100%", padding:"13px 14px", borderRadius:12, border:`2px solid ${storeNameEdit.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:15, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:14 }}
+              />
+
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Adresse ou quartier (optionnel)</div>
+              <input
+                value={storeLocation}
+                onChange={e=>setStoreLocation(e.target.value)}
+                placeholder="Ex : Rue de la Paix, Centre-ville..."
+                style={{ width:"100%", padding:"13px 14px", borderRadius:12, border:`2px solid ${storeLocation.trim()?C.blue:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:15, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:20 }}
+              />
+
+              <div style={{ marginBottom:20 }}>
+                <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Enseigne</div>
+                <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                  {STORES.map(s=>(
+                    <button key={s.id} onClick={()=>setSelectedStore(s.id)} style={{ padding:"6px 12px", background:selectedStore===s.id?C.blue:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, color:selectedStore===s.id?C.white:C.text, cursor:"pointer" }}>
+                      {s.logo} {s.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <button onClick={()=>setStatus("preview")} disabled={!storeNameEdit.trim()} style={{ width:"100%", padding:"16px", border:"none", borderRadius:12, background:storeNameEdit.trim()?C.orange:C.grayLight, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:storeNameEdit.trim()?C.white:C.gray, cursor:storeNameEdit.trim()?"pointer":"default", marginBottom:10, boxShadow:storeNameEdit.trim()?"0 6px 20px rgba(204,0,0,0.35)":"none" }}>
+                Continuer →
+              </button>
+              <button onClick={()=>setStatus("idle")} style={{ width:"100%", padding:"13px", border:`2px solid ${C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.textLight, cursor:"pointer" }}>
+                ← Retour
               </button>
             </>
           )}
@@ -365,15 +419,10 @@ function ImportTicketSheet({ onClose, onImport }) {
                 {result.date && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>📅 {new Date(result.date).toLocaleDateString("fr-FR",{day:"numeric",month:"long",year:"numeric"})}</div>}
               </div>
 
-              <div style={{ marginBottom:16 }}>
-                <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Magasin : <span style={{ color:C.blue }}>{result.store}</span></div>
-                <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-                  {STORES.map(s=>(
-                    <button key={s.id} onClick={()=>setSelectedStore(s.id)} style={{ padding:"6px 12px", background:selectedStore===s.id?C.blue:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, color:selectedStore===s.id?C.white:C.text, cursor:"pointer" }}>
-                      {s.logo} {s.name}
-                    </button>
-                  ))}
-                </div>
+              <div style={{ background:C.grayLight, borderRadius:10, padding:"10px 14px", marginBottom:16, display:"flex", alignItems:"center", gap:8 }}>
+                <span style={{ fontSize:16 }}>🏪</span>
+                <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{storeNameEdit}{storeLocation.trim()?` – ${storeLocation.trim()}`:""}</span>
+                <button onClick={()=>setStatus("store")} style={{ marginLeft:"auto", background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.blue, fontWeight:800, cursor:"pointer", padding:0 }}>Modifier</button>
               </div>
 
               <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Produits à importer</div>
