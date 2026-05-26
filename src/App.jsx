@@ -253,7 +253,7 @@ function ImportTicketSheet({ onClose, onImport }) {
   const [editableProducts, setEditableProducts] = useState([]);
   const [scanning, setScanning] = useState(false);
   const fileInputRef = useRef(null);
-  const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
+  const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
 
   const EXAMPLE = `{
   "store": "Intermarché",

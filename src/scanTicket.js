@@ -1,25 +1,21 @@
 export async function scanTicketWithClaude(imageBase64, apiKey) {
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
+      "Authorization": `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
+      model: "anthropic/claude-sonnet-4-20250514",
       max_tokens: 1024,
       messages: [
         {
           role: "user",
           content: [
             {
-              type: "image",
-              source: {
-                type: "base64",
-                media_type: "image/jpeg",
-                data: imageBase64,
+              type: "image_url",
+              image_url: {
+                url: `data:image/jpeg;base64,${imageBase64}`,
               },
             },
             {
@@ -47,7 +43,7 @@ Normalise les noms abrégés (ex: LT DEMI ECR → Lait demi-écrémé). Ignore l
     throw new Error(msg);
   }
 
-  const text = data.content?.[0]?.text || "";
+  const text = data.choices?.[0]?.message?.content || "";
   const clean = text.replace(/```json|```/g, "").trim();
 
   if (!clean) throw new Error("Réponse vide du modèle");
