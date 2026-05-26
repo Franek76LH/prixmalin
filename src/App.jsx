@@ -1056,8 +1056,11 @@ function PricesTab({ priceDB, setPriceDB }) {
   const [showImport,    setShowImport]    = useState(false);
   const [showEntry,     setShowEntry]     = useState(false);
   const [editPrice,     setEditPrice]     = useState(null);
-  const [filterStore,   setFilterStore]   = useState("all");
-  const [searchQuery,   setSearchQuery]   = useState("");
+  const [filterStore,    setFilterStore]    = useState("all");
+  const [filterCategory, setFilterCategory] = useState("all");
+  const [filterPeriod,   setFilterPeriod]   = useState("all");
+  const [sortBy,         setSortBy]         = useState("date");
+  const [searchQuery,    setSearchQuery]    = useState("");
   const [toast,         setToast]         = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
 
@@ -1083,17 +1086,31 @@ function PricesTab({ priceDB, setPriceDB }) {
     }
   };
 
+  const categories = useMemo(()=>
+    [...new Set(priceDB.map(p=>p.category||"Autres"))].sort()
+  ,[priceDB]);
+
   const grouped = useMemo(()=>{
+    const periodDays = {"7d":7,"30d":30,"90d":90};
+    const cutoff = periodDays[filterPeriod] ? Date.now() - periodDays[filterPeriod]*86400000 : 0;
     const q = searchQuery.toLowerCase().trim();
-    const filtered = (filterStore==="all"?priceDB:priceDB.filter(p=>p.storeId===filterStore))
-      .filter(p=>!q || p.product.toLowerCase().includes(q) || (p.brand||"").toLowerCase().includes(q) || p.format.toLowerCase().includes(q));
-    return filtered.reduce((acc,p)=>{
+    const filtered = priceDB
+      .filter(p=>filterStore==="all"||p.storeId===filterStore)
+      .filter(p=>filterCategory==="all"||(p.category||"Autres")===filterCategory)
+      .filter(p=>!cutoff||new Date(p.date).getTime()>=cutoff)
+      .filter(p=>!q||p.product.toLowerCase().includes(q)||(p.brand||"").toLowerCase().includes(q)||p.format.toLowerCase().includes(q));
+    const groups={};
+    filtered.forEach(p=>{
       const key=`${p.brand||""}_${p.product}_${p.format}`.toLowerCase();
-      if(!acc[key]) acc[key]={brand:p.brand, product:p.product, format:p.format, entries:[]};
-      acc[key].entries.push(p);
-      return acc;
-    },{});
-  },[priceDB,filterStore,searchQuery]);
+      if(!groups[key]) groups[key]={brand:p.brand,product:p.product,format:p.format,entries:[]};
+      groups[key].entries.push(p);
+    });
+    const arr=Object.values(groups);
+    if(sortBy==="date")       arr.sort((a,b)=>Math.max(...b.entries.map(e=>new Date(e.date)))-Math.max(...a.entries.map(e=>new Date(e.date))));
+    else if(sortBy==="price") arr.sort((a,b)=>Math.min(...a.entries.map(e=>e.price))-Math.min(...b.entries.map(e=>e.price)));
+    else if(sortBy==="name")  arr.sort((a,b)=>a.product.localeCompare(b.product,"fr"));
+    return arr;
+  },[priceDB,filterStore,filterCategory,filterPeriod,sortBy,searchQuery]);
 
   return (
     <div style={{ padding:"16px 16px 110px" }}>
@@ -1104,7 +1121,7 @@ function PricesTab({ priceDB, setPriceDB }) {
         </div>
         <div style={{ flex:1, background:C.green, borderRadius:12, padding:"12px 14px" }}>
           <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:800, color:"rgba(255,255,255,0.65)", textTransform:"uppercase", letterSpacing:"0.06em" }}>Produits distincts</div>
-          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:24, color:C.white }}>{Object.keys(grouped).length}</div>
+          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:24, color:C.white }}>{grouped.length}</div>
         </div>
       </div>
 
@@ -1117,13 +1134,36 @@ function PricesTab({ priceDB, setPriceDB }) {
           style={{ width:"100%", padding:"11px 14px", borderRadius:10, border:`2px solid ${searchQuery?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:10 }} />
       )}
       {priceDB.length>0 && (
-        <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:14 }}>
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:10 }}>
           <button onClick={()=>setFilterStore("all")} style={{ padding:"6px 12px", background:filterStore==="all"?C.blue:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, color:filterStore==="all"?C.white:C.text, cursor:"pointer" }}>Tous</button>
           {STORES.filter(s=>priceDB.some(p=>p.storeId===s.id)).map(s=>(
             <button key={s.id} onClick={()=>setFilterStore(s.id)} style={{ padding:"6px 12px", background:filterStore===s.id?C.blue:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, color:filterStore===s.id?C.white:C.text, cursor:"pointer" }}>
               {s.logo} {s.name}
             </button>
           ))}
+        </div>
+      )}
+      {priceDB.length>0 && categories.length>1 && (
+        <div style={{ display:"flex", gap:6, overflowX:"auto", marginBottom:10, paddingBottom:2, scrollbarWidth:"none" }}>
+          <button onClick={()=>setFilterCategory("all")} style={{ padding:"6px 12px", background:filterCategory==="all"?C.orange:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, color:filterCategory==="all"?C.white:C.text, cursor:"pointer", whiteSpace:"nowrap", flexShrink:0 }}>Toutes</button>
+          {categories.map(cat=>(
+            <button key={cat} onClick={()=>setFilterCategory(cat)} style={{ padding:"6px 12px", background:filterCategory===cat?C.orange:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, color:filterCategory===cat?C.white:C.text, cursor:"pointer", whiteSpace:"nowrap", flexShrink:0 }}>
+              {cat}
+            </button>
+          ))}
+        </div>
+      )}
+      {priceDB.length>0 && (
+        <div style={{ display:"flex", gap:6, alignItems:"center", marginBottom:14 }}>
+          {[["all","Tout"],["7d","7j"],["30d","30j"],["90d","3 mois"]].map(([v,l])=>(
+            <button key={v} onClick={()=>setFilterPeriod(v)} style={{ padding:"6px 11px", background:filterPeriod===v?C.blue:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, color:filterPeriod===v?C.white:C.text, cursor:"pointer" }}>{l}</button>
+          ))}
+          <div style={{ flex:1 }}/>
+          <select value={sortBy} onChange={e=>setSortBy(e.target.value)} style={{ padding:"6px 10px", borderRadius:99, border:`1.5px solid ${C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:800, color:C.text, background:C.white, outline:"none", cursor:"pointer" }}>
+            <option value="date">Récent d'abord</option>
+            <option value="price">Prix croissant</option>
+            <option value="name">Nom A→Z</option>
+          </select>
         </div>
       )}
 
@@ -1135,7 +1175,7 @@ function PricesTab({ priceDB, setPriceDB }) {
         </div>
       )}
 
-      {Object.values(grouped).map(group=>{
+      {grouped.map(group=>{
         const best=group.entries.reduce((m,e)=>e.price<m.price?e:m,group.entries[0]);
         return (
           <div key={`${group.brand}_${group.product}_${group.format}`} style={{ background:C.white, borderRadius:14, border:`1px solid ${C.grayLight}`, overflow:"hidden", marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
