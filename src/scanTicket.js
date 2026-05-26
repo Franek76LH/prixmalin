@@ -6,7 +6,7 @@ export async function scanTicketWithClaude(imageBase64, apiKey) {
       "Authorization": `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: "anthropic/claude-sonnet-4-20250514",
+      model: "anthropic/claude-sonnet-4-5",
       max_tokens: 1024,
       messages: [
         {
