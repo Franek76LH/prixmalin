@@ -1541,20 +1541,19 @@ function PricesTab({ priceDB, setPriceDB, saveSavings }) {
 
 // ── COMPARE TAB ───────────────────────────────────────────────────────────────
 function CompareTab({ items, priceDB, onValidate }) {
+  const F = "'Nunito',sans-serif";
+
   if(items.length===0) return (
     <div style={{ padding:"40px 20px 100px", textAlign:"center" }}>
       <div style={{ fontSize:60, marginBottom:14 }}>🏪</div>
-      <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:17, color:"#CC0000", marginBottom:6 }}>Ta liste est vide</div>
-      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>Ajoute des produits dans "Liste" pour comparer</div>
+      <div style={{ fontFamily:F, fontWeight:900, fontSize:17, color:"#CC0000", marginBottom:6 }}>Ta liste est vide</div>
+      <div style={{ fontFamily:F, fontSize:13, color:C.textLight }}>Ajoute des produits dans "Liste" pour comparer</div>
     </div>
   );
 
-  // Pour chaque item de la liste, trouver les prix correspondants dans priceDB
-  // matching : même produit + même format + (même marque si marque fixée)
   const analysis = useMemo(()=>{
     return items.map(item=>{
       const matches = priceDB.filter(p=>itemMatchesPrice(item,p));
-      // grouper par magasin (garder le plus récent si doublon)
       const byStore = {};
       matches.forEach(p=>{
         if(!byStore[p.storeId]||new Date(p.date)>new Date(byStore[p.storeId].date)) byStore[p.storeId]=p;
@@ -1563,53 +1562,69 @@ function CompareTab({ items, priceDB, onValidate }) {
     });
   },[items,priceDB]);
 
-  // Totaux par magasin
   const storeTotals = useMemo(()=>{
     const totals={};
     STORES.forEach(s=>{ totals[s.id]={total:0,found:0,missing:[]}; });
     analysis.forEach(({item,byStore})=>{
       STORES.forEach(s=>{
-        if(byStore[s.id]){
-          totals[s.id].total += byStore[s.id].price * item.qty;
-          totals[s.id].found += 1;
-        } else {
-          totals[s.id].missing.push(item.product);
-        }
+        if(byStore[s.id]){ totals[s.id].total+=byStore[s.id].price*item.qty; totals[s.id].found+=1; }
+        else              { totals[s.id].missing.push(item.product); }
       });
     });
     return totals;
   },[analysis]);
 
-  const ranked = STORES.map(s=>({...s,...storeTotals[s.id]})).filter(s=>s.found>0).sort((a,b)=>b.found!==a.found?b.found-a.found:a.total-b.total);
-  const best   = ranked[0];
-  const savings= ranked.length>1?ranked[ranked.length-1].total-best.total:0;
-  const totalItems=items.reduce((a,i)=>a+i.qty,0);
-  const missingItems=items.filter(item=>!priceDB.some(p=>itemMatchesPrice(item,p)));
+  const ranked       = STORES.map(s=>({...s,...storeTotals[s.id]})).filter(s=>s.found>0).sort((a,b)=>b.found!==a.found?b.found-a.found:a.total-b.total);
+  const best         = ranked[0];
+  const worstTotal   = ranked.length>1 ? ranked[ranked.length-1].total : 0;
+  const maxSavings   = best ? worstTotal - best.total : 0;
+  const totalItems   = items.reduce((a,i)=>a+i.qty,0);
+  const missingGlobal= items.filter(item=>!priceDB.some(p=>itemMatchesPrice(item,p)));
+
+  // Magasin suggéré pour les produits manquants chez le meilleur
+  const suggestion = useMemo(()=>{
+    if(!best||!best.missing.length||ranked.length<2) return null;
+    return ranked.slice(1).reduce((winner,store)=>{
+      const covers = best.missing.filter(name=>!store.missing.includes(name)).length;
+      if(!winner||covers>winner.covers) return {...store,covers};
+      return winner;
+    },null);
+  },[ranked,best]);
 
   return (
     <div style={{ padding:"16px 16px 110px" }}>
-      <div style={{ background:C.blue, borderRadius:16, padding:"16px 20px", marginBottom:16, display:"flex", alignItems:"center", gap:14 }}>
-        <div style={{ fontSize:34 }}>🛒</div>
+
+      {/* Résumé liste */}
+      <div style={{ background:C.blue, borderRadius:14, padding:"14px 18px", marginBottom:16, display:"flex", alignItems:"center", gap:12 }}>
+        <div style={{ fontSize:30 }}>🛒</div>
         <div>
-          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.white }}>{items.length} produit{items.length>1?"s":""} · {totalItems} article{totalItems>1?"s":""}</div>
-          {savings>0.05 && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:"rgba(255,255,255,0.75)", marginTop:2 }}>Jusqu'à <strong style={{ color:"#FFD700" }}>{savings.toFixed(2)} €</strong> d'économies</div>}
+          <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:C.white }}>
+            {items.length} produit{items.length>1?"s":""} · {totalItems} article{totalItems>1?"s":""}
+          </div>
+          {maxSavings>0.05 && (
+            <div style={{ fontFamily:F, fontSize:12, color:"rgba(255,255,255,0.75)", marginTop:2 }}>
+              Jusqu'à <strong style={{ color:"#FFD700" }}>{maxSavings.toFixed(2)} €</strong> d'écart entre magasins
+            </div>
+          )}
         </div>
       </div>
 
+      {/* Aucun prix */}
       {ranked.length===0 && (
-        <div style={{ background:C.orangeLight, borderRadius:14, padding:"24px 20px", textAlign:"center", border:`2px dashed ${C.orange}`, marginBottom:16 }}>
+        <div style={{ background:C.orangeLight, borderRadius:14, padding:"24px 20px", textAlign:"center", border:`2px dashed ${C.orange}` }}>
           <div style={{ fontSize:40, marginBottom:10 }}>💰</div>
-          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.orange, marginBottom:6 }}>Aucun prix correspondant</div>
-          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>Aucun prix trouvé pour les produits de ta liste. Vérifie le <strong>nom</strong> et le <strong>format</strong> dans "Mes prix".</div>
+          <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:C.orange, marginBottom:6 }}>Aucun prix correspondant</div>
+          <div style={{ fontFamily:F, fontSize:13, color:C.textLight }}>Vérifie le <strong>nom</strong> et le <strong>format</strong> dans "Mes prix".</div>
         </div>
       )}
 
-      {missingItems.length>0 && ranked.length>0 && (
+      {/* Produits sans aucun prix */}
+      {missingGlobal.length>0 && ranked.length>0 && (
         <div style={{ background:"#FFF8E6", borderRadius:12, padding:"12px 14px", marginBottom:14, border:`1px solid ${C.yellow}` }}>
-          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:"#7A6000", marginBottom:6 }}>⚠️ Pas de prix pour :</div>
+          <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:"#7A6000", marginBottom:6 }}>⚠️ Aucun prix enregistré pour :</div>
           <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-            {missingItems.map(item=>(
-              <span key={item.id} style={{ background:C.yellow, borderRadius:99, padding:"3px 10px", fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:700, color:C.text }}>
+            {missingGlobal.map(item=>(
+              <span key={item.id} style={{ background:C.yellow, borderRadius:99, padding:"3px 10px", fontFamily:F, fontSize:12, fontWeight:700, color:C.text }}>
                 {item.brand?`${item.brand} · `:""}{item.product} {item.format}
               </span>
             ))}
@@ -1617,106 +1632,117 @@ function CompareTab({ items, priceDB, onValidate }) {
         </div>
       )}
 
-      {/* Détail par produit — affiche les prix connus pour chaque article */}
-      {analysis.filter(({byStore})=>Object.keys(byStore).length>0).map(({item,byStore})=>{
-        const options=Object.values(byStore).sort((a,b)=>a.price-b.price);
-        const multi=options.length>1;
-        return (
-          <div key={item.id} style={{ background:C.white, borderRadius:14, border:`1px solid ${C.grayLight}`, overflow:"hidden", marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
-            <div style={{ background:C.blueLight, padding:"10px 14px", display:"flex", alignItems:"center", gap:8 }}>
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.blue, flex:1 }}>
-                {item.product} <span style={{ fontWeight:700, color:C.gray }}>{item.format}</span>
-              </div>
-              {!item.brand && <span style={{ fontSize:11, color:C.orange, fontWeight:700 }}>toutes marques</span>}
-            </div>
-            {options.map((p,i)=>{
-              const store=STORES.find(s=>s.id===p.storeId);
-              return (
-                <div key={p.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 14px", borderBottom:`1px solid ${C.grayLight}` }}>
-                  <span>{store?.logo}</span>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:C.text }}>{p.brand||"Sans marque"} · {store?.name}</div>
-                  </div>
-                  <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:multi&&i===0?C.green:C.text }}>{p.price.toFixed(2)} €</div>
-                  {multi && i===0 && <span style={{ fontSize:10, background:C.green, color:C.white, borderRadius:99, padding:"2px 7px", fontFamily:"'Nunito',sans-serif", fontWeight:800 }}>MOINS CHER</span>}
-                </div>
-              );
-            })}
-          </div>
-        );
-      })}
-
       {ranked.length>0 && (
         <>
-          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:10 }}>Classement global · tes prix réels</div>
-          <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:20 }}>
-            {ranked.map((store,i)=>{
-              const isBest=i===0;
-              const diff=store.total-best.total;
-              // Détail des articles pour ce magasin
-              const storeDetails = analysis.map(({item,byStore})=>{
-                const p=byStore[store.id];
-                return { item, price:p, total:p?p.price*item.qty:null };
-              });
-              return (
-                <div key={store.id} style={{ background:isBest?"linear-gradient(135deg,#CC0000,#E80000)":C.white, border:isBest?"none":`1px solid ${C.grayLight}`, borderRadius:14, overflow:"hidden", boxShadow:isBest?"0 6px 20px rgba(0,82,165,0.3)":"0 1px 4px rgba(0,0,0,0.06)", animation:`slideIn 0.25s ease ${i*0.07}s both` }}>
-                  {/* Ligne principale */}
-                  <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 16px" }}>
-                    <div style={{ width:30, height:30, borderRadius:99, background:isBest?C.orange:C.grayLight, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:isBest?C.white:C.gray, flexShrink:0 }}>{i+1}</div>
-                    <span style={{ fontSize:20 }}>{store.logo}</span>
-                    <div style={{ flex:1 }}>
-                      <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                        <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:isBest?C.white:C.text }}>{store.name}</span>
-                        {isBest && <span style={{ fontSize:10, background:C.orange, color:C.white, borderRadius:99, padding:"2px 7px", fontFamily:"'Nunito',sans-serif", fontWeight:800 }}>MEILLEUR</span>}
+          {/* ── MEILLEUR MAGASIN (grand) ── */}
+          <div style={{ background:"linear-gradient(145deg,#CC0000,#E00000)", borderRadius:18, overflow:"hidden", marginBottom:16, boxShadow:"0 10px 32px rgba(204,0,0,0.45)", animation:"slideIn 0.3s ease both" }}>
+
+            {/* Badge + Prix total */}
+            <div style={{ padding:"18px 18px 0", display:"flex", alignItems:"flex-start", justifyContent:"space-between" }}>
+              <div style={{ background:C.orange, borderRadius:8, padding:"4px 12px", fontFamily:F, fontWeight:900, fontSize:11, color:C.white, letterSpacing:"0.04em" }}>
+                🥇 MEILLEUR PRIX
+              </div>
+              <div style={{ textAlign:"right" }}>
+                <div style={{ fontFamily:F, fontWeight:900, fontSize:34, color:C.white, lineHeight:1 }}>{best.total.toFixed(2)} €</div>
+                {maxSavings>0.05 && <div style={{ fontFamily:F, fontSize:11, color:"rgba(255,255,255,0.6)", marginTop:2 }}>−{maxSavings.toFixed(2)} € vs le + cher</div>}
+              </div>
+            </div>
+
+            {/* Nom magasin */}
+            <div style={{ padding:"10px 18px 14px", display:"flex", alignItems:"center", gap:10 }}>
+              <span style={{ fontSize:26 }}>{best.logo}</span>
+              <div>
+                <div style={{ fontFamily:F, fontWeight:900, fontSize:20, color:C.white }}>{best.name}</div>
+                <div style={{ fontFamily:F, fontSize:12, color:"rgba(255,255,255,0.6)" }}>
+                  {best.found}/{items.length} produit{items.length>1?"s":""} trouvé{best.found>1?"s":""}
+                  {best.missing.length>0 && <span style={{ color:"#FFD700" }}> · {best.missing.length} manquant{best.missing.length>1?"s":""}</span>}
+                </div>
+              </div>
+            </div>
+
+            {/* Liste des articles */}
+            <div style={{ background:"rgba(0,0,0,0.18)", marginBottom:12 }}>
+              {analysis.map(({item,byStore})=>{
+                const p     = byStore[best.id];
+                const total = p ? p.price*item.qty : null;
+                return (
+                  <div key={item.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 18px", borderBottom:"1px solid rgba(255,255,255,0.07)" }}>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontFamily:F, fontWeight:700, fontSize:13, color:"rgba(255,255,255,0.92)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                        {item.brand?`${item.brand} · `:""}{item.product}
                       </div>
-                      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:isBest?"rgba(255,255,255,0.6)":C.gray, marginTop:2 }}>
-                        {store.found}/{items.length} produit{items.length>1?"s":""} trouvé{store.found>1?"s":""}
-                        {store.missing.length>0 && <span style={{ color:isBest?"#FFD700":C.orange }}> · {store.missing.length} manquant{store.missing.length>1?"s":""}</span>}
+                      <div style={{ fontFamily:F, fontSize:11, color:"rgba(255,255,255,0.45)", marginTop:1 }}>
+                        {item.format}{item.qty>1?` × ${item.qty}`:""}
                       </div>
                     </div>
-                    <div style={{ textAlign:"right" }}>
-                      <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:20, color:isBest?C.orange:C.red }}>{store.total.toFixed(2)} €</div>
-                      {!isBest && diff>0.01 && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.red, fontWeight:700 }}>+{diff.toFixed(2)} €</div>}
-                    </div>
+                    {total!==null ? (
+                      <div style={{ textAlign:"right", flexShrink:0 }}>
+                        <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:"#FFD700" }}>{total.toFixed(2)} €</div>
+                        {item.qty>1 && <div style={{ fontFamily:F, fontSize:10, color:"rgba(255,255,255,0.4)" }}>{p.price.toFixed(2)} €/u</div>}
+                      </div>
+                    ) : (
+                      <span style={{ fontFamily:F, fontSize:12, fontWeight:800, color:"#FFD700", flexShrink:0 }}>⚠️ manquant</span>
+                    )}
                   </div>
-                  {/* Détail des articles */}
-                  <div style={{ borderTop:`1px solid ${isBest?"rgba(255,255,255,0.12)":C.grayLight}` }}>
-                    {storeDetails.map(({item,price,total})=>(
-                      <div key={item.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 16px", borderBottom:`1px solid ${isBest?"rgba(255,255,255,0.08)":C.grayLight}` }}>
-                        <div style={{ flex:1 }}>
-                          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:13, color:isBest?"rgba(255,255,255,0.9)":C.text }}>
-                            {item.brand?`${item.brand} · `:""}{item.product}
-                          </div>
-                          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:isBest?"rgba(255,255,255,0.5)":C.gray, marginTop:1 }}>
-                            {item.format} × {item.qty}
-                          </div>
-                        </div>
-                        {price ? (
-                          <div style={{ textAlign:"right" }}>
-                            <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:isBest?"#FFD700":C.blue }}>
-                              {total.toFixed(2)} €
-                            </div>
-                            {item.qty>1 && (
-                              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:isBest?"rgba(255,255,255,0.5)":C.gray }}>
-                                {price.price.toFixed(2)} € / unité
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:700, color:isBest?"#FFD700":C.orange }}>
-                            ⚠️ manquant
-                          </span>
-                        )}
-                      </div>
-                    ))}
+                );
+              })}
+            </div>
+
+            {/* Suggestion pour produits manquants */}
+            {suggestion && suggestion.covers>0 && (
+              <div style={{ background:"rgba(255,255,255,0.12)", margin:"0 12px 12px", borderRadius:10, padding:"10px 14px", display:"flex", alignItems:"center", gap:10 }}>
+                <span style={{ fontSize:18 }}>{suggestion.logo}</span>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:C.white }}>
+                    Complète chez {suggestion.name}
+                  </div>
+                  <div style={{ fontFamily:F, fontSize:11, color:"rgba(255,255,255,0.65)", marginTop:2 }}>
+                    {suggestion.covers} produit{suggestion.covers>1?"s":""} manquant{suggestion.covers>1?"s":""} disponible{suggestion.covers>1?"s":""} ici
                   </div>
                 </div>
-              );
-            })}
+                <div style={{ fontFamily:F, fontWeight:900, fontSize:13, color:"rgba(255,255,255,0.6)", flexShrink:0 }}>
+                  {suggestion.total.toFixed(2)} €
+                </div>
+              </div>
+            )}
+
+            {/* Bouton valider */}
+            <div style={{ padding:"0 12px 16px" }}>
+              <button onClick={()=>onValidate(best)} style={{ width:"100%", padding:"15px", border:"none", borderRadius:12, background:C.orange, fontFamily:F, fontWeight:900, fontSize:16, color:"#111", cursor:"pointer", boxShadow:"0 4px 16px rgba(0,0,0,0.25)" }}>
+                ✅ Je fais mes courses chez {best.name}
+              </button>
+            </div>
           </div>
-          <button onClick={()=>onValidate(best)} style={{ width:"100%", padding:"16px", border:"none", borderRadius:14, background:C.orange, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:"#111111", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 6px 20px rgba(200,160,0,0.5)" }}>
-            ✅ Je fais mes courses chez {best.name}
-          </button>
+
+          {/* ── AUTRES MAGASINS (condensé) ── */}
+          {ranked.length>1 && (
+            <>
+              <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:10 }}>
+                Autres magasins
+              </div>
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                {ranked.slice(1).map((store,i)=>{
+                  const diff = store.total - best.total;
+                  return (
+                    <div key={store.id} style={{ background:C.white, borderRadius:12, padding:"12px 16px", border:`1px solid ${C.grayLight}`, display:"flex", alignItems:"center", gap:12, animation:`slideIn 0.25s ease ${(i+1)*0.07}s both` }}>
+                      <span style={{ fontSize:22, flexShrink:0 }}>{store.logo}</span>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontFamily:F, fontWeight:800, fontSize:14, color:C.text }}>{store.name}</div>
+                        <div style={{ fontFamily:F, fontSize:11, color:C.textLight }}>
+                          {store.found}/{items.length} produit{items.length>1?"s":""}
+                          {store.missing.length>0 && <span style={{ color:C.orange }}> · {store.missing.length} manquant{store.missing.length>1?"s":""}</span>}
+                        </div>
+                      </div>
+                      <div style={{ textAlign:"right", flexShrink:0 }}>
+                        <div style={{ fontFamily:F, fontWeight:900, fontSize:16, color:C.text }}>{store.total.toFixed(2)} €</div>
+                        {diff>0.01 && <div style={{ fontFamily:F, fontSize:12, fontWeight:800, color:"#CC3300" }}>+{diff.toFixed(2)} €</div>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </>
       )}
     </div>
