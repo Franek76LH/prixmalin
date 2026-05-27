@@ -1706,35 +1706,6 @@ function CompareTab({ items, priceDB, onValidate }) {
             </div>
           </div>
 
-          {/* ── AUTRES MAGASINS (condensé) ── */}
-          {ranked.length>1 && (
-            <>
-              <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:10 }}>
-                Autres magasins
-              </div>
-              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                {ranked.slice(1).map((store,i)=>{
-                  const diff = store.total - best.total;
-                  return (
-                    <div key={store.id} style={{ background:C.white, borderRadius:12, padding:"12px 16px", border:`1px solid ${C.grayLight}`, display:"flex", alignItems:"center", gap:12, animation:`slideIn 0.25s ease ${(i+1)*0.07}s both` }}>
-                      <span style={{ fontSize:22, flexShrink:0 }}>{store.logo}</span>
-                      <div style={{ flex:1, minWidth:0 }}>
-                        <div style={{ fontFamily:F, fontWeight:800, fontSize:14, color:C.text }}>{store.name}</div>
-                        <div style={{ fontFamily:F, fontSize:11, color:C.textLight }}>
-                          {store.found}/{items.length} produit{items.length>1?"s":""}
-                          {store.missing.length>0 && <span style={{ color:C.orange }}> · {store.missing.length} manquant{store.missing.length>1?"s":""}</span>}
-                        </div>
-                      </div>
-                      <div style={{ textAlign:"right", flexShrink:0 }}>
-                        <div style={{ fontFamily:F, fontWeight:900, fontSize:16, color:C.text }}>{store.total.toFixed(2)} €</div>
-                        {diff>0.01 && <div style={{ fontFamily:F, fontSize:12, fontWeight:800, color:"#CC3300" }}>+{diff.toFixed(2)} €</div>}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
         </>
       )}
     </div>
