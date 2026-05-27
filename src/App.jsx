@@ -1654,44 +1654,25 @@ function CompareTab({ items, priceDB, onValidate }) {
             {/* Liste des articles */}
             <div style={{ background:"rgba(0,0,0,0.18)", marginBottom:12 }}>
               {analysis.map(({item,byStore})=>{
-                const p       = byStore[best.id];
-                const total   = p ? p.price*item.qty : null;
-                // Meilleur magasin alternatif pour ce produit manquant
-                const bestAlt = total===null
-                  ? Object.entries(byStore)
-                      .map(([sid,pr])=>({ store:STORES.find(s=>s.id===sid), pr }))
-                      .sort((a,b)=>a.pr.price-b.pr.price)[0]
-                  : null;
+                const p     = byStore[best.id];
+                const total = p ? p.price*item.qty : null;
                 return (
-                  <div key={item.id} style={{ borderBottom:"1px solid rgba(255,255,255,0.07)" }}>
-                    <div style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 18px" }}>
-                      <div style={{ flex:1, minWidth:0 }}>
-                        <div style={{ fontFamily:F, fontWeight:700, fontSize:13, color:"rgba(255,255,255,0.92)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                          {item.brand?`${item.brand} · `:""}{item.product}
-                        </div>
-                        <div style={{ fontFamily:F, fontSize:11, color:"rgba(255,255,255,0.45)", marginTop:1 }}>
-                          {item.format}{item.qty>1?` × ${item.qty}`:""}
-                        </div>
+                  <div key={item.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 18px", borderBottom:"1px solid rgba(255,255,255,0.07)" }}>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontFamily:F, fontWeight:700, fontSize:13, color:"rgba(255,255,255,0.92)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                        {item.brand?`${item.brand} · `:""}{item.product}
                       </div>
-                      {total!==null ? (
-                        <div style={{ textAlign:"right", flexShrink:0 }}>
-                          <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:"#FFD700" }}>{total.toFixed(2)} €</div>
-                          {item.qty>1 && <div style={{ fontFamily:F, fontSize:10, color:"rgba(255,255,255,0.4)" }}>{p.price.toFixed(2)} €/u</div>}
-                        </div>
-                      ) : (
-                        <span style={{ fontFamily:F, fontSize:12, fontWeight:800, color:"#FFD700", flexShrink:0 }}>⚠️ manquant</span>
-                      )}
+                      <div style={{ fontFamily:F, fontSize:11, color:"rgba(255,255,255,0.45)", marginTop:1 }}>
+                        {item.format}{item.qty>1?` × ${item.qty}`:""}
+                      </div>
                     </div>
-                    {bestAlt && (
-                      <div style={{ padding:"0 18px 9px 30px", display:"flex", alignItems:"center", gap:6 }}>
-                        <span style={{ fontSize:13 }}>{bestAlt.store?.logo}</span>
-                        <div style={{ fontFamily:F, fontSize:11, color:"rgba(255,255,255,0.5)", flex:1 }}>
-                          → <span style={{ fontWeight:800, color:"rgba(255,255,255,0.78)" }}>{bestAlt.store?.name}</span>
-                        </div>
-                        <div style={{ fontFamily:F, fontWeight:800, fontSize:12, color:"rgba(255,255,255,0.7)" }}>
-                          {(bestAlt.pr.price*item.qty).toFixed(2)} €
-                        </div>
+                    {total!==null ? (
+                      <div style={{ textAlign:"right", flexShrink:0 }}>
+                        <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:"#FFD700" }}>{total.toFixed(2)} €</div>
+                        {item.qty>1 && <div style={{ fontFamily:F, fontSize:10, color:"rgba(255,255,255,0.4)" }}>{p.price.toFixed(2)} €/u</div>}
                       </div>
+                    ) : (
+                      <span style={{ fontFamily:F, fontSize:12, fontWeight:800, color:"#FFD700", flexShrink:0 }}>⚠️ manquant</span>
                     )}
                   </div>
                 );
@@ -1704,6 +1685,35 @@ function CompareTab({ items, priceDB, onValidate }) {
                 ✅ Je fais mes courses chez {best.name}
               </button>
             </div>
+
+            {/* Suggestions pour produits manquants — après le bouton */}
+            {analysis.some(({byStore})=>!byStore[best.id]&&Object.keys(byStore).length>0) && (
+              <div style={{ padding:"0 12px 16px", display:"flex", flexDirection:"column", gap:6 }}>
+                {analysis
+                  .filter(({byStore})=>!byStore[best.id]&&Object.keys(byStore).length>0)
+                  .map(({item,byStore})=>{
+                    const alt = Object.entries(byStore)
+                      .map(([sid,pr])=>({ store:STORES.find(s=>s.id===sid), pr }))
+                      .sort((a,b)=>a.pr.price-b.pr.price)[0];
+                    return (
+                      <div key={item.id} style={{ background:"rgba(255,255,255,0.1)", borderRadius:8, padding:"8px 12px", display:"flex", alignItems:"center", gap:8 }}>
+                        <span style={{ fontSize:14 }}>{alt?.store?.logo}</span>
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <div style={{ fontFamily:F, fontWeight:800, fontSize:12, color:"rgba(255,255,255,0.9)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                            {item.brand?`${item.brand} · `:""}{item.product} <span style={{ fontWeight:600, color:"rgba(255,255,255,0.5)" }}>{item.format}</span>
+                          </div>
+                          <div style={{ fontFamily:F, fontSize:11, color:"rgba(255,255,255,0.5)", marginTop:1 }}>
+                            disponible chez <span style={{ fontWeight:800, color:"rgba(255,255,255,0.75)" }}>{alt?.store?.name}</span>
+                          </div>
+                        </div>
+                        <div style={{ fontFamily:F, fontWeight:900, fontSize:13, color:"rgba(255,255,255,0.8)", flexShrink:0 }}>
+                          {alt ? (alt.pr.price*item.qty).toFixed(2)+" €" : "—"}
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
           </div>
 
         </>
