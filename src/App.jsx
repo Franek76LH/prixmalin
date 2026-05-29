@@ -342,10 +342,7 @@ function ImportTicketSheet({ onClose, onImport }) {
               <button onClick={()=>parseAndPreview(jsonText)} disabled={!jsonText.trim()} style={{ width:"100%", padding:"15px", border:"none", borderRadius:12, background:jsonText.trim()?C.orange:C.grayLight, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:jsonText.trim()?C.white:C.gray, cursor:jsonText.trim()?"pointer":"default", marginBottom:10 }}>
                 Analyser →
               </button>
-              <button onClick={loadExample} style={{ width:"100%", padding:"13px", border:`2px solid ${C.blue}`, borderRadius:12, background:C.blueLight, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.blue, cursor:"pointer" }}>
-                🧪 Tester avec ticket Intermarché
-              </button>
-              <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={async (e) => {
+<input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={async (e) => {
                 const file = e.target.files[0];
                 if(!file) return;
                 setScanning(true); setError("");
