@@ -1082,7 +1082,7 @@ function ListTab({ items, setItems, setTab, favorites, saveFavorites }) {
 }
 
 // ── ECONOMIES TAB ─────────────────────────────────────────────────────────────
-function EconomiesTab({ priceDB, savings, items, setTab }) {
+function EconomiesTab({ priceDB, archives, items, setTab }) {
   const sLabel = { fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:10 };
 
   // ── Section 1 : Économies potentielles (liste de courses en cours)
@@ -1107,28 +1107,31 @@ function EconomiesTab({ priceDB, savings, items, setTab }) {
     return { totalSaving, details };
   }, [items, priceDB]);
 
-  // ── Section 2 : Cagnotte réalisées
+  // ── Section 2 : Cagnotte réalisées — archives avec ticket scanné
+  const scannedArchives = useMemo(() =>
+    archives.filter(a => a.ticket_scanned && a.realized_saving != null),
+    [archives]
+  );
+
   const cagnotte = useMemo(() => ({
-    vsAvg: savings.reduce((a,s) => a + (s.saved_vs_avg||0), 0),
-    vsMax: savings.reduce((a,s) => a + (s.saved_vs_max||0), 0),
-  }), [savings]);
+    total: scannedArchives.reduce((a, arc) => a + (arc.realized_saving || 0), 0),
+  }), [scannedArchives]);
 
   // ── Section 3 : Récapitulatif mensuel réalisées
   const monthly = useMemo(() => {
     const map = {};
-    savings.forEach(s => {
-      const m = (s.date||'').substring(0,7);
+    scannedArchives.forEach(arc => {
+      const m = (arc.date||'').substring(0,7);
       if (!m) return;
-      if (!map[m]) map[m] = { vsAvg:0, vsMax:0, count:0 };
-      map[m].vsAvg  += s.saved_vs_avg || 0;
-      map[m].vsMax  += s.saved_vs_max || 0;
-      map[m].count  += 1;
+      if (!map[m]) map[m] = { total:0, count:0 };
+      map[m].total += arc.realized_saving || 0;
+      map[m].count += 1;
     });
     return Object.entries(map)
       .sort((a,b) => b[0].localeCompare(a[0]))
       .slice(0,6)
       .map(([m,d]) => ({ month:m, label:formatMonth(m), ...d }));
-  }, [savings]);
+  }, [scannedArchives]);
 
   const thisMonthStr = `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`;
 
@@ -1197,58 +1200,49 @@ function EconomiesTab({ priceDB, savings, items, setTab }) {
         Confirmées après chaque scan de ticket de caisse
       </div>
 
-      {savings.length === 0 ? (
+      {scannedArchives.length === 0 ? (
         <div style={{ background:"#F0FFF5", borderRadius:14, padding:"20px 16px", textAlign:"center", marginBottom:24, border:`2px dashed ${C.green}` }}>
           <div style={{ fontSize:36, marginBottom:8 }}>🧾</div>
           <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight, lineHeight:1.6 }}>
-            Scanne ton prochain ticket de caisse pour voir tes économies réelles s'accumuler ici.
+            Valide une liste, fais tes courses, scanne le ticket — tes économies vs le magasin alternatif s'accumuleront ici.
           </div>
         </div>
       ) : (
         <>
           {/* Cagnotte totale */}
-          <div style={{ background:"linear-gradient(135deg,#00B341,#00C850)", borderRadius:14, padding:"18px 20px", marginBottom:16, display:"flex", alignItems:"center", gap:16 }}>
-            <div style={{ flex:1 }}>
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:800, color:"rgba(255,255,255,0.7)", textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:4 }}>Cagnotte · vs prix moyen</div>
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:32, color:C.white, lineHeight:1 }}>
-                {cagnotte.vsAvg >= 0 ? "+" : ""}{cagnotte.vsAvg.toFixed(2)} €
-              </div>
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:4 }}>
-                {savings.length} ticket{savings.length>1?"s":""} analysé{savings.length>1?"s":""}
-              </div>
+          <div style={{ background:"linear-gradient(135deg,#00B341,#00C850)", borderRadius:14, padding:"18px 20px", marginBottom:16 }}>
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:800, color:"rgba(255,255,255,0.7)", textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:4 }}>Cagnotte · vs 2e magasin</div>
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:36, color:C.white, lineHeight:1 }}>
+              {cagnotte.total >= 0 ? "+" : ""}{cagnotte.total.toFixed(2)} €
             </div>
-            <div style={{ width:1, background:"rgba(255,255,255,0.25)", alignSelf:"stretch" }}/>
-            <div style={{ textAlign:"right" }}>
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:800, color:"rgba(255,255,255,0.7)", textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:4 }}>vs + cher</div>
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:22, color:C.white, lineHeight:1 }}>
-                {cagnotte.vsMax >= 0 ? "+" : ""}{cagnotte.vsMax.toFixed(2)} €
-              </div>
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:6 }}>
+              {scannedArchives.length} course{scannedArchives.length>1?"s":""} analysée{scannedArchives.length>1?"s":""}
             </div>
           </div>
 
-          {/* Derniers tickets */}
+          {/* Dernières courses scannées */}
           <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:24 }}>
-            {[...savings].reverse().slice(0,8).map((s,i) => {
-              const store = STORES.find(st => st.id === s.store_id);
-              const pos = (s.saved_vs_avg || 0) >= 0;
+            {[...scannedArchives].reverse().slice(0,8).map((arc,i) => {
+              const store = arc.store;
+              const pos = (arc.realized_saving || 0) >= 0;
               return (
-                <div key={s.id||i} style={{ background:C.white, borderRadius:12, padding:"12px 14px", border:`1px solid ${C.grayLight}`, display:"flex", alignItems:"center", gap:10 }}>
+                <div key={arc.id||i} style={{ background:C.white, borderRadius:12, padding:"12px 14px", border:`1px solid ${C.grayLight}`, display:"flex", alignItems:"center", gap:10 }}>
                   <span style={{ fontSize:20, flexShrink:0 }}>{store?.logo || "🏪"}</span>
                   <div style={{ flex:1, minWidth:0 }}>
                     <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                      {s.store_name || store?.name || "Ticket"}
+                      {store?.name || "Courses"}
                     </div>
                     <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight }}>
-                      {new Date(s.date).toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}
+                      {new Date(arc.date).toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}
                       {" · "}
-                      {s.items_compared}/{s.items_total} produit{s.items_total>1?"s":""} comparé{s.items_compared>1?"s":""}
+                      {arc.items?.length || 0} produit{(arc.items?.length||0)>1?"s":""}
                     </div>
                   </div>
                   <div style={{ textAlign:"right", flexShrink:0 }}>
                     <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:pos?C.green:"#CC3300" }}>
-                      {pos?"+":""}{(s.saved_vs_avg||0).toFixed(2)} €
+                      {pos?"+":""}{(arc.realized_saving||0).toFixed(2)} €
                     </div>
-                    <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, color:C.textLight }}>vs moy.</div>
+                    <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, color:C.textLight }}>vs 2e magasin</div>
                   </div>
                 </div>
               );
@@ -1267,17 +1261,14 @@ function EconomiesTab({ priceDB, savings, items, setTab }) {
                 <div style={{ flex:1 }}>
                   <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{m.label}</div>
                   <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight, marginTop:2 }}>
-                    {m.count} ticket{m.count>1?"s":""}
+                    {m.count} course{m.count>1?"s":""}
                   </div>
                 </div>
                 <div style={{ textAlign:"right" }}>
-                  <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:m.vsAvg>=0?C.green:"#CC3300" }}>
-                    {m.vsAvg>=0?"+":""}{m.vsAvg.toFixed(2)} €
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:m.total>=0?C.green:"#CC3300" }}>
+                    {m.total>=0?"+":""}{m.total.toFixed(2)} €
                   </div>
-                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, color:C.textLight }}>vs prix moyen</div>
-                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, color:C.textLight }}>
-                    {m.vsMax>=0?"+":""}{m.vsMax.toFixed(2)} € vs + cher
-                  </div>
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, color:C.textLight }}>vs 2e magasin</div>
                 </div>
               </div>
             ))}
@@ -1289,7 +1280,7 @@ function EconomiesTab({ priceDB, savings, items, setTab }) {
 }
 
 // ── PRICES TAB ────────────────────────────────────────────────────────────────
-function PricesTab({ priceDB, setPriceDB, saveSavings }) {
+function PricesTab({ priceDB, setPriceDB, archives, updateArchive }) {
   const [showImport,    setShowImport]    = useState(false);
   const [showEntry,     setShowEntry]     = useState(false);
   const [editPrice,     setEditPrice]     = useState(null);
@@ -1309,38 +1300,41 @@ function PricesTab({ priceDB, setPriceDB, saveSavings }) {
     showToast("✓ Prix enregistré");
   };
   const importPrices = entries => {
-    // Calcul des économies réalisées AVANT d'ajouter les nouveaux prix
-    let savedVsAvg = 0, savedVsMax = 0, itemsCompared = 0;
-    entries.forEach(e => {
-      const eKey = `${normName(e.brand||'')}_${normName(e.product)}_${normFormat(e.format)}`;
-      const others = priceDB.filter(p => {
-        const pKey = `${normName(p.brand||'')}_${normName(p.product)}_${normFormat(p.format)}`;
-        return pKey === eKey && p.storeId !== e.storeId;
+    // Trouve la dernière archive sans ticket scanné
+    const openArchive = [...archives].reverse().find(a => !a.ticket_scanned);
+
+    let realizedSaving = null;
+    if (openArchive) {
+      realizedSaving = 0;
+      entries.forEach(e => {
+        // Est-ce que cet article était sur la liste archivée ?
+        const archiveItem = openArchive.items.find(item =>
+          normName(item.product) === normName(e.product) &&
+          normFormat(item.format || '') === normFormat(e.format || '')
+        );
+        if (!archiveItem) return;
+        const qty = archiveItem.qty || 1;
+        const eKey = `${normName(e.brand||'')}_${normName(e.product)}_${normFormat(e.format||'')}`;
+        const alts = priceDB.filter(p => {
+          const pKey = `${normName(p.brand||'')}_${normName(p.product)}_${normFormat(p.format||'')}`;
+          return pKey === eKey && p.storeId !== e.storeId;
+        });
+        if (alts.length > 0) {
+          const secondBest = Math.min(...alts.map(p => p.price));
+          realizedSaving += (secondBest - e.price) * qty;
+        }
       });
-      if (others.length > 0) {
-        const prices = others.map(p => p.price);
-        const avg = prices.reduce((a,b)=>a+b,0) / prices.length;
-        const max = Math.max(...prices);
-        savedVsAvg += avg - e.price;
-        savedVsMax += max - e.price;
-        itemsCompared++;
-      }
-    });
-    if (itemsCompared > 0 && saveSavings) {
-      saveSavings({
-        date:           entries[0]?.date || new Date().toISOString(),
-        store_id:       entries[0]?.storeId || 'autre',
-        store_name:     entries[0]?.store_name || '',
-        saved_vs_avg:   Math.round(savedVsAvg * 100) / 100,
-        saved_vs_max:   Math.round(savedVsMax * 100) / 100,
-        items_compared: itemsCompared,
-        items_total:    entries.length,
-      });
+      realizedSaving = Math.round(realizedSaving * 100) / 100;
+      updateArchive(openArchive.id, { ticket_scanned: true, realized_saving: realizedSaving });
     }
-    let updated=[...priceDB];
-    entries.forEach(e=>{ updated=[...updated.filter(p=>priceKey(p)!==priceKey(e)),e]; });
+
+    let updated = [...priceDB];
+    entries.forEach(e => { updated = [...updated.filter(p => priceKey(p) !== priceKey(e)), e]; });
     setPriceDB(updated);
-    showToast(`✓ ${entries.length} prix importé${entries.length>1?"s":""}`);
+    const savingMsg = realizedSaving !== null
+      ? ` · Économies : ${realizedSaving >= 0 ? '+' : ''}${realizedSaving.toFixed(2)} €`
+      : '';
+    showToast(`✓ ${entries.length} prix importé${entries.length > 1 ? "s" : ""}${savingMsg}`);
   };
   const deletePrice = async (entry) => {
     const previous = priceDB;
@@ -1681,9 +1675,10 @@ function CompareTab({ items, priceDB, onValidate }) {
 
             {/* Bouton valider */}
             <div style={{ padding:"0 12px 16px" }}>
-              <button onClick={()=>onValidate(best)} style={{ width:"100%", padding:"15px", border:"none", borderRadius:12, background:C.orange, fontFamily:F, fontWeight:900, fontSize:16, color:"#111", cursor:"pointer", boxShadow:"0 4px 16px rgba(0,0,0,0.25)" }}>
+              <button onClick={()=>onValidate(best, maxSavings)} style={{ width:"100%", padding:"15px", border:"none", borderRadius:12, background:C.orange, fontFamily:F, fontWeight:900, fontSize:16, color:"#111", cursor:"pointer", boxShadow:"0 4px 16px rgba(0,0,0,0.25)" }}>
                 ✅ Je fais mes courses chez {best.name}
               </button>
+
             </div>
 
             {/* Suggestions pour produits manquants — après le bouton */}
@@ -1788,7 +1783,6 @@ export default function App() {
   const [archives, setArchives]   = useState([]);
   const [showSuccess, setShowSuccess] = useState(null);
   const [favorites, setFavorites] = useState([]);
-  const [savings,   setSavings]   = useState([]);
   const [loaded, setLoaded]       = useState(false);
   const [produitsRef, setProduitsRef] = useState([]);
   const catalog = useMemo(() => {
@@ -1816,16 +1810,14 @@ export default function App() {
   useEffect(()=>{
     (async ()=>{
       try {
-        const [list, prices, arcs, favs, refs, savs] = await Promise.all([
+        const [list, prices, arcs, favs, refs] = await Promise.all([
           supabase.from('shopping_list').select('id, items').order('id').limit(1),
           supabase.from('price_db').select('*'),
           supabase.from('archives').select('*').order('date'),
           supabase.from('favorites').select('id, items').order('id').limit(1),
           supabase.from('produits_ref').select('produit_generique, sous_categorie, formats_courants, marques_nationales, marques_distributeurs').order('id'),
-          supabase.from('savings').select('*').order('date'),
         ]);
         if (refs.data)  setProduitsRef(refs.data);
-        if (savs.data)  setSavings(savs.data);
         if (list.data?.[0]) { setItems(list.data[0].items || []); listRowId.current = list.data[0].id; }
         if (prices.data) {
           setPriceDB(prices.data.map(p => ({ ...p, storeId: p.storeId || 'autre', category: p.category || guessCategory(p.product) })));
@@ -1925,25 +1917,27 @@ export default function App() {
     }
   };
 
-  const saveSavings = async (entry) => {
-    const { data, error } = await supabase.from('savings')
-      .insert({
-        date:           entry.date,
-        store_id:       entry.store_id,
-        store_name:     entry.store_name,
-        saved_vs_avg:   entry.saved_vs_avg,
-        saved_vs_max:   entry.saved_vs_max,
-        items_compared: entry.items_compared,
-        items_total:    entry.items_total,
-      })
-      .select('id').single();
-    if (!error && data) setSavings(prev => [...prev, { ...entry, id: data.id }]);
-    else if (error) console.error("Erreur sauvegarde économies :", error);
+  const updateArchive = async (id, updates) => {
+    const { error } = await supabase.from('archives').update(updates).eq('id', id);
+    if (!error) {
+      setArchives(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
+    } else {
+      console.error("Erreur mise à jour archive :", error);
+    }
   };
 
-  const handleValidate = store => {
-    const arc={id:Date.now(),date:new Date().toISOString(),store,total:store.total,items:[...items]};
-    saveArchives([...archives,arc]);
+  const handleValidate = (store, potentialSaving = 0) => {
+    const arc = {
+      id: Date.now(),
+      date: new Date().toISOString(),
+      store,
+      total: store.total,
+      items: [...items],
+      potential_saving: Math.round((potentialSaving || 0) * 100) / 100,
+      realized_saving: null,
+      ticket_scanned: false,
+    };
+    saveArchives([...archives, arc]);
     saveItems([]);
     setShowSuccess(store);
     setTimeout(()=>{setShowSuccess(null);setTab("archive");},2800);
@@ -1975,9 +1969,9 @@ export default function App() {
           {loaded && tab==="list"      && <ListTab      items={items} setItems={saveItems} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} setItems={saveItems} setTab={setTab} catalog={catalog} priceDB={priceDB}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate}/>}
-          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} saveSavings={saveSavings}/>}
+          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive}/>}
           {loaded && tab==="archive"   && <ArchiveTab   archives={archives} onDelete={deleteArchive}/>}
-          {loaded && tab==="economies" && <EconomiesTab priceDB={priceDB} savings={savings} items={items} setTab={setTab}/>}
+          {loaded && tab==="economies" && <EconomiesTab priceDB={priceDB} archives={archives} items={items} setTab={setTab}/>}
         </div>
         <TabBar tab={tab} setTab={setTab}/>
         {appToast && <Toast msg={appToast.msg} ok={appToast.ok}/>}
