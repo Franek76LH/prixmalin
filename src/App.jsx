@@ -1211,7 +1211,7 @@ function EconomiesTab({ priceDB, archives, items, setTab }) {
         <>
           {/* Cagnotte totale */}
           <div style={{ background:"linear-gradient(135deg,#00B341,#00C850)", borderRadius:14, padding:"18px 20px", marginBottom:16 }}>
-            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:800, color:"rgba(255,255,255,0.7)", textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:4 }}>Cagnotte · vs 2e magasin</div>
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:800, color:"rgba(255,255,255,0.7)", textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:4 }}>Cagnotte · vs prix moyen marché</div>
             <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:36, color:C.white, lineHeight:1 }}>
               {cagnotte.total >= 0 ? "+" : ""}{cagnotte.total.toFixed(2)} €
             </div>
@@ -1242,7 +1242,7 @@ function EconomiesTab({ priceDB, archives, items, setTab }) {
                     <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:pos?C.green:"#CC3300" }}>
                       {pos?"+":""}{(arc.realized_saving||0).toFixed(2)} €
                     </div>
-                    <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, color:C.textLight }}>vs 2e magasin</div>
+                    <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, color:C.textLight }}>vs prix moyen</div>
                   </div>
                 </div>
               );
@@ -1268,7 +1268,7 @@ function EconomiesTab({ priceDB, archives, items, setTab }) {
                   <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:m.total>=0?C.green:"#CC3300" }}>
                     {m.total>=0?"+":""}{m.total.toFixed(2)} €
                   </div>
-                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, color:C.textLight }}>vs 2e magasin</div>
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, color:C.textLight }}>vs prix moyen</div>
                 </div>
               </div>
             ))}
@@ -1320,8 +1320,8 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive }) {
           return pKey === eKey && p.storeId !== e.storeId;
         });
         if (alts.length > 0) {
-          const secondBest = Math.min(...alts.map(p => p.price));
-          realizedSaving += (secondBest - e.price) * qty;
+          const avgMarket = alts.reduce((s, p) => s + p.price, 0) / alts.length;
+          realizedSaving += (avgMarket - e.price) * qty;
         }
       });
       realizedSaving = Math.round(realizedSaving * 100) / 100;
