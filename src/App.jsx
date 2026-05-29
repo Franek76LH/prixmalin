@@ -77,24 +77,109 @@ function itemMatchesPrice(item, price) {
   return sameProduct && sameFormat && brandOk;
 }
 
+// ── AUTH SCREEN ───────────────────────────────────────────────────────────────
+function AuthScreen() {
+  const F = "'Nunito',sans-serif";
+  const [mode,     setMode]     = useState('login');
+  const [email,    setEmail]    = useState('');
+  const [password, setPassword] = useState('');
+  const [loading,  setLoading]  = useState(false);
+  const [error,    setError]    = useState('');
+  const [success,  setSuccess]  = useState('');
+
+  const handle = async () => {
+    if (!email.trim() || !password.trim()) { setError("Remplis tous les champs"); return; }
+    setLoading(true); setError(''); setSuccess('');
+    try {
+      const { error } = mode === 'login'
+        ? await supabase.auth.signInWithPassword({ email: email.trim(), password })
+        : await supabase.auth.signUp({ email: email.trim(), password });
+      if (error) throw error;
+      if (mode === 'register') { setSuccess('Compte créé ! Tu peux te connecter.'); setMode('login'); }
+    } catch(e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ minHeight:"100vh", background:C.bg, maxWidth:430, margin:"0 auto", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"32px 24px" }}>
+      <div style={{ fontSize:60, marginBottom:6 }}>🛒</div>
+      <div style={{ fontFamily:F, fontWeight:900, fontSize:28, color:C.red, marginBottom:4 }}>PrixMalin</div>
+      <div style={{ fontFamily:F, fontSize:13, color:C.textLight, marginBottom:36 }}>Comparez. Économisez.</div>
+
+      <div style={{ background:C.white, borderRadius:20, padding:"28px 24px", width:"100%", boxShadow:"0 4px 24px rgba(0,0,0,0.08)" }}>
+        <div style={{ fontFamily:F, fontWeight:900, fontSize:18, color:C.text, marginBottom:20 }}>
+          {mode === 'login' ? 'Connexion' : 'Créer un compte'}
+        </div>
+
+        <div style={{ fontFamily:F, fontSize:12, fontWeight:700, color:C.gray, marginBottom:6 }}>Email</div>
+        <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="ton@email.com"
+          style={{ width:"100%", padding:"12px 14px", borderRadius:10, border:`2px solid ${C.grayLight}`, fontFamily:F, fontSize:14, color:C.text, marginBottom:14, boxSizing:"border-box" }}
+        />
+
+        <div style={{ fontFamily:F, fontSize:12, fontWeight:700, color:C.gray, marginBottom:6 }}>Mot de passe</div>
+        <input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••"
+          onKeyDown={e=>e.key==='Enter'&&handle()}
+          style={{ width:"100%", padding:"12px 14px", borderRadius:10, border:`2px solid ${C.grayLight}`, fontFamily:F, fontSize:14, color:C.text, marginBottom:16, boxSizing:"border-box" }}
+        />
+
+        {error   && <div style={{ background:"#FEE", borderRadius:8, padding:"10px 12px", marginBottom:12, fontFamily:F, fontSize:13, color:C.red,   fontWeight:700 }}>⚠️ {error}</div>}
+        {success && <div style={{ background:"#F0FFF5", borderRadius:8, padding:"10px 12px", marginBottom:12, fontFamily:F, fontSize:13, color:C.green, fontWeight:700 }}>✓ {success}</div>}
+
+        <button onClick={handle} disabled={loading}
+          style={{ width:"100%", padding:"14px", border:"none", borderRadius:12, background:loading?C.grayLight:C.red, fontFamily:F, fontWeight:900, fontSize:15, color:loading?C.gray:C.white, cursor:loading?"default":"pointer", marginBottom:12 }}>
+          {loading ? "…" : mode === 'login' ? 'Se connecter' : 'Créer mon compte'}
+        </button>
+
+        <button onClick={()=>{ setMode(m=>m==='login'?'register':'login'); setError(''); setSuccess(''); }}
+          style={{ width:"100%", padding:"10px", border:"none", background:"none", fontFamily:F, fontSize:13, color:C.blue, fontWeight:700, cursor:"pointer" }}>
+          {mode === 'login' ? "Pas encore de compte → S'inscrire" : '← Déjà un compte ? Se connecter'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── HEADER ────────────────────────────────────────────────────────────────────
-function Header({ tab, itemCount }) {
+function Header({ tab, itemCount, userEmail, onLogout }) {
+  const F = "'Nunito',sans-serif";
   const titles = { list:"Ma liste", catalog:"Catalogue", compare:"Comparer", prices:"Mes prix", archive:"Historique", economies:"Mes économies" };
-  // petit indicateur visuel sauvegarde auto
+  const [showLogout, setShowLogout] = useState(false);
   return (
     <div style={{ background:C.blue, padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", boxShadow:"0 4px 20px rgba(204,0,0,0.4)" }}>
       <div style={{ display:"flex", alignItems:"center", gap:10 }}>
         <div style={{ width:36, height:36, borderRadius:10, background:"#FFFFFF", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, boxShadow:"0 2px 8px rgba(0,0,0,0.15)" }}>🛒</div>
         <div>
-          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:18, color:C.white, lineHeight:1 }}>PrixMalin</div>
-          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:1 }}>{titles[tab]}</div>
+          <div style={{ fontFamily:F, fontWeight:900, fontSize:18, color:C.white, lineHeight:1 }}>PrixMalin</div>
+          <div style={{ fontFamily:F, fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:1 }}>{titles[tab]}</div>
         </div>
       </div>
-      {tab==="list" && itemCount>0 && (
-        <div style={{ background:C.orange, borderRadius:99, padding:"6px 14px", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:C.white }}>
-          🧾 {itemCount} article{itemCount>1?"s":""}
-        </div>
-      )}
+      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+        {tab==="list" && itemCount>0 && (
+          <div style={{ background:C.orange, borderRadius:99, padding:"6px 14px", fontFamily:F, fontWeight:800, fontSize:13, color:C.white }}>
+            🧾 {itemCount} article{itemCount>1?"s":""}
+          </div>
+        )}
+        {userEmail && (
+          <div style={{ position:"relative" }}>
+            <button onClick={()=>setShowLogout(s=>!s)}
+              style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:99, padding:"6px 10px", fontFamily:F, fontSize:12, fontWeight:700, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", gap:5 }}>
+              👤 {userEmail.split('@')[0]}
+            </button>
+            {showLogout && (
+              <div style={{ position:"absolute", right:0, top:38, background:C.white, borderRadius:12, boxShadow:"0 4px 20px rgba(0,0,0,0.15)", padding:"8px", zIndex:200, minWidth:160 }}>
+                <div style={{ fontFamily:F, fontSize:12, color:C.textLight, padding:"6px 10px" }}>{userEmail}</div>
+                <button onClick={()=>{ setShowLogout(false); onLogout(); }}
+                  style={{ width:"100%", padding:"10px 12px", border:"none", background:"#FEE", borderRadius:8, fontFamily:F, fontWeight:800, fontSize:13, color:C.red, cursor:"pointer", textAlign:"left" }}>
+                  Se déconnecter
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1774,6 +1859,8 @@ function ArchiveTab({ archives, onDelete }) {
 
 // ── ROOT ──────────────────────────────────────────────────────────────────────
 export default function App() {
+  const [session,   setSession]   = useState(null);
+  const [authReady, setAuthReady] = useState(false);
   const [tab, setTab]           = useState("list");
   const [items, setItems]       = useState([]);
   const [priceDB, setPriceDB]     = useState([]);
@@ -1804,7 +1891,26 @@ export default function App() {
   const [appToast, setAppToast] = useState(null);
   const showAppToast = (msg, ok=true) => { setAppToast({msg,ok}); setTimeout(()=>setAppToast(null),3000); };
 
+  // Auth — écoute la session Supabase
   useEffect(()=>{
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setAuthReady(true);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (!session) {
+        setItems([]); setPriceDB([]); setArchives([]); setFavorites([]);
+        setLoaded(false); listRowId.current = null; favRowId.current = null;
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Chargement données — uniquement si session active
+  useEffect(()=>{
+    if (!session) return;
+    setLoaded(false);
     (async ()=>{
       try {
         const [list, prices, arcs, favs, refs] = await Promise.all([
@@ -1828,7 +1934,7 @@ export default function App() {
       } catch(e){ console.log("Supabase load:", e); }
       setLoaded(true);
     })();
-  },[]);
+  },[session]);
 
   const saveItems = async (v) => {
     setItems(v);
@@ -1837,7 +1943,7 @@ export default function App() {
         const { error } = await supabase.from('shopping_list').update({items:v}).eq('id', listRowId.current);
         if (error) throw error;
       } else {
-        const { data, error } = await supabase.from('shopping_list').insert({items:v}).select('id').single();
+        const { data, error } = await supabase.from('shopping_list').insert({items:v, user_id: session?.user?.id}).select('id').single();
         if (error) throw error;
         if (data) listRowId.current = data.id;
       }
@@ -1858,6 +1964,7 @@ export default function App() {
       price: parseFloat(p.price),
       date: p.date || new Date().toISOString(),
       category: p.category || guessCategory(p.product),
+      user_id: session?.user?.id,
     }));
 
     const { error } = await supabase
@@ -1877,7 +1984,7 @@ export default function App() {
     if (v.length > 0) {
       const last = v[v.length-1];
       const {id, ...rest} = last;
-      const { error } = await supabase.from('archives').insert(rest);
+      const { error } = await supabase.from('archives').insert({...rest, user_id: session?.user?.id});
       if (error) {
         console.error("Erreur sauvegarde historique :", error);
         showAppToast("⚠️ Historique non sauvegardé, vérifie ta connexion", false);
@@ -1904,7 +2011,7 @@ export default function App() {
         const { error } = await supabase.from('favorites').update({items:v}).eq('id', favRowId.current);
         if (error) throw error;
       } else {
-        const { data, error } = await supabase.from('favorites').insert({items:v}).select('id').single();
+        const { data, error } = await supabase.from('favorites').insert({items:v, user_id: session?.user?.id}).select('id').single();
         if (error) throw error;
         if (data) favRowId.current = data.id;
       }
@@ -1940,22 +2047,38 @@ export default function App() {
     setTimeout(()=>{setShowSuccess(null);setTab("archive");},2800);
   };
 
+  const handleLogout = async () => { await supabase.auth.signOut(); };
+
+  const globalStyle = (
+    <style>{`
+      @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800;900&display=swap');
+      *{box-sizing:border-box;margin:0;padding:0;}
+      body{background:#F8F8F8;} ::selection{background:#CC0000;color:white;}
+      @keyframes slideIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+      @keyframes fadeIn {from{opacity:0}to{opacity:1}}
+      @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+      @keyframes spin   {to{transform:rotate(360deg)}}
+      @keyframes popIn  {0%{opacity:0;transform:scale(0.85)}60%{transform:scale(1.04)}100%{opacity:1;transform:scale(1)}}
+      input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;}
+      textarea:focus,input:focus{outline:none;}
+    `}</style>
+  );
+
+  if (!authReady) return (
+    <>{globalStyle}
+      <div style={{ minHeight:"100vh", background:C.bg, display:"flex", alignItems:"center", justifyContent:"center" }}>
+        <div style={{ width:40, height:40, border:"4px solid #EFEFEF", borderTopColor:"#CC0000", borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
+      </div>
+    </>
+  );
+
+  if (!session) return <>{globalStyle}<AuthScreen/></>;
+
   return (
     <>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800;900&display=swap');
-        *{box-sizing:border-box;margin:0;padding:0;}
-        body{background:#F8F8F8;} ::selection{background:#CC0000;color:white;}
-        @keyframes slideIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
-        @keyframes fadeIn {from{opacity:0}to{opacity:1}}
-        @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
-        @keyframes spin   {to{transform:rotate(360deg)}}
-        @keyframes popIn  {0%{opacity:0;transform:scale(0.85)}60%{transform:scale(1.04)}100%{opacity:1;transform:scale(1)}}
-        input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;}
-        textarea:focus,input:focus{outline:none;}
-      `}</style>
+      {globalStyle}
       <div style={{ minHeight:"100vh", background:C.bg, maxWidth:430, margin:"0 auto" }}>
-        <Header tab={tab} itemCount={items.length}/>
+        <Header tab={tab} itemCount={items.length} userEmail={session.user.email} onLogout={handleLogout}/>
         <div style={{ paddingTop:4 }}>
           {!loaded && (
             <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", height:200, gap:16 }}>
