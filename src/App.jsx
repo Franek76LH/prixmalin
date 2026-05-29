@@ -83,25 +83,46 @@ function AuthScreen() {
   const [mode,     setMode]     = useState('login');
   const [email,    setEmail]    = useState('');
   const [password, setPassword] = useState('');
+  const [confirm,  setConfirm]  = useState('');
+  const [showPwd,  setShowPwd]  = useState(false);
+  const [showConf, setShowConf] = useState(false);
   const [loading,  setLoading]  = useState(false);
   const [error,    setError]    = useState('');
   const [success,  setSuccess]  = useState('');
 
+  const switchMode = (m) => { setMode(m); setError(''); setSuccess(''); setConfirm(''); setShowPwd(false); setShowConf(false); };
+
   const handle = async () => {
     if (!email.trim() || !password.trim()) { setError("Remplis tous les champs"); return; }
+    if (mode === 'register' && password !== confirm) { setError("Les mots de passe ne correspondent pas"); return; }
     setLoading(true); setError(''); setSuccess('');
     try {
       const { error } = mode === 'login'
         ? await supabase.auth.signInWithPassword({ email: email.trim(), password })
         : await supabase.auth.signUp({ email: email.trim(), password });
       if (error) throw error;
-      if (mode === 'register') { setSuccess('Compte créé ! Tu peux te connecter.'); setMode('login'); }
+      if (mode === 'register') { setSuccess('Compte créé ! Confirme ton email puis connecte-toi.'); switchMode('login'); }
     } catch(e) {
       setError(e.message);
     } finally {
       setLoading(false);
     }
   };
+
+  const pwdInput = (value, onChange, show, onToggle, placeholder, onEnter) => (
+    <div style={{ position:"relative", marginBottom:14 }}>
+      <input
+        type={show ? "text" : "password"}
+        value={value} onChange={onChange} placeholder={placeholder}
+        onKeyDown={onEnter ? e=>e.key==='Enter'&&handle() : undefined}
+        style={{ width:"100%", padding:"12px 44px 12px 14px", borderRadius:10, border:`2px solid ${C.grayLight}`, fontFamily:F, fontSize:14, color:C.text, boxSizing:"border-box" }}
+      />
+      <button onClick={onToggle} tabIndex={-1}
+        style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", cursor:"pointer", fontSize:16, color:C.gray, padding:0, lineHeight:1 }}>
+        {show ? "🙈" : "👁️"}
+      </button>
+    </div>
+  );
 
   return (
     <div style={{ minHeight:"100vh", background:C.bg, maxWidth:430, margin:"0 auto", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"32px 24px" }}>
@@ -120,10 +141,12 @@ function AuthScreen() {
         />
 
         <div style={{ fontFamily:F, fontSize:12, fontWeight:700, color:C.gray, marginBottom:6 }}>Mot de passe</div>
-        <input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••"
-          onKeyDown={e=>e.key==='Enter'&&handle()}
-          style={{ width:"100%", padding:"12px 14px", borderRadius:10, border:`2px solid ${C.grayLight}`, fontFamily:F, fontSize:14, color:C.text, marginBottom:16, boxSizing:"border-box" }}
-        />
+        {pwdInput(password, e=>setPassword(e.target.value), showPwd, ()=>setShowPwd(s=>!s), "••••••••", mode==='login')}
+
+        {mode === 'register' && (<>
+          <div style={{ fontFamily:F, fontSize:12, fontWeight:700, color:C.gray, marginBottom:6 }}>Confirmer le mot de passe</div>
+          {pwdInput(confirm, e=>setConfirm(e.target.value), showConf, ()=>setShowConf(s=>!s), "••••••••", true)}
+        </>)}
 
         {error   && <div style={{ background:"#FEE", borderRadius:8, padding:"10px 12px", marginBottom:12, fontFamily:F, fontSize:13, color:C.red,   fontWeight:700 }}>⚠️ {error}</div>}
         {success && <div style={{ background:"#F0FFF5", borderRadius:8, padding:"10px 12px", marginBottom:12, fontFamily:F, fontSize:13, color:C.green, fontWeight:700 }}>✓ {success}</div>}
@@ -133,7 +156,7 @@ function AuthScreen() {
           {loading ? "…" : mode === 'login' ? 'Se connecter' : 'Créer mon compte'}
         </button>
 
-        <button onClick={()=>{ setMode(m=>m==='login'?'register':'login'); setError(''); setSuccess(''); }}
+        <button onClick={()=>switchMode(mode==='login'?'register':'login')}
           style={{ width:"100%", padding:"10px", border:"none", background:"none", fontFamily:F, fontSize:13, color:C.blue, fontWeight:700, cursor:"pointer" }}>
           {mode === 'login' ? "Pas encore de compte → S'inscrire" : '← Déjà un compte ? Se connecter'}
         </button>
