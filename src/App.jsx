@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { scanTicketWithClaude } from "./scanTicket";
+import { scanPdfWithClaude } from "./scanPdf";
 import { STORES, CATEGORY_META, PRODUCT_SUGGESTIONS, STALE_DAYS } from "./constants";
 import { supabase } from "./lib/supabase";
 
@@ -534,10 +535,12 @@ function ImportTicketSheet({ onClose, onImport }) {
   const [result,   setResult]   = useState(null);
   const [selectedStore, setSelectedStore] = useState("");
   const [editableProducts, setEditableProducts] = useState([]);
-  const [scanning, setScanning] = useState(false);
+  const [scanning,    setScanning]    = useState(false);
+  const [pdfScanning, setPdfScanning] = useState(false);
   const [storeNameEdit, setStoreNameEdit] = useState("");
   const [storeLocation, setStoreLocation] = useState("");
   const fileInputRef = useRef(null);
+  const pdfInputRef  = useRef(null);
   const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
 
   const EXAMPLE = `{
@@ -605,9 +608,9 @@ function ImportTicketSheet({ onClose, onImport }) {
               <div style={{ background:C.blueLight, borderRadius:14, padding:"16px", marginBottom:16 }}>
                 <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.blue, marginBottom:10 }}>Comment ça marche :</div>
                 {[
-                  {n:"1",t:"📷 Appuie sur Scanner un ticket"},
-                  {n:"2",t:"Prends une photo de ton ticket de caisse"},
-                  {n:"3",t:"Les produits s'importent automatiquement !"},
+                  {n:"1",t:"📷 Scanne un ticket photo ou 📄 importe un PDF"},
+                  {n:"2",t:"L'IA lit le ticket et extrait produits, prix et magasin"},
+                  {n:"3",t:"Vérifie et importe dans Mes prix !"},
                 ].map(s=>(
                   <div key={s.n} style={{ display:"flex", gap:10, alignItems:"flex-start", marginBottom:8 }}>
                     <div style={{ width:24, height:24, borderRadius:99, background:C.orange, color:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>{s.n}</div>
@@ -639,8 +642,30 @@ function ImportTicketSheet({ onClose, onImport }) {
                 } catch(e) { setError("Erreur scan : " + e.message); }
                 setScanning(false);
               }} style={{ display:"none" }} />
-              <button onClick={()=>fileInputRef.current?.click()} disabled={scanning} style={{ width:"100%", padding:"15px", marginTop:10, border:"none", borderRadius:12, background:scanning?"#999":"#00B341", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:"white", cursor:scanning?"default":"pointer" }}>
+              <button onClick={()=>fileInputRef.current?.click()} disabled={scanning||pdfScanning} style={{ width:"100%", padding:"15px", marginTop:10, border:"none", borderRadius:12, background:scanning?"#999":"#00B341", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:"white", cursor:scanning?"default":"pointer" }}>
                 {scanning ? "⏳ Analyse en cours..." : "📷 Scanner un ticket"}
+              </button>
+
+              {/* PDF import */}
+              <input ref={pdfInputRef} type="file" accept="application/pdf" onChange={async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                setPdfScanning(true); setError("");
+                try {
+                  const parsed = await scanPdfWithClaude(file, apiKey);
+                  setResult(parsed);
+                  setSelectedStore(storeIdFromName(parsed.store));
+                  setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true, share:true})));
+                  setStoreNameEdit(parsed.store || "");
+                  setStoreLocation(parsed.address || "");
+                  setStatus("store");
+                } catch(e) { setError("Erreur PDF : " + e.message); }
+                setPdfScanning(false);
+                e.target.value = "";
+              }} style={{ display:"none" }} />
+              <button onClick={()=>pdfInputRef.current?.click()} disabled={scanning||pdfScanning}
+                style={{ width:"100%", padding:"15px", marginTop:10, border:`2px solid ${pdfScanning?"#999":"#CC0000"}`, borderRadius:12, background:"transparent", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:pdfScanning?"#999":"#CC0000", cursor:pdfScanning?"default":"pointer" }}>
+                {pdfScanning ? "⏳ Lecture PDF en cours..." : "📄 Importer un ticket PDF"}
               </button>
             </>
           )}
