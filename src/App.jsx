@@ -535,12 +535,14 @@ function ImportTicketSheet({ onClose, onImport }) {
   const [result,   setResult]   = useState(null);
   const [selectedStore, setSelectedStore] = useState("");
   const [editableProducts, setEditableProducts] = useState([]);
-  const [scanning,    setScanning]    = useState(false);
-  const [pdfScanning, setPdfScanning] = useState(false);
+  const [scanning,      setScanning]      = useState(false);
+  const [galleryScanning, setGalleryScanning] = useState(false);
+  const [pdfScanning,   setPdfScanning]   = useState(false);
   const [storeNameEdit, setStoreNameEdit] = useState("");
   const [storeLocation, setStoreLocation] = useState("");
-  const fileInputRef = useRef(null);
-  const pdfInputRef  = useRef(null);
+  const fileInputRef    = useRef(null);
+  const galleryInputRef = useRef(null);
+  const pdfInputRef     = useRef(null);
   const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
 
   const EXAMPLE = `{
@@ -642,8 +644,30 @@ function ImportTicketSheet({ onClose, onImport }) {
                 } catch(e) { setError("Erreur scan : " + e.message); }
                 setScanning(false);
               }} style={{ display:"none" }} />
-              <button onClick={()=>fileInputRef.current?.click()} disabled={scanning||pdfScanning} style={{ width:"100%", padding:"15px", marginTop:10, border:"none", borderRadius:12, background:scanning?"#999":"#00B341", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:"white", cursor:scanning?"default":"pointer" }}>
+              <button onClick={()=>fileInputRef.current?.click()} disabled={scanning||galleryScanning||pdfScanning} style={{ width:"100%", padding:"15px", marginTop:10, border:"none", borderRadius:12, background:scanning?"#999":"#00B341", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:"white", cursor:scanning?"default":"pointer" }}>
                 {scanning ? "⏳ Analyse en cours..." : "📷 Scanner un ticket"}
+              </button>
+
+              {/* Galerie */}
+              <input ref={galleryInputRef} type="file" accept="image/*" onChange={async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                setGalleryScanning(true); setError("");
+                try {
+                  const base64 = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.readAsDataURL(file); });
+                  const parsed = await scanTicketWithClaude(base64, apiKey);
+                  setResult(parsed); setSelectedStore(storeIdFromName(parsed.store));
+                  setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true, share:true})));
+                  setStoreNameEdit(parsed.store || "");
+                  setStoreLocation(parsed.address || "");
+                  setStatus("store");
+                } catch(e) { setError("Erreur scan : " + e.message); }
+                setGalleryScanning(false);
+                e.target.value = "";
+              }} style={{ display:"none" }} />
+              <button onClick={()=>galleryInputRef.current?.click()} disabled={scanning||galleryScanning||pdfScanning}
+                style={{ width:"100%", padding:"15px", marginTop:10, border:"none", borderRadius:12, background:galleryScanning?"#999":"#4A90D9", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:"white", cursor:galleryScanning?"default":"pointer" }}>
+                {galleryScanning ? "⏳ Analyse en cours..." : "🖼️ Importer une photo"}
               </button>
 
               {/* PDF import */}
