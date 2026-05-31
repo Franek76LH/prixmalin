@@ -166,14 +166,15 @@ function AuthScreen() {
 }
 
 // ── CIRCLE SHEET ─────────────────────────────────────────────────────────────
-function CircleSheet({ circles, userId, onClose, onInvite, onUpdateStatus }) {
+function CircleSheet({ circles, userId, userEmail, onClose, onInvite, onUpdateStatus }) {
   const F = "'Nunito',sans-serif";
   const [inviteEmail,   setInviteEmail]   = useState('');
   const [inviteError,   setInviteError]   = useState('');
   const [inviteLoading, setInviteLoading] = useState(false);
 
-  const received = circles.filter(c => c.recipient_id === userId && c.status === 'pending');
-  const accepted = circles.filter(c => c.status === 'accepted' && (c.requester_id === userId || c.recipient_id === userId));
+  const isMe = c => c.recipient_id === userId || c.recipient_email?.toLowerCase() === userEmail?.toLowerCase();
+  const received = circles.filter(c => isMe(c) && c.status === 'pending');
+  const accepted = circles.filter(c => c.status === 'accepted' && (c.requester_id === userId || isMe(c)));
   const sent     = circles.filter(c => c.requester_id === userId && c.status === 'pending');
   const otherEmail = c => c.requester_id === userId ? c.recipient_email : c.requester_email;
 
@@ -2250,7 +2251,10 @@ export default function App() {
       if (status === 'revoked') {
         setCircles(prev => prev.filter(c => c.id !== id));
       } else {
-        setCircles(prev => prev.map(c => c.id === id ? { ...c, status } : c));
+        // Recharge depuis Supabase pour récupérer recipient_id mis à jour par le trigger
+        const { data } = await supabase.from('circles').select('*');
+        if (data) setCircles(data);
+        else setCircles(prev => prev.map(c => c.id === id ? { ...c, status } : c));
       }
     }
   };
@@ -2287,7 +2291,7 @@ export default function App() {
       {globalStyle}
       <div style={{ minHeight:"100vh", background:C.bg, maxWidth:430, margin:"0 auto" }}>
         <Header tab={tab} itemCount={items.length} userEmail={session.user.email} onLogout={handleLogout}
-          pendingCount={circles.filter(c=>c.recipient_id===session.user.id&&c.status==='pending').length}
+          pendingCount={circles.filter(c=>(c.recipient_id===session.user.id||c.recipient_email?.toLowerCase()===session.user.email?.toLowerCase())&&c.status==='pending').length}
           onCircle={()=>setShowCircle(true)}/>
         <div style={{ paddingTop:4 }}>
           {!loaded && (
@@ -2305,7 +2309,7 @@ export default function App() {
         </div>
         <TabBar tab={tab} setTab={setTab}/>
         {appToast && <Toast msg={appToast.msg} ok={appToast.ok}/>}
-        {showCircle && <CircleSheet circles={circles} userId={session.user.id} onClose={()=>setShowCircle(false)} onInvite={inviteToCircle} onUpdateStatus={updateCircleStatus}/>}
+        {showCircle && <CircleSheet circles={circles} userId={session.user.id} userEmail={session.user.email} onClose={()=>setShowCircle(false)} onInvite={inviteToCircle} onUpdateStatus={updateCircleStatus}/>}
         {showSuccess && (
           <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:300, animation:"fadeIn 0.2s ease" }}>
             <div style={{ background:C.white, borderRadius:20, padding:"36px 32px", textAlign:"center", maxWidth:300, width:"90%", animation:"popIn 0.35s ease", boxShadow:"0 20px 60px rgba(0,0,0,0.25)" }}>
