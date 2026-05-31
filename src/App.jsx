@@ -77,6 +77,47 @@ function itemMatchesPrice(item, price) {
   return sameProduct && sameFormat && brandOk;
 }
 
+// ── PSEUDO MODAL ─────────────────────────────────────────────────────────────
+function PseudoModal({ onSave }) {
+  const F = "'Nunito',sans-serif";
+  const [value,   setValue]   = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handle = async () => {
+    if (!value.trim()) return;
+    setLoading(true);
+    await onSave(value.trim());
+    setLoading(false);
+  };
+
+  const canSubmit = value.trim().length > 0 && !loading;
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:400, padding:24 }}>
+      <div style={{ background:"#fff", borderRadius:20, padding:"32px 24px", width:"100%", maxWidth:360, boxShadow:"0 20px 60px rgba(0,0,0,0.25)", animation:"popIn 0.35s ease" }}>
+        <div style={{ fontSize:48, textAlign:"center", marginBottom:12 }}>👋</div>
+        <div style={{ fontFamily:F, fontWeight:900, fontSize:20, color:C.text, textAlign:"center", marginBottom:8 }}>
+          Comment tu veux t'appeler ?
+        </div>
+        <div style={{ fontFamily:F, fontSize:13, color:C.textLight, textAlign:"center", marginBottom:24, lineHeight:1.6 }}>
+          Ce pseudo sera affiché dans ton cercle privé.
+        </div>
+        <input
+          type="text" autoFocus maxLength={30}
+          value={value} onChange={e=>setValue(e.target.value)}
+          onKeyDown={e=>e.key==='Enter'&&handle()}
+          placeholder="Nico, Marie, Papy…"
+          style={{ width:"100%", padding:"14px 16px", borderRadius:12, border:`2px solid ${value.trim()?C.blue:C.grayLight}`, fontFamily:F, fontSize:16, color:C.text, boxSizing:"border-box", marginBottom:16, textAlign:"center" }}
+        />
+        <button onClick={handle} disabled={!canSubmit}
+          style={{ width:"100%", padding:"14px", border:"none", borderRadius:12, background:canSubmit?C.red:C.grayLight, fontFamily:F, fontWeight:900, fontSize:15, color:canSubmit?C.white:C.gray, cursor:canSubmit?"pointer":"default" }}>
+          {loading ? "…" : "Valider →"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── AUTH SCREEN ───────────────────────────────────────────────────────────────
 function AuthScreen() {
   const F = "'Nunito',sans-serif";
@@ -166,7 +207,7 @@ function AuthScreen() {
 }
 
 // ── CIRCLE SHEET ─────────────────────────────────────────────────────────────
-function CircleSheet({ circles, userId, userEmail, onClose, onInvite, onUpdateStatus }) {
+function CircleSheet({ circles, userId, userEmail, profileMap, onClose, onInvite, onUpdateStatus }) {
   const F = "'Nunito',sans-serif";
   const [inviteEmail,   setInviteEmail]   = useState('');
   const [inviteError,   setInviteError]   = useState('');
@@ -176,7 +217,11 @@ function CircleSheet({ circles, userId, userEmail, onClose, onInvite, onUpdateSt
   const received = circles.filter(c => isMe(c) && c.status === 'pending');
   const accepted = circles.filter(c => c.status === 'accepted' && (c.requester_id === userId || isMe(c)));
   const sent     = circles.filter(c => c.requester_id === userId && c.status === 'pending');
-  const otherEmail = c => c.requester_id === userId ? c.recipient_email : c.requester_email;
+  const otherEmail   = c => c.requester_id === userId ? c.recipient_email : c.requester_email;
+  const otherDisplay = c => {
+    const otherId = c.requester_id === userId ? c.recipient_id : c.requester_id;
+    return (otherId && profileMap[otherId]) || otherEmail(c);
+  };
 
   const handleInvite = async () => {
     if (!inviteEmail.trim()) return;
@@ -205,7 +250,7 @@ function CircleSheet({ circles, userId, userEmail, onClose, onInvite, onUpdateSt
             {received.map(c => (
               <div key={c.id} style={{ background:"#FFFBEA", borderRadius:12, padding:"12px 14px", marginBottom:8, border:`1.5px solid ${C.orange}`, display:"flex", alignItems:"center", gap:10 }}>
                 <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{c.requester_email}</div>
+                  <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{(c.requester_id && profileMap[c.requester_id]) || c.requester_email}</div>
                   <div style={{ fontFamily:F, fontSize:11, color:C.textLight }}>veut partager ses prix avec toi</div>
                 </div>
                 <button onClick={()=>onUpdateStatus(c.id,'accepted')} style={{ padding:"8px 10px", border:"none", borderRadius:8, background:C.green, fontFamily:F, fontWeight:800, fontSize:12, color:C.white, cursor:"pointer", flexShrink:0 }}>✓ Accepter</button>
@@ -221,7 +266,7 @@ function CircleSheet({ circles, userId, userEmail, onClose, onInvite, onUpdateSt
               <div key={c.id} style={{ background:C.white, borderRadius:12, padding:"12px 14px", marginBottom:8, border:`1px solid ${C.grayLight}`, display:"flex", alignItems:"center", gap:10 }}>
                 <span style={{ fontSize:22, flexShrink:0 }}>👤</span>
                 <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{otherEmail(c)}</div>
+                  <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{otherDisplay(c)}</div>
                   <div style={{ fontFamily:F, fontSize:11, color:C.green, fontWeight:700 }}>● Partage actif · prix mutuels visibles</div>
                 </div>
                 <button onClick={()=>onUpdateStatus(c.id,'revoked')} style={{ padding:"6px 10px", border:`1px solid ${C.grayLight}`, borderRadius:8, background:C.white, fontFamily:F, fontWeight:700, fontSize:11, color:C.gray, cursor:"pointer", flexShrink:0 }}>Révoquer</button>
@@ -275,7 +320,7 @@ function CircleSheet({ circles, userId, userEmail, onClose, onInvite, onUpdateSt
 }
 
 // ── HEADER ────────────────────────────────────────────────────────────────────
-function Header({ tab, itemCount, userEmail, onLogout, pendingCount, onCircle }) {
+function Header({ tab, itemCount, userEmail, displayName, onLogout, pendingCount, onCircle }) {
   const F = "'Nunito',sans-serif";
   const titles = { list:"Ma liste", catalog:"Catalogue", compare:"Comparer", prices:"Mes prix", archive:"Historique", economies:"Mes économies" };
   const [showMenu, setShowMenu] = useState(false);
@@ -298,14 +343,17 @@ function Header({ tab, itemCount, userEmail, onLogout, pendingCount, onCircle })
           <div style={{ position:"relative" }}>
             <button onClick={()=>setShowMenu(s=>!s)}
               style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:99, padding:"6px 10px", fontFamily:F, fontSize:12, fontWeight:700, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", gap:5, position:"relative" }}>
-              👤 {userEmail.split('@')[0]}
+              👤 {displayName || userEmail.split('@')[0]}
               {pendingCount > 0 && (
                 <span style={{ position:"absolute", top:-4, right:-4, background:C.orange, borderRadius:99, width:16, height:16, fontSize:10, fontWeight:900, color:C.white, display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1 }}>{pendingCount}</span>
               )}
             </button>
             {showMenu && (
               <div style={{ position:"absolute", right:0, top:38, background:C.white, borderRadius:12, boxShadow:"0 4px 20px rgba(0,0,0,0.15)", padding:"8px", zIndex:200, minWidth:170 }}>
-                <div style={{ fontFamily:F, fontSize:12, color:C.textLight, padding:"6px 10px" }}>{userEmail}</div>
+                <div style={{ fontFamily:F, padding:"6px 10px" }}>
+                  {displayName && <div style={{ fontSize:13, fontWeight:800, color:C.text }}>{displayName}</div>}
+                  <div style={{ fontSize:12, color:C.textLight }}>{userEmail}</div>
+                </div>
                 <button onClick={()=>{ setShowMenu(false); onCircle(); }}
                   style={{ width:"100%", padding:"10px 12px", border:"none", background:"none", borderRadius:8, fontFamily:F, fontWeight:800, fontSize:13, color:C.text, cursor:"pointer", textAlign:"left", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                   <span>👥 Mon cercle</span>
@@ -2045,6 +2093,8 @@ export default function App() {
   const [produitsRef, setProduitsRef] = useState([]);
   const [circles,    setCircles]    = useState([]);
   const [showCircle, setShowCircle] = useState(false);
+  const [pseudo,     setPseudo]     = useState(null);
+  const [profileMap, setProfileMap] = useState({});
   const catalog = useMemo(() => {
     const split = s => s ? s.split(';').map(x => x.trim()).filter(Boolean) : [];
     const refProducts = produitsRef.map(p => ({
@@ -2077,6 +2127,7 @@ export default function App() {
       setSession(session);
       if (!session) {
         setItems([]); setPriceDB([]); setArchives([]); setFavorites([]); setCircles([]);
+        setPseudo(null); setProfileMap({});
         setLoaded(false); listRowId.current = null; favRowId.current = null;
       }
     });
@@ -2089,13 +2140,14 @@ export default function App() {
     setLoaded(false);
     (async ()=>{
       try {
-        const [list, prices, arcs, favs, refs, circs] = await Promise.all([
+        const [list, prices, arcs, favs, refs, circs, prof] = await Promise.all([
           supabase.from('shopping_list').select('id, items').order('id').limit(1),
           supabase.from('price_db').select('*'),
           supabase.from('archives').select('*').order('date'),
           supabase.from('favorites').select('id, items').order('id').limit(1),
           supabase.from('produits_ref').select('produit_generique, sous_categorie, formats_courants, marques_nationales, marques_distributeurs').order('id'),
           supabase.from('circles').select('*'),
+          supabase.from('profiles').select('pseudo').eq('id', session.user.id).maybeSingle(),
         ]);
         if (refs.data)  setProduitsRef(refs.data);
         if (list.data?.[0]) { setItems(list.data[0].items || []); listRowId.current = list.data[0].id; }
@@ -2108,7 +2160,24 @@ export default function App() {
         }
         if (arcs.data) setArchives(arcs.data);
         if (favs.data?.[0]) { setFavorites(favs.data[0].items || []); favRowId.current = favs.data[0].id; }
-        if (circs.data) setCircles(circs.data);
+        if (circs.data) {
+          setCircles(circs.data);
+          const memberIds = [...new Set(circs.data
+            .flatMap(c => [c.requester_id, c.recipient_id])
+            .filter(id => id && id !== session.user.id)
+          )];
+          if (memberIds.length) {
+            supabase.from('profiles').select('id, pseudo').in('id', memberIds)
+              .then(({ data: mProfs }) => {
+                if (mProfs) {
+                  const map = {};
+                  mProfs.forEach(p => { if (p.pseudo) map[p.id] = p.pseudo; });
+                  setProfileMap(map);
+                }
+              });
+          }
+        }
+        setPseudo(prof.data?.pseudo ?? null);
       } catch(e){ console.log("Supabase load:", e); }
       setLoaded(true);
     })();
@@ -2259,6 +2328,11 @@ export default function App() {
     }
   };
 
+  const savePseudo = async (value) => {
+    const { error } = await supabase.from('profiles').upsert({ id: session.user.id, pseudo: value });
+    if (!error) setPseudo(value);
+  };
+
   const handleLogout = async () => { await supabase.auth.signOut(); };
 
   const globalStyle = (
@@ -2290,7 +2364,7 @@ export default function App() {
     <>
       {globalStyle}
       <div style={{ minHeight:"100vh", background:C.bg, maxWidth:430, margin:"0 auto" }}>
-        <Header tab={tab} itemCount={items.length} userEmail={session.user.email} onLogout={handleLogout}
+        <Header tab={tab} itemCount={items.length} userEmail={session.user.email} displayName={pseudo} onLogout={handleLogout}
           pendingCount={circles.filter(c=>(c.recipient_id===session.user.id||c.recipient_email?.toLowerCase()===session.user.email?.toLowerCase())&&c.status==='pending').length}
           onCircle={()=>setShowCircle(true)}/>
         <div style={{ paddingTop:4 }}>
@@ -2309,7 +2383,8 @@ export default function App() {
         </div>
         <TabBar tab={tab} setTab={setTab}/>
         {appToast && <Toast msg={appToast.msg} ok={appToast.ok}/>}
-        {showCircle && <CircleSheet circles={circles} userId={session.user.id} userEmail={session.user.email} onClose={()=>setShowCircle(false)} onInvite={inviteToCircle} onUpdateStatus={updateCircleStatus}/>}
+        {showCircle && <CircleSheet circles={circles} userId={session.user.id} userEmail={session.user.email} profileMap={profileMap} onClose={()=>setShowCircle(false)} onInvite={inviteToCircle} onUpdateStatus={updateCircleStatus}/>}
+        {loaded && pseudo === null && <PseudoModal onSave={savePseudo}/>}
         {showSuccess && (
           <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:300, animation:"fadeIn 0.2s ease" }}>
             <div style={{ background:C.white, borderRadius:20, padding:"36px 32px", textAlign:"center", maxWidth:300, width:"90%", animation:"popIn 0.35s ease", boxShadow:"0 20px 60px rgba(0,0,0,0.25)" }}>
