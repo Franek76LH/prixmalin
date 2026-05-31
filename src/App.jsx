@@ -386,7 +386,7 @@ function ImportTicketSheet({ onClose, onImport }) {
       if(!parsed.products||!Array.isArray(parsed.products)) throw new Error("Champ 'products' manquant");
       setResult(parsed);
       setSelectedStore(storeIdFromName(parsed.store));
-      setEditableProducts(parsed.products.map((p,i)=>({...p,id:i,keep:true})));
+      setEditableProducts(parsed.products.map((p,i)=>({...p,id:i,keep:true,share:true})));
       setStoreNameEdit(parsed.store||"");
       setStoreLocation(parsed.address||"");
       setError("");
@@ -396,6 +396,7 @@ function ImportTicketSheet({ onClose, onImport }) {
 
   const loadExample = () => { setJsonText(EXAMPLE); parseAndPreview(EXAMPLE); };
   const toggleProduct = id => setEditableProducts(prev=>prev.map(p=>p.id===id?{...p,keep:!p.keep}:p));
+  const toggleShare   = id => setEditableProducts(prev=>prev.map(p=>p.id===id?{...p,share:!p.share}:p));
   const updatePrice = (id,val) => setEditableProducts(prev=>prev.map(p=>p.id===id?{...p,price:parseFloat(val)||0}:p));
 
   const confirm = () => {
@@ -409,6 +410,7 @@ function ImportTicketSheet({ onClose, onImport }) {
       store_address: storeLocation.trim(),
       price:  p.price,
       date:   result?.date?new Date(result.date).toISOString():new Date().toISOString(),
+      share:  p.share !== false,
     }));
     onImport(toImport);
     onClose();
@@ -534,15 +536,28 @@ function ImportTicketSheet({ onClose, onImport }) {
               <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Produits à importer</div>
               <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:20 }}>
                 {editableProducts.map(p=>(
-                  <div key={p.id} style={{ display:"flex", alignItems:"center", gap:10, background:p.keep?C.white:C.grayLight, borderRadius:12, padding:"10px 14px", border:`1px solid ${p.keep?C.blue:C.grayLight}`, opacity:p.keep?1:0.5 }}>
-                    <button onClick={()=>toggleProduct(p.id)} style={{ width:24, height:24, borderRadius:6, flexShrink:0, cursor:"pointer", border:`2px solid ${p.keep?C.blue:C.gray}`, background:p.keep?C.blue:C.white, color:C.white, fontSize:13, display:"flex", alignItems:"center", justifyContent:"center" }}>{p.keep?"✓":""}</button>
-                    <div style={{ flex:1 }}>
-                      <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{p.brand?`${p.brand} · `:""}{p.name}</div>
-                      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>{p.format}</div>
+                  <div key={p.id} style={{ background:p.keep?C.white:C.grayLight, borderRadius:12, border:`1px solid ${p.keep?C.blue:C.grayLight}`, opacity:p.keep?1:0.5, overflow:"hidden" }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 14px" }}>
+                      <button onClick={()=>toggleProduct(p.id)} style={{ width:24, height:24, borderRadius:6, flexShrink:0, cursor:"pointer", border:`2px solid ${p.keep?C.blue:C.gray}`, background:p.keep?C.blue:C.white, color:C.white, fontSize:13, display:"flex", alignItems:"center", justifyContent:"center" }}>{p.keep?"✓":""}</button>
+                      <div style={{ flex:1 }}>
+                        <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{p.brand?`${p.brand} · `:""}{p.name}</div>
+                        <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>{p.format}</div>
+                      </div>
+                      <input type="number" step="0.01" min="0" value={p.price} onChange={e=>updatePrice(p.id,e.target.value)}
+                        style={{ width:68, padding:"6px 8px", textAlign:"right", borderRadius:8, border:`2px solid ${C.orange}`, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.orange, outline:"none" }} />
+                      <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.orange }}>€</span>
                     </div>
-                    <input type="number" step="0.01" min="0" value={p.price} onChange={e=>updatePrice(p.id,e.target.value)}
-                      style={{ width:68, padding:"6px 8px", textAlign:"right", borderRadius:8, border:`2px solid ${C.orange}`, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.orange, outline:"none" }} />
-                    <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.orange }}>€</span>
+                    {p.keep && (
+                      <div style={{ borderTop:`1px solid ${C.grayLight}`, padding:"6px 14px", display:"flex", alignItems:"center", gap:6 }}>
+                        <button onClick={()=>toggleShare(p.id)}
+                          style={{ background:"none", border:"none", cursor:"pointer", fontSize:14, padding:0, lineHeight:1 }}>
+                          {p.share !== false ? "🌍" : "🔒"}
+                        </button>
+                        <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight }}>
+                          {p.share !== false ? "Partagé avec la communauté" : "Gardé privé"}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1385,7 +1400,7 @@ function EconomiesTab({ priceDB, archives, items, setTab }) {
 }
 
 // ── PRICES TAB ────────────────────────────────────────────────────────────────
-function PricesTab({ priceDB, setPriceDB, archives, updateArchive }) {
+function PricesTab({ priceDB, setPriceDB, archives, updateArchive, userId }) {
   const [showImport,    setShowImport]    = useState(false);
   const [showEntry,     setShowEntry]     = useState(false);
   const [editPrice,     setEditPrice]     = useState(null);
@@ -1436,6 +1451,25 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive }) {
     let updated = [...priceDB];
     entries.forEach(e => { updated = [...updated.filter(p => priceKey(p) !== priceKey(e)), e]; });
     setPriceDB(updated);
+
+    // Copie anonyme dans community_prices
+    if (userId) {
+      const communityEntries = entries.map(e => ({
+        user_id:       userId,
+        product:       e.product,
+        brand:         e.brand || '',
+        format:        e.format || '',
+        category:      guessCategory(e.product),
+        price:         e.price,
+        date:          e.date,
+        store_name:    e.store_name || '',
+        store_address: e.store_address || '',
+        is_private:    e.share === false,
+      }));
+      supabase.from('community_prices').insert(communityEntries)
+        .then(({ error }) => { if (error) console.error("Erreur community_prices :", error); });
+    }
+
     const savingMsg = realizedSaving !== null
       ? ` · Économies : ${realizedSaving >= 0 ? '+' : ''}${realizedSaving.toFixed(2)} €`
       : '';
@@ -2112,7 +2146,7 @@ export default function App() {
           {loaded && tab==="list"      && <ListTab      items={items} setItems={saveItems} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} setItems={saveItems} setTab={setTab} catalog={catalog} priceDB={priceDB}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate}/>}
-          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive}/>}
+          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} userId={session?.user?.id}/>}
           {loaded && tab==="archive"   && <ArchiveTab   archives={archives} onDelete={deleteArchive}/>}
           {loaded && tab==="economies" && <EconomiesTab priceDB={priceDB} archives={archives} items={items} setTab={setTab}/>}
         </div>
