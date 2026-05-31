@@ -1,3 +1,27 @@
+// Convertit n'importe quel format image (HEIC, PNG, WEBP…) en JPEG base64
+// via canvas, avec redimensionnement si > 2000px pour limiter la taille du payload.
+export function imageFileToJpegBase64(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 2000;
+      let { naturalWidth: w, naturalHeight: h } = img;
+      if (w > MAX || h > MAX) {
+        if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+        else        { w = Math.round(w * MAX / h); h = MAX; }
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL("image/jpeg", 0.92).split(",")[1]);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Impossible de lire l'image")); };
+    img.src = url;
+  });
+}
+
 export async function scanTicketWithClaude(imageBase64, apiKey) {
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",

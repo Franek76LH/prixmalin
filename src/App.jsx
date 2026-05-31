@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { scanTicketWithClaude } from "./scanTicket";
+import { scanTicketWithClaude, imageFileToJpegBase64 } from "./scanTicket";
 import { scanPdfWithClaude } from "./scanPdf";
 import { STORES, CATEGORY_META, PRODUCT_SUGGESTIONS, STALE_DAYS } from "./constants";
 import { supabase } from "./lib/supabase";
@@ -654,7 +654,7 @@ function ImportTicketSheet({ onClose, onImport }) {
                 if (!file) return;
                 setGalleryScanning(true); setError("");
                 try {
-                  const base64 = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.readAsDataURL(file); });
+                  const base64 = await imageFileToJpegBase64(file);
                   const parsed = await scanTicketWithClaude(base64, apiKey);
                   setResult(parsed); setSelectedStore(storeIdFromName(parsed.store));
                   setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true, share:true})));
