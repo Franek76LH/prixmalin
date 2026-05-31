@@ -324,6 +324,13 @@ function Header({ tab, itemCount, userEmail, displayName, onLogout, pendingCount
   const F = "'Nunito',sans-serif";
   const titles = { list:"Ma liste", catalog:"Catalogue", compare:"Comparer", prices:"Mes prix", archive:"Historique", economies:"Mes économies" };
   const [showMenu, setShowMenu] = useState(false);
+  const menuRef = useRef(null);
+  useEffect(() => {
+    if (!showMenu) return;
+    const handler = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setShowMenu(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showMenu]);
   return (
     <div style={{ background:C.blue, padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", boxShadow:"0 4px 20px rgba(204,0,0,0.4)" }}>
       <div style={{ display:"flex", alignItems:"center", gap:10 }}>
@@ -340,7 +347,7 @@ function Header({ tab, itemCount, userEmail, displayName, onLogout, pendingCount
           </div>
         )}
         {userEmail && (
-          <div style={{ position:"relative" }}>
+          <div ref={menuRef} style={{ position:"relative" }}>
             <button onClick={()=>setShowMenu(s=>!s)}
               style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:99, padding:"6px 10px", fontFamily:F, fontSize:12, fontWeight:700, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", gap:5, position:"relative" }}>
               👤 {displayName || userEmail.split('@')[0]}
