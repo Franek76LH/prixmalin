@@ -165,11 +165,119 @@ function AuthScreen() {
   );
 }
 
+// ── CIRCLE SHEET ─────────────────────────────────────────────────────────────
+function CircleSheet({ circles, userId, onClose, onInvite, onUpdateStatus }) {
+  const F = "'Nunito',sans-serif";
+  const [inviteEmail,   setInviteEmail]   = useState('');
+  const [inviteError,   setInviteError]   = useState('');
+  const [inviteLoading, setInviteLoading] = useState(false);
+
+  const received = circles.filter(c => c.recipient_id === userId && c.status === 'pending');
+  const accepted = circles.filter(c => c.status === 'accepted' && (c.requester_id === userId || c.recipient_id === userId));
+  const sent     = circles.filter(c => c.requester_id === userId && c.status === 'pending');
+  const otherEmail = c => c.requester_id === userId ? c.recipient_email : c.requester_email;
+
+  const handleInvite = async () => {
+    if (!inviteEmail.trim()) return;
+    setInviteLoading(true); setInviteError('');
+    const { error } = await onInvite(inviteEmail);
+    if (error) setInviteError(error); else setInviteEmail('');
+    setInviteLoading(false);
+  };
+
+  const sLabel = { fontFamily:F, fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8, marginTop:20 };
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", zIndex:300, animation:"fadeIn 0.2s ease" }} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{ background:C.white, borderRadius:"20px 20px 0 0", width:"100%", maxWidth:430, margin:"0 auto", maxHeight:"85vh", display:"flex", flexDirection:"column", animation:"slideUp 0.3s ease" }}>
+
+        <div style={{ background:C.blue, padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0, borderRadius:"20px 20px 0 0" }}>
+          <div style={{ fontFamily:F, fontWeight:900, fontSize:17, color:C.white }}>👥 Mon cercle</div>
+          <button onClick={onClose} style={{ background:"rgba(255,255,255,0.2)", border:"none", borderRadius:99, width:28, height:28, color:C.white, fontSize:14, cursor:"pointer" }}>✕</button>
+        </div>
+
+        <div style={{ overflowY:"auto", flex:1, padding:"20px 20px 40px" }}>
+
+          {/* Invitations reçues */}
+          {received.length > 0 && (<>
+            <div style={sLabel}>📩 Invitations reçues</div>
+            {received.map(c => (
+              <div key={c.id} style={{ background:"#FFFBEA", borderRadius:12, padding:"12px 14px", marginBottom:8, border:`1.5px solid ${C.orange}`, display:"flex", alignItems:"center", gap:10 }}>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{c.requester_email}</div>
+                  <div style={{ fontFamily:F, fontSize:11, color:C.textLight }}>veut partager ses prix avec toi</div>
+                </div>
+                <button onClick={()=>onUpdateStatus(c.id,'accepted')} style={{ padding:"8px 10px", border:"none", borderRadius:8, background:C.green, fontFamily:F, fontWeight:800, fontSize:12, color:C.white, cursor:"pointer", flexShrink:0 }}>✓ Accepter</button>
+                <button onClick={()=>onUpdateStatus(c.id,'declined')} style={{ padding:"8px 10px", border:`1px solid ${C.grayLight}`, borderRadius:8, background:C.white, fontFamily:F, fontWeight:800, fontSize:12, color:C.gray, cursor:"pointer", flexShrink:0 }}>✕</button>
+              </div>
+            ))}
+          </>)}
+
+          {/* Membres actifs */}
+          {accepted.length > 0 && (<>
+            <div style={sLabel}>🤝 Membres du cercle</div>
+            {accepted.map(c => (
+              <div key={c.id} style={{ background:C.white, borderRadius:12, padding:"12px 14px", marginBottom:8, border:`1px solid ${C.grayLight}`, display:"flex", alignItems:"center", gap:10 }}>
+                <span style={{ fontSize:22, flexShrink:0 }}>👤</span>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{otherEmail(c)}</div>
+                  <div style={{ fontFamily:F, fontSize:11, color:C.green, fontWeight:700 }}>● Partage actif · prix mutuels visibles</div>
+                </div>
+                <button onClick={()=>onUpdateStatus(c.id,'revoked')} style={{ padding:"6px 10px", border:`1px solid ${C.grayLight}`, borderRadius:8, background:C.white, fontFamily:F, fontWeight:700, fontSize:11, color:C.gray, cursor:"pointer", flexShrink:0 }}>Révoquer</button>
+              </div>
+            ))}
+          </>)}
+
+          {/* Invitations envoyées */}
+          {sent.length > 0 && (<>
+            <div style={sLabel}>📤 Invitations envoyées</div>
+            {sent.map(c => (
+              <div key={c.id} style={{ background:C.white, borderRadius:12, padding:"12px 14px", marginBottom:8, border:`1px solid ${C.grayLight}`, display:"flex", alignItems:"center", gap:10 }}>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{c.recipient_email}</div>
+                  <div style={{ fontFamily:F, fontSize:11, color:C.textLight }}>En attente d'acceptation</div>
+                </div>
+                <button onClick={()=>onUpdateStatus(c.id,'revoked')} style={{ padding:"6px 10px", border:`1px solid ${C.grayLight}`, borderRadius:8, background:C.white, fontFamily:F, fontWeight:700, fontSize:11, color:C.gray, cursor:"pointer", flexShrink:0 }}>Annuler</button>
+              </div>
+            ))}
+          </>)}
+
+          {received.length === 0 && accepted.length === 0 && sent.length === 0 && (
+            <div style={{ textAlign:"center", padding:"24px 0 8px", fontFamily:F, fontSize:13, color:C.textLight, lineHeight:1.7 }}>
+              Ton cercle est vide.<br/>Invite des amis pour comparer vos prix !
+            </div>
+          )}
+
+          {/* Formulaire d'invitation */}
+          <div style={{ marginTop:24 }}>
+            <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Inviter par email</div>
+            <div style={{ display:"flex", gap:8 }}>
+              <input type="email" value={inviteEmail} onChange={e=>setInviteEmail(e.target.value)}
+                onKeyDown={e=>e.key==='Enter'&&handleInvite()}
+                placeholder="ami@email.com"
+                style={{ flex:1, padding:"12px 14px", borderRadius:10, border:`2px solid ${inviteEmail?C.blue:C.grayLight}`, fontFamily:F, fontSize:14, color:C.text, boxSizing:"border-box" }}
+              />
+              <button onClick={handleInvite} disabled={inviteLoading || !inviteEmail.trim()}
+                style={{ padding:"12px 16px", border:"none", borderRadius:10, background:inviteLoading||!inviteEmail.trim()?C.grayLight:C.blue, fontFamily:F, fontWeight:900, fontSize:14, color:inviteLoading||!inviteEmail.trim()?C.gray:C.white, cursor:inviteLoading||!inviteEmail.trim()?"default":"pointer", flexShrink:0 }}>
+                {inviteLoading ? "…" : "Inviter"}
+              </button>
+            </div>
+            {inviteError && <div style={{ fontFamily:F, fontSize:12, color:C.red, fontWeight:700, marginTop:8 }}>⚠️ {inviteError}</div>}
+            <div style={{ fontFamily:F, fontSize:11, color:C.textLight, marginTop:8, lineHeight:1.5 }}>
+              L'autre utilisateur doit avoir un compte PrixMalin. Il devra accepter l'invitation pour que le partage soit actif.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── HEADER ────────────────────────────────────────────────────────────────────
-function Header({ tab, itemCount, userEmail, onLogout }) {
+function Header({ tab, itemCount, userEmail, onLogout, pendingCount, onCircle }) {
   const F = "'Nunito',sans-serif";
   const titles = { list:"Ma liste", catalog:"Catalogue", compare:"Comparer", prices:"Mes prix", archive:"Historique", economies:"Mes économies" };
-  const [showLogout, setShowLogout] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
   return (
     <div style={{ background:C.blue, padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", boxShadow:"0 4px 20px rgba(204,0,0,0.4)" }}>
       <div style={{ display:"flex", alignItems:"center", gap:10 }}>
@@ -187,14 +295,22 @@ function Header({ tab, itemCount, userEmail, onLogout }) {
         )}
         {userEmail && (
           <div style={{ position:"relative" }}>
-            <button onClick={()=>setShowLogout(s=>!s)}
-              style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:99, padding:"6px 10px", fontFamily:F, fontSize:12, fontWeight:700, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", gap:5 }}>
+            <button onClick={()=>setShowMenu(s=>!s)}
+              style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:99, padding:"6px 10px", fontFamily:F, fontSize:12, fontWeight:700, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", gap:5, position:"relative" }}>
               👤 {userEmail.split('@')[0]}
+              {pendingCount > 0 && (
+                <span style={{ position:"absolute", top:-4, right:-4, background:C.orange, borderRadius:99, width:16, height:16, fontSize:10, fontWeight:900, color:C.white, display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1 }}>{pendingCount}</span>
+              )}
             </button>
-            {showLogout && (
-              <div style={{ position:"absolute", right:0, top:38, background:C.white, borderRadius:12, boxShadow:"0 4px 20px rgba(0,0,0,0.15)", padding:"8px", zIndex:200, minWidth:160 }}>
+            {showMenu && (
+              <div style={{ position:"absolute", right:0, top:38, background:C.white, borderRadius:12, boxShadow:"0 4px 20px rgba(0,0,0,0.15)", padding:"8px", zIndex:200, minWidth:170 }}>
                 <div style={{ fontFamily:F, fontSize:12, color:C.textLight, padding:"6px 10px" }}>{userEmail}</div>
-                <button onClick={()=>{ setShowLogout(false); onLogout(); }}
+                <button onClick={()=>{ setShowMenu(false); onCircle(); }}
+                  style={{ width:"100%", padding:"10px 12px", border:"none", background:"none", borderRadius:8, fontFamily:F, fontWeight:800, fontSize:13, color:C.text, cursor:"pointer", textAlign:"left", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                  <span>👥 Mon cercle</span>
+                  {pendingCount > 0 && <span style={{ background:C.orange, borderRadius:99, padding:"2px 7px", fontSize:11, color:C.white, fontWeight:900 }}>{pendingCount}</span>}
+                </button>
+                <button onClick={()=>{ setShowMenu(false); onLogout(); }}
                   style={{ width:"100%", padding:"10px 12px", border:"none", background:"#FEE", borderRadius:8, fontFamily:F, fontWeight:800, fontSize:13, color:C.red, cursor:"pointer", textAlign:"left" }}>
                   Se déconnecter
                 </button>
@@ -1926,6 +2042,8 @@ export default function App() {
   const [favorites, setFavorites] = useState([]);
   const [loaded, setLoaded]       = useState(false);
   const [produitsRef, setProduitsRef] = useState([]);
+  const [circles,    setCircles]    = useState([]);
+  const [showCircle, setShowCircle] = useState(false);
   const catalog = useMemo(() => {
     const split = s => s ? s.split(';').map(x => x.trim()).filter(Boolean) : [];
     const refProducts = produitsRef.map(p => ({
@@ -1957,7 +2075,7 @@ export default function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       if (!session) {
-        setItems([]); setPriceDB([]); setArchives([]); setFavorites([]);
+        setItems([]); setPriceDB([]); setArchives([]); setFavorites([]); setCircles([]);
         setLoaded(false); listRowId.current = null; favRowId.current = null;
       }
     });
@@ -1970,12 +2088,13 @@ export default function App() {
     setLoaded(false);
     (async ()=>{
       try {
-        const [list, prices, arcs, favs, refs] = await Promise.all([
+        const [list, prices, arcs, favs, refs, circs] = await Promise.all([
           supabase.from('shopping_list').select('id, items').order('id').limit(1),
           supabase.from('price_db').select('*'),
           supabase.from('archives').select('*').order('date'),
           supabase.from('favorites').select('id, items').order('id').limit(1),
           supabase.from('produits_ref').select('produit_generique, sous_categorie, formats_courants, marques_nationales, marques_distributeurs').order('id'),
+          supabase.from('circles').select('*'),
         ]);
         if (refs.data)  setProduitsRef(refs.data);
         if (list.data?.[0]) { setItems(list.data[0].items || []); listRowId.current = list.data[0].id; }
@@ -1988,6 +2107,7 @@ export default function App() {
         }
         if (arcs.data) setArchives(arcs.data);
         if (favs.data?.[0]) { setFavorites(favs.data[0].items || []); favRowId.current = favs.data[0].id; }
+        if (circs.data) setCircles(circs.data);
       } catch(e){ console.log("Supabase load:", e); }
       setLoaded(true);
     })();
@@ -2104,6 +2224,37 @@ export default function App() {
     setTimeout(()=>{setShowSuccess(null);setTab("archive");},2800);
   };
 
+  const inviteToCircle = async (email) => {
+    const trimmed = email.trim().toLowerCase();
+    if (trimmed === session.user.email.toLowerCase()) return { error: "Tu ne peux pas t'inviter toi-même" };
+    const existing = circles.find(c =>
+      (c.requester_id === session.user.id && c.recipient_email?.toLowerCase() === trimmed) ||
+      (c.recipient_id === session.user.id && c.requester_email?.toLowerCase() === trimmed)
+    );
+    if (existing && existing.status !== 'revoked' && existing.status !== 'declined') {
+      return { error: "Invitation déjà envoyée ou cercle déjà actif" };
+    }
+    const { data, error } = await supabase.from('circles').insert({
+      requester_id: session.user.id,
+      requester_email: session.user.email,
+      recipient_email: trimmed,
+    }).select().single();
+    if (error) return { error: error.message };
+    setCircles(prev => [...prev, data]);
+    return {};
+  };
+
+  const updateCircleStatus = async (id, status) => {
+    const { error } = await supabase.from('circles').update({ status, updated_at: new Date().toISOString() }).eq('id', id);
+    if (!error) {
+      if (status === 'revoked') {
+        setCircles(prev => prev.filter(c => c.id !== id));
+      } else {
+        setCircles(prev => prev.map(c => c.id === id ? { ...c, status } : c));
+      }
+    }
+  };
+
   const handleLogout = async () => { await supabase.auth.signOut(); };
 
   const globalStyle = (
@@ -2135,7 +2286,9 @@ export default function App() {
     <>
       {globalStyle}
       <div style={{ minHeight:"100vh", background:C.bg, maxWidth:430, margin:"0 auto" }}>
-        <Header tab={tab} itemCount={items.length} userEmail={session.user.email} onLogout={handleLogout}/>
+        <Header tab={tab} itemCount={items.length} userEmail={session.user.email} onLogout={handleLogout}
+          pendingCount={circles.filter(c=>c.recipient_id===session.user.id&&c.status==='pending').length}
+          onCircle={()=>setShowCircle(true)}/>
         <div style={{ paddingTop:4 }}>
           {!loaded && (
             <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", height:200, gap:16 }}>
@@ -2152,6 +2305,7 @@ export default function App() {
         </div>
         <TabBar tab={tab} setTab={setTab}/>
         {appToast && <Toast msg={appToast.msg} ok={appToast.ok}/>}
+        {showCircle && <CircleSheet circles={circles} userId={session.user.id} onClose={()=>setShowCircle(false)} onInvite={inviteToCircle} onUpdateStatus={updateCircleStatus}/>}
         {showSuccess && (
           <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:300, animation:"fadeIn 0.2s ease" }}>
             <div style={{ background:C.white, borderRadius:20, padding:"36px 32px", textAlign:"center", maxWidth:300, width:"90%", animation:"popIn 0.35s ease", boxShadow:"0 20px 60px rgba(0,0,0,0.25)" }}>
