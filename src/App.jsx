@@ -43,6 +43,27 @@ function normFormat(s) {
 
 // Clé unique d'un article de prix : marque+produit+format+magasin
 function priceKey(p){ return `${normName(p.brand)}_${normName(p.product)}_${normFormat(p.format)}_${p.storeId}`; }
+
+// Prix à l'unité (€/kg ou €/L) à partir du format texte
+function calcUnitPrice(price, format) {
+  if (!price || !format) return null;
+  const s = String(format).toLowerCase().trim().replace(/\s+/g,'').replace(',','.');
+  const multi = s.match(/^(\d+(?:\.\d+)?)[x×*](\d+(?:\.\d+)?)(g|kg|mg|l|ml|cl|dl)$/);
+  const single = s.match(/^(\d+(?:\.\d+)?)(g|kg|mg|l|ml|cl|dl)$/);
+  const [amt, unit] = multi
+    ? [parseFloat(multi[1]) * parseFloat(multi[2]), multi[3]]
+    : single ? [parseFloat(single[1]), single[2]] : [null, null];
+  if (!amt || !unit) return null;
+  const bases = { g: [1000,'kg'], kg:[1,'kg'], mg:[1e6,'kg'], l:[1,'L'], ml:[1000,'L'], cl:[100,'L'], dl:[10,'L'] };
+  const [div, label] = bases[unit] || [null,null];
+  if (!div) return null;
+  const perUnit = price / (amt / div);
+  return perUnit > 0 ? { value: perUnit, unit: label } : null;
+}
+function fmtUnitPrice(price, format) {
+  const up = calcUnitPrice(price, format);
+  return up ? `${up.value.toFixed(2).replace('.',',')} €/${up.unit}` : null;
+}
 const MOIS=['jan.','fév.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'];
 function formatMonth(yyyymm){ if(!yyyymm) return ''; const [y,m]=yyyymm.split('-'); return `${MOIS[parseInt(m)-1]} ${y}`; }
 
@@ -1865,7 +1886,12 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, userId }) {
                       {stale?`⚠️ Il y a ${days}j`:days===0?"✓ Aujourd'hui":`✓ Il y a ${days}j`}
                     </div>
                   </div>
-                  <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:17, color:entry.price===best.price?C.green:C.text }}>{entry.price.toFixed(2)} €</div>
+                  <div style={{ textAlign:"right" }}>
+                    <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:17, color:entry.price===best.price?C.green:C.text }}>{entry.price.toFixed(2)} €</div>
+                    {fmtUnitPrice(entry.price, group.format) && (
+                      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, color:C.gray, fontWeight:700, marginTop:1 }}>{fmtUnitPrice(entry.price, group.format)}</div>
+                    )}
+                  </div>
                   <button onClick={()=>{setEditPrice(entry);setShowEntry(true);}} style={{ background:C.grayLight, border:"none", borderRadius:8, padding:"5px 8px", fontSize:12, cursor:"pointer" }}>✏️</button>
                  {pendingDelete === entry.id ? (
                     <div style={{ display:"flex", gap:4 }}>
@@ -2024,6 +2050,9 @@ function CompareTab({ items, priceDB, onValidate }) {
                       <div style={{ textAlign:"right", flexShrink:0 }}>
                         <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:"#FFD700" }}>{total.toFixed(2)} €</div>
                         {item.qty>1 && <div style={{ fontFamily:F, fontSize:10, color:"rgba(255,255,255,0.4)" }}>{p.price.toFixed(2)} €/u</div>}
+                        {fmtUnitPrice(p.price, item.format) && (
+                          <div style={{ fontFamily:F, fontSize:10, color:"rgba(255,255,255,0.35)", marginTop:1 }}>{fmtUnitPrice(p.price, item.format)}</div>
+                        )}
                       </div>
                     ) : (
                       <span style={{ fontFamily:F, fontSize:12, fontWeight:800, color:"#FFD700", flexShrink:0 }}>⚠️ manquant</span>
