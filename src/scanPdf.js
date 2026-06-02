@@ -5,7 +5,7 @@ import { scanTicketWithClaude } from "./scanTicket";
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
-export async function scanPdfWithClaude(file, apiKey) {
+export async function scanPdfWithClaude(file, apiKey, refProducts = []) {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
 
@@ -42,5 +42,5 @@ export async function scanPdfWithClaude(file, apiKey) {
   }
 
   const base64 = merged.toDataURL("image/jpeg", 0.9).split(",")[1];
-  return scanTicketWithClaude(base64, apiKey);
+  return scanTicketWithClaude(base64, apiKey, refProducts);
 }

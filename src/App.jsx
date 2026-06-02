@@ -549,7 +549,7 @@ function AddItemSheet({ onClose, onAdd }) {
 }
 
 // ── IMPORT TICKET SHEET ───────────────────────────────────────────────────────
-function ImportTicketSheet({ onClose, onImport }) {
+function ImportTicketSheet({ onClose, onImport, refProducts = [] }) {
   const [jsonText, setJsonText] = useState("");
   const [status,   setStatus]   = useState("idle");
   const [error,    setError]    = useState("");
@@ -656,7 +656,7 @@ function ImportTicketSheet({ onClose, onImport }) {
                 setScanning(true); setError("");
                 try {
                   const base64 = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.readAsDataURL(file); });
-                  const parsed = await scanTicketWithClaude(base64, apiKey);
+                  const parsed = await scanTicketWithClaude(base64, apiKey, refProducts);
                   setResult(parsed); setSelectedStore(storeIdFromName(parsed.store));
                   setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true})));
                   setStoreNameEdit(parsed.store||"");
@@ -676,7 +676,7 @@ function ImportTicketSheet({ onClose, onImport }) {
                 setGalleryScanning(true); setError("");
                 try {
                   const base64 = await imageFileToJpegBase64(file);
-                  const parsed = await scanTicketWithClaude(base64, apiKey);
+                  const parsed = await scanTicketWithClaude(base64, apiKey, refProducts);
                   setResult(parsed); setSelectedStore(storeIdFromName(parsed.store));
                   setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true, share:true})));
                   setStoreNameEdit(parsed.store || "");
@@ -697,7 +697,7 @@ function ImportTicketSheet({ onClose, onImport }) {
                 if (!file) return;
                 setPdfScanning(true); setError("");
                 try {
-                  const parsed = await scanPdfWithClaude(file, apiKey);
+                  const parsed = await scanPdfWithClaude(file, apiKey, refProducts);
                   setResult(parsed);
                   setSelectedStore(storeIdFromName(parsed.store));
                   setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true, share:true})));
@@ -1642,7 +1642,7 @@ function EconomiesTab({ priceDB, archives, items, setTab }) {
 }
 
 // ── PRICES TAB ────────────────────────────────────────────────────────────────
-function PricesTab({ priceDB, setPriceDB, archives, updateArchive, userId }) {
+function PricesTab({ priceDB, setPriceDB, archives, updateArchive, userId, produitsRef = [] }) {
   const [showImport,    setShowImport]    = useState(false);
   const [showEntry,     setShowEntry]     = useState(false);
   const [editPrice,     setEditPrice]     = useState(null);
@@ -1912,7 +1912,7 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, userId }) {
         ✏️ Saisie manuelle
       </button>
 
-      {showImport    && <ImportTicketSheet onClose={()=>setShowImport(false)} onImport={importPrices}/>}
+      {showImport    && <ImportTicketSheet onClose={()=>setShowImport(false)} onImport={importPrices} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))}/>}
       {showEntry     && <PriceEntrySheet  onClose={()=>{setShowEntry(false);setEditPrice(null);}} onSave={savePrice} existingPrice={editPrice}/>}
       {toast && <Toast msg={toast.msg} ok={toast.ok}/>}
     </div>
@@ -2462,7 +2462,7 @@ export default function App() {
           {loaded && tab==="list"      && <ListTab      items={items} setItems={saveItems} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} setItems={saveItems} setTab={setTab} catalog={catalog} priceDB={priceDB}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate}/>}
-          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} userId={session?.user?.id}/>}
+          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} userId={session?.user?.id} produitsRef={produitsRef}/>}
           {loaded && tab==="archive"   && <ArchiveTab   archives={archives} onDelete={deleteArchive}/>}
           {loaded && tab==="economies" && <EconomiesTab priceDB={priceDB} archives={archives} items={items} setTab={setTab}/>}
         </div>

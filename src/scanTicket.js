@@ -22,7 +22,13 @@ export function imageFileToJpegBase64(file) {
   });
 }
 
-export async function scanTicketWithClaude(imageBase64, apiKey) {
+export async function scanTicketWithClaude(imageBase64, apiKey, refProducts = []) {
+  const refSection = refProducts.length > 0
+    ? `\n\nCatalogue de référence (${refProducts.length} produits génériques) :\n` +
+      refProducts.map(p => `- ${p.nom} (${p.categorie})`).join("\n") +
+      `\n\nPour chaque article du ticket, cherche dans ce catalogue le nom générique le plus proche (ex : "LT DEMI ECR" → "Lait demi-écrémé", "POULET ROT" → "Poulet rôti"). Utilise ce nom officiel dans le champ "name". Si aucune correspondance n'est évidente, normalise le nom du ticket (majuscules → minuscules, abréviations développées).`
+    : `\nNormalise les noms abrégés (ex: LT DEMI ECR → Lait demi-écrémé).`;
+
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -31,7 +37,7 @@ export async function scanTicketWithClaude(imageBase64, apiKey) {
     },
     body: JSON.stringify({
       model: "anthropic/claude-sonnet-4-5",
-      max_tokens: 1024,
+      max_tokens: 1500,
       messages: [
         {
           role: "user",
@@ -53,7 +59,7 @@ export async function scanTicketWithClaude(imageBase64, apiKey) {
     { "brand": "marque ou vide", "name": "nom du produit normalisé", "format": "format ou vide", "price": 0.00 }
   ]
 }
-Normalise les noms abrégés (ex: LT DEMI ECR → Lait demi-écrémé). Ignore les lignes qui ne sont pas des produits (total, TVA, etc).`,
+Ignore les lignes qui ne sont pas des produits (total, TVA, remises globales, etc).${refSection}`,
             },
           ],
         },
