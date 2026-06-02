@@ -596,12 +596,13 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [] }) {
     } catch(e) { setError("JSON invalide : "+e.message); }
   };
 
+  const [shareChecked, setShareChecked] = useState(new Set());
+
   const loadExample = () => { setJsonText(EXAMPLE); parseAndPreview(EXAMPLE); };
   const toggleProduct = id => setEditableProducts(prev=>prev.map(p=>p.id===id?{...p,keep:!p.keep}:p));
-  const toggleShare   = id => setEditableProducts(prev=>prev.map(p=>p.id===id?{...p,share:!p.share}:p));
   const updatePrice = (id,val) => setEditableProducts(prev=>prev.map(p=>p.id===id?{...p,price:parseFloat(val)||0}:p));
 
-  const confirm = () => {
+  const confirm = (idsToShare) => {
     const toImport=editableProducts.filter(p=>p.keep&&p.name&&p.price>0).map(p=>({
       id:Date.now()+p.id,
       brand:  p.brand||"",
@@ -612,10 +613,16 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [] }) {
       store_address: storeLocation.trim(),
       price:  p.price,
       date:   result?.date?new Date(result.date).toISOString():new Date().toISOString(),
-      share:  p.share !== false,
+      share:  idsToShare.has(p.id),
     }));
     onImport(toImport);
     onClose();
+  };
+
+  const goToShare = () => {
+    const ids = new Set(editableProducts.filter(p=>p.keep&&p.name&&p.price>0).map(p=>p.id));
+    setShareChecked(ids);
+    setStatus("share");
   };
 
   return (
@@ -793,26 +800,64 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [] }) {
                         style={{ width:68, padding:"6px 8px", textAlign:"right", borderRadius:8, border:`2px solid ${C.orange}`, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.orange, outline:"none" }} />
                       <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.orange }}>€</span>
                     </div>
-                    {p.keep && (
-                      <div style={{ borderTop:`1px solid ${C.grayLight}`, padding:"6px 14px", display:"flex", alignItems:"center", gap:6 }}>
-                        <button onClick={()=>toggleShare(p.id)}
-                          style={{ background:"none", border:"none", cursor:"pointer", fontSize:14, padding:0, lineHeight:1 }}>
-                          {p.share !== false ? "🌍" : "🔒"}
-                        </button>
-                        <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight }}>
-                          {p.share !== false ? "Partagé avec la communauté" : "Gardé privé"}
-                        </span>
-                      </div>
-                    )}
                   </div>
                 ))}
               </div>
 
-              <button onClick={confirm} style={{ width:"100%", padding:"16px", border:"none", borderRadius:12, background:C.orange, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.white, cursor:"pointer", marginBottom:10, boxShadow:"0 6px 20px rgba(204,0,0,0.35)" }}>
-                💾 Importer {editableProducts.filter(p=>p.keep).length} prix
+              <button onClick={goToShare} style={{ width:"100%", padding:"16px", border:"none", borderRadius:12, background:C.orange, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.white, cursor:"pointer", marginBottom:10, boxShadow:"0 6px 20px rgba(204,0,0,0.35)" }}>
+                Continuer →
               </button>
               <button onClick={()=>setStatus("idle")} style={{ width:"100%", padding:"13px", border:`2px solid ${C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.textLight, cursor:"pointer" }}>
                 ← Coller un autre JSON
+              </button>
+            </>
+          )}
+
+          {status==="share" && (
+            <>
+              <div style={{ background:"#F0FFF5", borderRadius:14, padding:"14px 16px", marginBottom:20, border:`1.5px solid ${C.green}` }}>
+                <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.green, marginBottom:4 }}>
+                  👥 Partager avec ton cercle ?
+                </div>
+                <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, lineHeight:1.5 }}>
+                  Ces prix seront visibles par tes contacts PrixMalin. Décoche les articles que tu veux garder privés.
+                </div>
+              </div>
+
+              <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:24 }}>
+                {editableProducts.filter(p=>p.keep&&p.name&&p.price>0).map(p => {
+                  const checked = shareChecked.has(p.id);
+                  const toggle = () => setShareChecked(prev => {
+                    const next = new Set(prev);
+                    checked ? next.delete(p.id) : next.add(p.id);
+                    return next;
+                  });
+                  return (
+                    <div key={p.id} onClick={toggle} style={{ display:"flex", alignItems:"center", gap:12, background:checked?"#F0FFF5":C.white, borderRadius:12, padding:"12px 14px", border:`1.5px solid ${checked?C.green:C.grayLight}`, cursor:"pointer" }}>
+                      <div style={{ width:24, height:24, borderRadius:6, flexShrink:0, border:`2px solid ${checked?C.green:C.gray}`, background:checked?C.green:C.white, display:"flex", alignItems:"center", justifyContent:"center", color:C.white, fontSize:13 }}>
+                        {checked ? "✓" : ""}
+                      </div>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                          {p.brand ? `${p.brand} · ` : ""}{p.name}
+                        </div>
+                        <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>{p.format}</div>
+                      </div>
+                      <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.orange, flexShrink:0 }}>
+                        {p.price.toFixed(2)} €
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <button onClick={()=>confirm(shareChecked)}
+                style={{ width:"100%", padding:"16px", border:"none", borderRadius:12, background:C.green, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.white, cursor:"pointer", marginBottom:10, boxShadow:"0 6px 20px rgba(0,179,65,0.35)" }}>
+                👥 Partager {shareChecked.size} article{shareChecked.size !== 1 ? "s" : ""}
+              </button>
+              <button onClick={()=>confirm(new Set())}
+                style={{ width:"100%", padding:"14px", border:`2px solid ${C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.textLight, cursor:"pointer" }}>
+                Non merci — garder tout privé
               </button>
             </>
           )}
