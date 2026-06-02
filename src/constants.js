@@ -5,6 +5,7 @@ export const STORES = [
   { id:"lidl",       name:"Lidl",        logo:"🟡" },
   { id:"intermarche",name:"Intermarché", logo:"🟢" },
   { id:"monoprix",   name:"Monoprix",    logo:"🟣" },
+  { id:"vival",      name:"Vival",       logo:"🟤" },
   { id:"autre",      name:"Autre",       logo:"🏪" },
 ];
 
