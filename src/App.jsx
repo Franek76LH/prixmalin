@@ -408,6 +408,7 @@ function Header({ tab, itemCount, userEmail, displayName, onLogout, pendingCount
 // ── TAB BAR ───────────────────────────────────────────────────────────────────
 function TabBar({ tab, setTab }) {
   const tabs = [
+    { id:"home",      icon:"🏠", label:"Accueil"   },
     { id:"list",      icon:"📋", label:"Liste"     },
     { id:"catalog",   icon:"🛍️", label:"Catalogue" },
     { id:"compare",   icon:"🏪", label:"Comparer"  },
@@ -2213,11 +2214,171 @@ function ArchiveTab({ archives, onDelete }) {
   );
 }
 
+// ── HOME TAB ─────────────────────────────────────────────────────────────────
+function HomeTab({ items, circles, profileMap, userId, setTab }) {
+  const F = "'Nunito',sans-serif";
+  const unchecked = items.filter(i => !i.checked).length;
+  const members   = circles.filter(c => c.status === 'accepted');
+  const avatarBg  = ["#E5181B","#F5C200","#00B341","#4A90D9","#8E44AD"];
+
+  const NavBtn = ({ label, icon, target, style = {} }) => (
+    <button onClick={() => setTab(target)} style={{
+      background: "#fff",
+      border: "none",
+      borderRadius: 16,
+      padding: "11px 18px",
+      fontFamily: F, fontWeight: 900, fontSize: 14, color: "#111",
+      cursor: "pointer",
+      boxShadow: "0 4px 20px rgba(0,0,0,0.13)",
+      display: "flex", alignItems: "center", gap: 7,
+      whiteSpace: "nowrap",
+      ...style,
+    }}>
+      <span style={{ fontSize: 16 }}>{icon}</span>
+      {label}
+    </button>
+  );
+
+  return (
+    <div style={{
+      background: "linear-gradient(160deg, #F5C200 60%, #FFDA44 100%)",
+      minHeight: "calc(100vh - 68px)",
+      position: "relative",
+      overflow: "hidden",
+      display: "flex",
+      flexDirection: "column",
+    }}>
+
+      {/* Illustration de fond (fournie par l'utilisateur → /illustration-home.png) */}
+      <img
+        src="/illustration-home.png" alt=""
+        style={{ position:"absolute", bottom:64, left:0, width:"100%", pointerEvents:"none", zIndex:1 }}
+        onError={e => { e.target.style.display = "none"; }}
+      />
+
+      {/* ── Barre du haut ── */}
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"18px 20px 0", position:"relative", zIndex:10 }}>
+
+        {/* Logo PM */}
+        <div style={{ background:"#E5181B", borderRadius:12, width:44, height:44, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:F, fontWeight:900, fontSize:17, color:"#fff", boxShadow:"0 3px 12px rgba(229,24,27,0.45)", letterSpacing:"-0.5px" }}>
+          PM
+        </div>
+
+        {/* Localisation */}
+        <div style={{ display:"flex", alignItems:"center", gap:6, background:"rgba(255,255,255,0.88)", borderRadius:99, padding:"9px 16px", fontFamily:F, fontWeight:800, fontSize:14, color:"#111", boxShadow:"0 2px 10px rgba(0,0,0,0.1)", cursor:"pointer" }}>
+          📍 Belleville <span style={{ fontSize:10, color:"#888", marginLeft:2 }}>▼</span>
+        </div>
+
+        {/* Avatar Moi */}
+        <div style={{ background:"#E5181B", borderRadius:99, width:44, height:44, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:F, fontWeight:900, fontSize:12, color:"#fff", boxShadow:"0 3px 12px rgba(229,24,27,0.45)", cursor:"pointer" }}>
+          Moi
+        </div>
+      </div>
+
+      {/* ── Navigation circulaire ── */}
+      <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", position:"relative", zIndex:10, paddingBottom:20 }}>
+        <div style={{ position:"relative", width:300, height:290 }}>
+
+          {/* Ma liste — haut centre */}
+          <div style={{ position:"absolute", top:0, left:"50%", transform:"translateX(-50%)" }}>
+            <button onClick={() => setTab("list")} style={{
+              background:"#fff", border:"none", borderRadius:16,
+              padding:"11px 18px",
+              fontFamily:F, fontWeight:900, fontSize:14, color:"#111",
+              cursor:"pointer", boxShadow:"0 4px 20px rgba(0,0,0,0.13)",
+              display:"flex", alignItems:"center", gap:7, whiteSpace:"nowrap",
+            }}>
+              <span style={{ fontSize:16 }}>📋</span>
+              Ma liste
+              {unchecked > 0 && (
+                <span style={{ background:"#E5181B", color:"#fff", borderRadius:99, padding:"2px 8px", fontSize:11, fontWeight:900 }}>
+                  {unchecked}
+                </span>
+              )}
+            </button>
+          </div>
+
+          {/* Catalogue — bas gauche */}
+          <div style={{ position:"absolute", bottom:0, left:0 }}>
+            <NavBtn label="Catalogue" icon="🛍️" target="catalog" />
+          </div>
+
+          {/* Comparer — bas droite */}
+          <div style={{ position:"absolute", bottom:0, right:0 }}>
+            <NavBtn label="Comparer" icon="🏪" target="compare" />
+          </div>
+
+          {/* Bouton Flasher — centre */}
+          <div style={{ position:"absolute", top:"50%", left:"50%", transform:"translate(-50%, -46%)", display:"flex", flexDirection:"column", alignItems:"center", gap:10 }}>
+            <button onClick={() => setTab("prices")} style={{
+              width:118, height:118,
+              borderRadius:"50%",
+              background:"#E5181B",
+              border:"5px solid #fff",
+              cursor:"pointer",
+              display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:5,
+              boxShadow:"0 8px 36px rgba(229,24,27,0.55), 0 0 0 10px rgba(229,24,27,0.12)",
+              transition:"transform 0.15s ease",
+            }}
+              onMouseDown={e => e.currentTarget.style.transform = "scale(0.94)"}
+              onMouseUp={e   => e.currentTarget.style.transform = "scale(1)"}
+              onTouchStart={e => e.currentTarget.style.transform = "scale(0.94)"}
+              onTouchEnd={e   => e.currentTarget.style.transform = "scale(1)"}
+            >
+              <span style={{ fontSize:28 }}>📷</span>
+              <span style={{ fontFamily:F, fontWeight:900, fontSize:16, color:"#fff", letterSpacing:"0.01em" }}>Flasher</span>
+            </button>
+            <div style={{ fontFamily:F, fontSize:13, color:"rgba(0,0,0,0.55)", fontWeight:700, textAlign:"center" }}>
+              un ticket de caisse
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      {/* ── Bandeau communautaire ── */}
+      <div style={{ margin:"0 16px 16px", background:"rgba(255,255,255,0.93)", borderRadius:18, padding:"13px 16px", display:"flex", alignItems:"center", gap:12, position:"relative", zIndex:10, boxShadow:"0 4px 20px rgba(0,0,0,0.1)" }}>
+
+        {/* Avatars empilés */}
+        <div style={{ display:"flex", flexShrink:0 }}>
+          {members.length > 0
+            ? members.slice(0, 3).map((c, i) => {
+                const otherId = c.requester_id === userId ? c.recipient_id : c.requester_id;
+                const initial = (profileMap[otherId] || "?")[0]?.toUpperCase() || "?";
+                return (
+                  <div key={c.id} style={{ width:32, height:32, borderRadius:"50%", background:avatarBg[i%avatarBg.length], border:"2px solid #fff", marginLeft:i>0?-10:0, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:F, fontWeight:900, fontSize:12, color:"#fff", position:"relative", zIndex:4-i }}>
+                    {initial}
+                  </div>
+                );
+              })
+            : [0,1,2].map(i => (
+                <div key={i} style={{ width:32, height:32, borderRadius:"50%", background:avatarBg[i], border:"2px solid #fff", marginLeft:i>0?-10:0, opacity:0.5, position:"relative", zIndex:3-i }}/>
+              ))
+          }
+          <div style={{ width:32, height:32, borderRadius:"50%", background:"#333", border:"2px solid #fff", marginLeft:-10, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:F, fontWeight:900, fontSize:9, color:"#fff", position:"relative", zIndex:0 }}>
+            +321
+          </div>
+        </div>
+
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:"#111" }}>
+            <span style={{ color:"#E5181B", fontWeight:900 }}>324</span> voisins partagent leurs prix
+          </div>
+          <div style={{ fontFamily:F, fontSize:11, color:"#666", marginTop:2 }}>
+            🔥 12 nouveaux prix aujourd'hui
+          </div>
+        </div>
+      </div>
+
+    </div>
+  );
+}
+
 // ── ROOT ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const [session,   setSession]   = useState(null);
   const [authReady, setAuthReady] = useState(false);
-  const [tab, setTab]           = useState("list");
+  const [tab, setTab]           = useState("home");
   const [items, setItems]       = useState([]);
   const [priceDB, setPriceDB]     = useState([]);
   const [archives, setArchives]   = useState([]);
@@ -2498,16 +2659,19 @@ export default function App() {
     <>
       {globalStyle}
       <div style={{ minHeight:"100vh", background:C.bg, maxWidth:430, margin:"0 auto" }}>
-        <Header tab={tab} itemCount={items.length} userEmail={session.user.email} displayName={pseudo} onLogout={handleLogout}
-          pendingCount={circles.filter(c=>(c.recipient_id===session.user.id||c.recipient_email?.toLowerCase()===session.user.email?.toLowerCase())&&c.status==='pending').length}
-          onCircle={()=>setShowCircle(true)}/>
-        <div style={{ paddingTop:4 }}>
+        {tab !== "home" && (
+          <Header tab={tab} itemCount={items.length} userEmail={session.user.email} displayName={pseudo} onLogout={handleLogout}
+            pendingCount={circles.filter(c=>(c.recipient_id===session.user.id||c.recipient_email?.toLowerCase()===session.user.email?.toLowerCase())&&c.status==='pending').length}
+            onCircle={()=>setShowCircle(true)}/>
+        )}
+        <div style={{ paddingTop: tab === "home" ? 0 : 4 }}>
           {!loaded && (
             <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", height:200, gap:16 }}>
               <div style={{ width:40, height:40, border:"4px solid #EFEFEF", borderTopColor:"#CC0000", borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
               <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:14, color:"#999" }}>Chargement...</div>
             </div>
           )}
+          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab}/>}
           {loaded && tab==="list"      && <ListTab      items={items} setItems={saveItems} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} setItems={saveItems} setTab={setTab} catalog={catalog} priceDB={priceDB}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate}/>}
