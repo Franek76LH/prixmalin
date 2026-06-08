@@ -2074,17 +2074,19 @@ function CompareTab({ items, priceDB, onValidate }) {
             </div>
 
             {/* Nom magasin */}
-            <div style={{ padding:"10px 18px 14px", display:"flex", alignItems:"center", gap:10 }}>
-              <span style={{ fontSize:26 }}>{best.logo}</span>
-              <div style={{ flex:1 }}>
-                <div style={{ fontFamily:F, fontWeight:900, fontSize:20, color:C.white }}>{best.name}</div>
-                <div style={{ fontFamily:F, fontSize:12, color:"rgba(255,255,255,0.6)" }}>
-                  {best.found}/{items.length} produit{items.length>1?"s":""} trouvé{best.found>1?"s":""}
-                  {best.missing.length>0 && <span style={{ color:"#FFD700" }}> · {best.missing.length} manquant{best.missing.length>1?"s":""}</span>}
+            <div style={{ padding:"10px 18px 14px" }}>
+              <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
+                <span style={{ fontSize:26 }}>{best.logo}</span>
+                <div>
+                  <div style={{ fontFamily:F, fontWeight:900, fontSize:20, color:C.white }}>{best.name}</div>
+                  <div style={{ fontFamily:F, fontSize:12, color:"rgba(255,255,255,0.6)" }}>
+                    {best.found}/{items.length} produit{items.length>1?"s":""} trouvé{best.found>1?"s":""}
+                    {best.missing.length>0 && <span style={{ color:"#FFD700" }}> · {best.missing.length} manquant{best.missing.length>1?"s":""}</span>}
+                  </div>
                 </div>
               </div>
               <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
-                style={{ flexShrink:0, background:"rgba(255,255,255,0.18)", borderRadius:10, padding:"8px 12px", fontFamily:F, fontWeight:800, fontSize:12, color:C.white, textDecoration:"none", display:"flex", alignItems:"center", gap:5 }}>
+                style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, background:"#fff", border:"2px solid #D32F2F", borderRadius:20, padding:"10px 18px", fontFamily:F, fontWeight:700, fontSize:14, color:"#D32F2F", textDecoration:"none", boxShadow:"0 2px 6px rgba(0,0,0,0.15)" }}>
                 📍 Y aller
               </a>
             </div>
