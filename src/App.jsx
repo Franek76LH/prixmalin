@@ -29,6 +29,10 @@ function storeIdFromName(n){
   if(s.includes("spar"))      return "spar";
   if(s.includes("netto"))     return "netto";
   if(s.includes("franprix"))  return "franprix";
+  if(s.includes("casino"))   return "casino";
+  if(s.includes("super u")||s.includes("superu")) return "superu";
+  if(s.includes("simply"))   return "simply";
+  if(s.includes("bio c"))    return "biocbon";
   return "autre";
 }
 
@@ -87,7 +91,7 @@ function guessCategory(name) {
   return "Autres";
 }
 
-const PURE_STORES = new Set(['auchan','carrefour','casino','intermarche','leclerc','e.leclerc','monoprix','lidl','u','vival','spar','netto','franprix']);
+const PURE_STORES = new Set(['auchan','carrefour','casino','intermarche','leclerc','e.leclerc','monoprix','lidl','u','vival','spar','netto','franprix','superu','super u','simply','simply market','biocbon','bio c bon']);
 function filterMDD(brands) {
   return brands.filter(m => {
     const n = m.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();

@@ -9,6 +9,10 @@ export const STORES = [
   { id:"spar",       name:"Spar",        logo:"🌲" },
   { id:"netto",      name:"Netto",       logo:"🔶" },
   { id:"franprix",   name:"Franprix",    logo:"🟥" },
+  { id:"casino",     name:"Casino",      logo:"🎰" },
+  { id:"superu",     name:"Super U",     logo:"🔷" },
+  { id:"simply",     name:"Simply Market", logo:"🛍️" },
+  { id:"biocbon",    name:"Bio c' Bon",  logo:"🌿" },
   { id:"autre",      name:"Autre",       logo:"🏪" },
 ];
 
