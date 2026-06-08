@@ -2350,40 +2350,6 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle }) {
         </div>
       </div>
 
-      {/* ── Bandeau communautaire ── */}
-      <div style={{ margin:"0 16px 16px", background:"rgba(255,255,255,0.93)", borderRadius:18, padding:"13px 16px", display:"flex", alignItems:"center", gap:12, position:"relative", zIndex:10, boxShadow:"0 4px 20px rgba(0,0,0,0.1)" }}>
-
-        {/* Avatars empilés */}
-        <div style={{ display:"flex", flexShrink:0 }}>
-          {members.length > 0
-            ? members.slice(0, 3).map((c, i) => {
-                const otherId = c.requester_id === userId ? c.recipient_id : c.requester_id;
-                const initial = (profileMap[otherId] || "?")[0]?.toUpperCase() || "?";
-                return (
-                  <div key={c.id} style={{ width:32, height:32, borderRadius:"50%", background:avatarBg[i%avatarBg.length], border:"2px solid #fff", marginLeft:i>0?-10:0, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:F, fontWeight:900, fontSize:12, color:"#fff", position:"relative", zIndex:4-i }}>
-                    {initial}
-                  </div>
-                );
-              })
-            : [0,1,2].map(i => (
-                <div key={i} style={{ width:32, height:32, borderRadius:"50%", background:avatarBg[i], border:"2px solid #fff", marginLeft:i>0?-10:0, opacity:0.5, position:"relative", zIndex:3-i }}/>
-              ))
-          }
-          <div style={{ width:32, height:32, borderRadius:"50%", background:"#333", border:"2px solid #fff", marginLeft:-10, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:F, fontWeight:900, fontSize:9, color:"#fff", position:"relative", zIndex:0 }}>
-            +321
-          </div>
-        </div>
-
-        <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:"#111" }}>
-            <span style={{ color:"#E5181B", fontWeight:900 }}>324</span> voisins partagent leurs prix
-          </div>
-          <div style={{ fontFamily:F, fontSize:11, color:"#666", marginTop:2 }}>
-            🔥 12 nouveaux prix aujourd'hui
-          </div>
-        </div>
-      </div>
-
     </div>
   );
 }
