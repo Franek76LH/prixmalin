@@ -478,9 +478,6 @@ function Header({ tab, itemCount, userEmail, displayName, onLogout, pendingCount
 function TabBar({ tab, setTab }) {
   const tabs = [
     { id:"home",      icon:"🏠", label:"Accueil"   },
-    { id:"list",      icon:"📋", label:"Liste"     },
-    { id:"catalog",   icon:"🛍️", label:"Catalogue" },
-    { id:"compare",   icon:"🏪", label:"Comparer"  },
     { id:"prices",    icon:"🏷️", label:"Mes prix"  },
     { id:"archive",   icon:"📦", label:"Historique"},
     { id:"economies", icon:"💰", label:"Économies" },
