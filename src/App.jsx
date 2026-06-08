@@ -236,22 +236,33 @@ function AuthScreen() {
   );
 }
 
-// ── CIRCLE SHEET ─────────────────────────────────────────────────────────────
-function CircleSheet({ circles, userId, userEmail, profileMap, onClose, onInvite, onUpdateStatus }) {
+// ── PROFIL SHEET ─────────────────────────────────────────────────────────────
+function ProfilSheet({ circles, userId, userEmail, profileMap, pseudo, archives, onClose, onInvite, onUpdateStatus, onLogout }) {
   const F = "'Nunito',sans-serif";
   const [inviteEmail,   setInviteEmail]   = useState('');
   const [inviteError,   setInviteError]   = useState('');
   const [inviteLoading, setInviteLoading] = useState(false);
+  const [sharedCount,   setSharedCount]   = useState(null);
+  const inviteRef = useRef(null);
+  const avatarColors = ["#E5181B","#F5C200","#00B341","#4A90D9","#8E44AD","#FF6B35"];
+
+  useEffect(() => {
+    supabase.from('community_prices')
+      .select('id', { count:'exact', head:true })
+      .eq('user_id', userId)
+      .then(({ count }) => setSharedCount(count ?? 0));
+  }, [userId]);
 
   const isMe = c => c.recipient_id === userId || c.recipient_email?.toLowerCase() === userEmail?.toLowerCase();
   const received = circles.filter(c => isMe(c) && c.status === 'pending');
   const accepted = circles.filter(c => c.status === 'accepted' && (c.requester_id === userId || isMe(c)));
   const sent     = circles.filter(c => c.requester_id === userId && c.status === 'pending');
-  const otherEmail   = c => c.requester_id === userId ? c.recipient_email : c.requester_email;
   const otherDisplay = c => {
     const otherId = c.requester_id === userId ? c.recipient_id : c.requester_id;
-    return (otherId && profileMap[otherId]) || otherEmail(c);
+    const email   = c.requester_id === userId ? c.recipient_email : c.requester_email;
+    return (otherId && profileMap[otherId]) || email || '?';
   };
+  const initial = s => (s || '?')[0].toUpperCase();
 
   const handleInvite = async () => {
     if (!inviteEmail.trim()) return;
@@ -261,88 +272,142 @@ function CircleSheet({ circles, userId, userEmail, profileMap, onClose, onInvite
     setInviteLoading(false);
   };
 
-  const sLabel = { fontFamily:F, fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8, marginTop:20 };
+  const ringR = 56;
+  const ringMembers = accepted.slice(0, 6);
 
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", zIndex:300, animation:"fadeIn 0.2s ease" }} onClick={onClose}>
-      <div onClick={e=>e.stopPropagation()} style={{ background:C.white, borderRadius:"20px 20px 0 0", width:"100%", maxWidth:430, margin:"0 auto", maxHeight:"85vh", display:"flex", flexDirection:"column", animation:"slideUp 0.3s ease" }}>
+      <div onClick={e=>e.stopPropagation()} style={{ background:C.white, borderRadius:"24px 24px 0 0", width:"100%", maxWidth:430, margin:"0 auto", maxHeight:"90vh", display:"flex", flexDirection:"column", animation:"slideUp 0.3s ease" }}>
 
-        <div style={{ background:C.blue, padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0, borderRadius:"20px 20px 0 0" }}>
-          <div style={{ fontFamily:F, fontWeight:900, fontSize:17, color:C.white }}>👥 Mon cercle</div>
-          <button onClick={onClose} style={{ background:"rgba(255,255,255,0.2)", border:"none", borderRadius:99, width:28, height:28, color:C.white, fontSize:14, cursor:"pointer" }}>✕</button>
+        {/* Header */}
+        <div style={{ padding:"20px 20px 0", display:"flex", alignItems:"flex-start", justifyContent:"space-between", flexShrink:0 }}>
+          <div>
+            <div style={{ fontFamily:F, fontWeight:900, fontSize:24, color:C.text }}>Profil</div>
+            <div style={{ fontFamily:F, fontSize:14, color:C.textLight, fontWeight:600, marginTop:2 }}>@{pseudo || 'Moi'}</div>
+          </div>
+          <button onClick={onClose} style={{ background:C.bg, border:"none", borderRadius:99, width:32, height:32, fontSize:15, cursor:"pointer", color:C.gray, marginTop:4 }}>✕</button>
         </div>
 
-        <div style={{ overflowY:"auto", flex:1, padding:"20px 20px 40px" }}>
+        {/* Avatar ring + savings */}
+        <div style={{ display:"flex", flexDirection:"column", alignItems:"center", paddingTop:20, paddingBottom:4, flexShrink:0 }}>
+          <div style={{ position:"relative", width:168, height:168 }}>
+            <svg width="168" height="168" style={{ position:"absolute", inset:0 }}>
+              <circle cx="84" cy="84" r={ringR} fill="none" stroke={C.grayLight} strokeWidth="2"/>
+            </svg>
+            <div style={{ position:"absolute", inset:0, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}>
+              <div style={{ fontFamily:F, fontWeight:900, fontSize:28, color:C.text, lineHeight:1 }}>0€</div>
+              <div style={{ fontFamily:F, fontSize:11, color:C.green, fontWeight:700, marginTop:3 }}>+0€ ce mois-ci</div>
+            </div>
+            {ringMembers.length === 0 ? (
+              <div style={{ position:"absolute", left:84+ringR-14, top:84-14, width:28, height:28, borderRadius:"50%", background:C.grayLight, display:"flex", alignItems:"center", justifyContent:"center", fontSize:16, color:C.gray, border:"2px solid white" }}>+</div>
+            ) : ringMembers.map((c, i) => {
+              const angle = (2 * Math.PI * i / ringMembers.length) - Math.PI / 2;
+              const x = 84 + ringR * Math.cos(angle) - 14;
+              const y = 84 + ringR * Math.sin(angle) - 14;
+              return (
+                <div key={c.id} style={{ position:"absolute", left:x, top:y, width:28, height:28, borderRadius:"50%", background:avatarColors[i%avatarColors.length], display:"flex", alignItems:"center", justifyContent:"center", fontFamily:F, fontWeight:900, fontSize:12, color:"#fff", border:"2px solid white", boxShadow:"0 2px 6px rgba(0,0,0,0.15)" }}>
+                  {initial(otherDisplay(c))}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Scrollable */}
+        <div style={{ overflowY:"auto", flex:1, padding:"8px 20px 40px" }}>
 
           {/* Invitations reçues */}
           {received.length > 0 && (<>
-            <div style={sLabel}>📩 Invitations reçues</div>
+            <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:"#E5181B", textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>
+              📩 {received.length} invitation{received.length>1?"s":""} reçue{received.length>1?"s":""}
+            </div>
             {received.map(c => (
-              <div key={c.id} style={{ background:"#FFFBEA", borderRadius:12, padding:"12px 14px", marginBottom:8, border:`1.5px solid ${C.orange}`, display:"flex", alignItems:"center", gap:10 }}>
+              <div key={c.id} style={{ background:"#FFFBEA", borderRadius:12, padding:"12px 14px", marginBottom:8, border:"1.5px solid #FFD000", display:"flex", alignItems:"center", gap:10 }}>
                 <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{(c.requester_id && profileMap[c.requester_id]) || c.requester_email}</div>
                   <div style={{ fontFamily:F, fontSize:11, color:C.textLight }}>veut partager ses prix avec toi</div>
                 </div>
-                <button onClick={()=>onUpdateStatus(c.id,'accepted')} style={{ padding:"8px 10px", border:"none", borderRadius:8, background:C.green, fontFamily:F, fontWeight:800, fontSize:12, color:C.white, cursor:"pointer", flexShrink:0 }}>✓ Accepter</button>
-                <button onClick={()=>onUpdateStatus(c.id,'declined')} style={{ padding:"8px 10px", border:`1px solid ${C.grayLight}`, borderRadius:8, background:C.white, fontFamily:F, fontWeight:800, fontSize:12, color:C.gray, cursor:"pointer", flexShrink:0 }}>✕</button>
+                <button onClick={()=>onUpdateStatus(c.id,'accepted')} style={{ padding:"8px 10px", border:"none", borderRadius:8, background:C.green, fontFamily:F, fontWeight:800, fontSize:12, color:"#fff", cursor:"pointer", flexShrink:0 }}>✓</button>
+                <button onClick={()=>onUpdateStatus(c.id,'declined')} style={{ padding:"8px 10px", border:"1px solid #EFEFEF", borderRadius:8, background:"#fff", fontFamily:F, fontWeight:800, fontSize:12, color:C.gray, cursor:"pointer", flexShrink:0 }}>✕</button>
               </div>
             ))}
           </>)}
 
-          {/* Membres actifs */}
-          {accepted.length > 0 && (<>
-            <div style={sLabel}>🤝 Membres du cercle</div>
-            {accepted.map(c => (
-              <div key={c.id} style={{ background:C.white, borderRadius:12, padding:"12px 14px", marginBottom:8, border:`1px solid ${C.grayLight}`, display:"flex", alignItems:"center", gap:10 }}>
-                <span style={{ fontSize:22, flexShrink:0 }}>👤</span>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{otherDisplay(c)}</div>
-                  <div style={{ fontFamily:F, fontSize:11, color:C.green, fontWeight:700 }}>● Partage actif · prix mutuels visibles</div>
-                </div>
-                <button onClick={()=>onUpdateStatus(c.id,'revoked')} style={{ padding:"6px 10px", border:`1px solid ${C.grayLight}`, borderRadius:8, background:C.white, fontFamily:F, fontWeight:700, fontSize:11, color:C.gray, cursor:"pointer", flexShrink:0 }}>Révoquer</button>
-              </div>
-            ))}
-          </>)}
-
-          {/* Invitations envoyées */}
-          {sent.length > 0 && (<>
-            <div style={sLabel}>📤 Invitations envoyées</div>
-            {sent.map(c => (
-              <div key={c.id} style={{ background:C.white, borderRadius:12, padding:"12px 14px", marginBottom:8, border:`1px solid ${C.grayLight}`, display:"flex", alignItems:"center", gap:10 }}>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{c.recipient_email}</div>
-                  <div style={{ fontFamily:F, fontSize:11, color:C.textLight }}>En attente d'acceptation</div>
-                </div>
-                <button onClick={()=>onUpdateStatus(c.id,'revoked')} style={{ padding:"6px 10px", border:`1px solid ${C.grayLight}`, borderRadius:8, background:C.white, fontFamily:F, fontWeight:700, fontSize:11, color:C.gray, cursor:"pointer", flexShrink:0 }}>Annuler</button>
-              </div>
-            ))}
-          </>)}
-
-          {received.length === 0 && accepted.length === 0 && sent.length === 0 && (
-            <div style={{ textAlign:"center", padding:"24px 0 8px", fontFamily:F, fontSize:13, color:C.textLight, lineHeight:1.7 }}>
-              Ton cercle est vide.<br/>Invite des amis pour comparer vos prix !
+          {/* MON CERCLE */}
+          <div style={{ background:C.bg, borderRadius:16, padding:"14px 16px", marginBottom:14 }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:accepted.length+sent.length>0?12:0 }}>
+              <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em" }}>Mon cercle · Famille</div>
+              <button onClick={()=>{ inviteRef.current?.focus(); inviteRef.current?.scrollIntoView({behavior:"smooth",block:"center"}); }}
+                style={{ background:C.blue, border:"none", borderRadius:20, padding:"6px 14px", fontFamily:F, fontWeight:800, fontSize:12, color:"#fff", cursor:"pointer" }}>
+                + Inviter
+              </button>
             </div>
-          )}
+            {accepted.length === 0 && sent.length === 0 && (
+              <div style={{ fontFamily:F, fontSize:13, color:C.textLight, padding:"8px 0 4px" }}>Aucun membre pour l'instant</div>
+            )}
+            {accepted.map((c, i) => {
+              const name = otherDisplay(c);
+              return (
+                <div key={c.id} style={{ display:"flex", alignItems:"center", gap:12, paddingTop:i>0?10:0, paddingBottom:10, borderTop:i>0?`1px solid ${C.grayLight}`:"none" }}>
+                  <div style={{ width:36, height:36, borderRadius:"50%", background:avatarColors[i%avatarColors.length], display:"flex", alignItems:"center", justifyContent:"center", fontFamily:F, fontWeight:900, fontSize:14, color:"#fff", flexShrink:0 }}>
+                    {initial(name)}
+                  </div>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontFamily:F, fontWeight:800, fontSize:14, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{name}</div>
+                    <div style={{ fontFamily:F, fontSize:11, color:C.green, fontWeight:700 }}>● Partage actif</div>
+                  </div>
+                  <button onClick={()=>onUpdateStatus(c.id,'revoked')} style={{ padding:"4px 10px", border:`1px solid ${C.grayLight}`, borderRadius:8, background:"#fff", fontFamily:F, fontSize:11, color:C.gray, cursor:"pointer" }}>Retirer</button>
+                </div>
+              );
+            })}
+            {sent.map((c, i) => (
+              <div key={c.id} style={{ display:"flex", alignItems:"center", gap:12, paddingTop:accepted.length+i>0?10:0, paddingBottom:10, borderTop:accepted.length+i>0?`1px solid ${C.grayLight}`:"none" }}>
+                <div style={{ width:36, height:36, borderRadius:"50%", background:C.grayLight, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:F, fontWeight:900, fontSize:14, color:C.gray, flexShrink:0 }}>?</div>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontFamily:F, fontWeight:700, fontSize:13, color:C.textLight, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{c.recipient_email}</div>
+                  <div style={{ fontFamily:F, fontSize:11, color:"#FFD000", fontWeight:700 }}>⏳ En attente</div>
+                </div>
+                <button onClick={()=>onUpdateStatus(c.id,'revoked')} style={{ padding:"4px 10px", border:`1px solid ${C.grayLight}`, borderRadius:8, background:"#fff", fontFamily:F, fontSize:11, color:C.gray, cursor:"pointer" }}>Annuler</button>
+              </div>
+            ))}
+          </div>
 
-          {/* Formulaire d'invitation */}
-          <div style={{ marginTop:24 }}>
+          {/* Stats */}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:20 }}>
+            {[
+              { label:"Prix partagés", value: sharedCount === null ? "…" : String(sharedCount) },
+              { label:"Tickets",        value: String(archives.length) },
+              { label:"Rang",           value: "#1" },
+            ].map(s => (
+              <div key={s.label} style={{ background:C.bg, borderRadius:14, padding:"14px 8px", textAlign:"center" }}>
+                <div style={{ fontFamily:F, fontWeight:900, fontSize:22, color:C.text }}>{s.value}</div>
+                <div style={{ fontFamily:F, fontSize:11, color:C.textLight, fontWeight:600, marginTop:3 }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Invite form */}
+          <div style={{ marginBottom:20 }}>
             <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Inviter par email</div>
             <div style={{ display:"flex", gap:8 }}>
-              <input type="email" value={inviteEmail} onChange={e=>setInviteEmail(e.target.value)}
+              <input ref={inviteRef} type="email" value={inviteEmail} onChange={e=>setInviteEmail(e.target.value)}
                 onKeyDown={e=>e.key==='Enter'&&handleInvite()}
                 placeholder="ami@email.com"
-                style={{ flex:1, padding:"12px 14px", borderRadius:10, border:`2px solid ${inviteEmail?C.blue:C.grayLight}`, fontFamily:F, fontSize:14, color:C.text, boxSizing:"border-box" }}
+                style={{ flex:1, padding:"12px 14px", borderRadius:10, border:`2px solid ${inviteEmail?C.blue:C.grayLight}`, fontFamily:F, fontSize:14, color:C.text, outline:"none" }}
               />
-              <button onClick={handleInvite} disabled={inviteLoading || !inviteEmail.trim()}
-                style={{ padding:"12px 16px", border:"none", borderRadius:10, background:inviteLoading||!inviteEmail.trim()?C.grayLight:C.blue, fontFamily:F, fontWeight:900, fontSize:14, color:inviteLoading||!inviteEmail.trim()?C.gray:C.white, cursor:inviteLoading||!inviteEmail.trim()?"default":"pointer", flexShrink:0 }}>
+              <button onClick={handleInvite} disabled={inviteLoading||!inviteEmail.trim()}
+                style={{ padding:"12px 16px", border:"none", borderRadius:10, background:inviteLoading||!inviteEmail.trim()?C.grayLight:C.blue, fontFamily:F, fontWeight:900, fontSize:14, color:inviteLoading||!inviteEmail.trim()?C.gray:"#fff", cursor:inviteLoading||!inviteEmail.trim()?"default":"pointer", flexShrink:0 }}>
                 {inviteLoading ? "…" : "Inviter"}
               </button>
             </div>
-            {inviteError && <div style={{ fontFamily:F, fontSize:12, color:C.red, fontWeight:700, marginTop:8 }}>⚠️ {inviteError}</div>}
-            <div style={{ fontFamily:F, fontSize:11, color:C.textLight, marginTop:8, lineHeight:1.5 }}>
-              L'autre utilisateur doit avoir un compte PrixMalin. Il devra accepter l'invitation pour que le partage soit actif.
-            </div>
+            {inviteError && <div style={{ fontFamily:F, fontSize:12, color:"#CC0000", fontWeight:700, marginTop:8 }}>⚠️ {inviteError}</div>}
           </div>
+
+          {/* Se déconnecter */}
+          <button onClick={()=>{ onClose(); onLogout(); }}
+            style={{ width:"100%", padding:"14px", border:`1.5px solid ${C.grayLight}`, borderRadius:14, background:"#fff", fontFamily:F, fontWeight:800, fontSize:14, color:C.textLight, cursor:"pointer" }}>
+            Se déconnecter
+          </button>
         </div>
       </div>
     </div>
@@ -2661,7 +2726,7 @@ export default function App() {
         </div>
         <TabBar tab={tab} setTab={setTab}/>
         {appToast && <Toast msg={appToast.msg} ok={appToast.ok}/>}
-        {showCircle && <CircleSheet circles={circles} userId={session.user.id} userEmail={session.user.email} profileMap={profileMap} onClose={()=>setShowCircle(false)} onInvite={inviteToCircle} onUpdateStatus={updateCircleStatus}/>}
+        {showCircle && <ProfilSheet circles={circles} userId={session.user.id} userEmail={session.user.email} profileMap={profileMap} pseudo={pseudo} archives={archives} onClose={()=>setShowCircle(false)} onInvite={inviteToCircle} onUpdateStatus={updateCircleStatus} onLogout={handleLogout}/>}
         {loaded && pseudo === null && <PseudoModal onSave={savePseudo}/>}
         {showSuccess && (
           <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:300, animation:"fadeIn 0.2s ease" }}>
