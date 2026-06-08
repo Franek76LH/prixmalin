@@ -2007,6 +2007,10 @@ function CompareTab({ items, priceDB, onValidate }) {
   const ranked       = STORES.map(s=>({...s,...storeTotals[s.id]})).filter(s=>s.found>0).sort((a,b)=>b.found!==a.found?b.found-a.found:a.total-b.total);
   const best         = ranked[0];
   const worstTotal   = ranked.length>1 ? ranked[ranked.length-1].total : 0;
+
+  const bestStoreEntry = best ? priceDB.find(p => p.storeId === best.id && p.store_address?.trim()) : null;
+  const mapsQuery      = best ? `${best.name}${bestStoreEntry ? ' ' + bestStoreEntry.store_address : ''}` : '';
+  const mapsUrl        = best ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapsQuery)}` : '#';
   const maxSavings   = best ? worstTotal - best.total : 0;
   const totalItems   = items.reduce((a,i)=>a+i.qty,0);
   const missingGlobal= items.filter(item=>!priceDB.some(p=>itemMatchesPrice(item,p)));
@@ -2072,13 +2076,17 @@ function CompareTab({ items, priceDB, onValidate }) {
             {/* Nom magasin */}
             <div style={{ padding:"10px 18px 14px", display:"flex", alignItems:"center", gap:10 }}>
               <span style={{ fontSize:26 }}>{best.logo}</span>
-              <div>
+              <div style={{ flex:1 }}>
                 <div style={{ fontFamily:F, fontWeight:900, fontSize:20, color:C.white }}>{best.name}</div>
                 <div style={{ fontFamily:F, fontSize:12, color:"rgba(255,255,255,0.6)" }}>
                   {best.found}/{items.length} produit{items.length>1?"s":""} trouvé{best.found>1?"s":""}
                   {best.missing.length>0 && <span style={{ color:"#FFD700" }}> · {best.missing.length} manquant{best.missing.length>1?"s":""}</span>}
                 </div>
               </div>
+              <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
+                style={{ flexShrink:0, background:"rgba(255,255,255,0.18)", borderRadius:10, padding:"8px 12px", fontFamily:F, fontWeight:800, fontSize:12, color:C.white, textDecoration:"none", display:"flex", alignItems:"center", gap:5 }}>
+                📍 Y aller
+              </a>
             </div>
 
             {/* Liste des articles */}
