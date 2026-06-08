@@ -2069,10 +2069,15 @@ function CompareTab({ items, priceDB, onValidate }) {
             {/* Badge + Prix total */}
             <div style={{ padding:"18px 18px 0", display:"flex", alignItems:"flex-start", justifyContent:"space-between" }}>
               <div style={{ background:C.orange, borderRadius:8, padding:"4px 12px", fontFamily:F, fontWeight:900, fontSize:11, color:C.white, letterSpacing:"0.04em" }}>
-                🥇 MEILLEUR PRIX
+                🥇 {best.missing.length > 0 ? "MEILLEUR PRIX PARTIEL" : "MEILLEUR PRIX"}
               </div>
               <div style={{ textAlign:"right" }}>
                 <div style={{ fontFamily:F, fontWeight:900, fontSize:34, color:C.white, lineHeight:1 }}>{best.total.toFixed(2)} €</div>
+                {best.missing.length > 0 && (
+                  <div style={{ fontFamily:F, fontSize:11, color:"#FFD700", fontWeight:700, marginTop:4 }}>
+                    Prix pour {best.found} article{best.found>1?"s":""} sur {items.length} — panier incomplet
+                  </div>
+                )}
                 {maxSavings>0.05 && <div style={{ fontFamily:F, fontSize:11, color:"rgba(255,255,255,0.6)", marginTop:2 }}>−{maxSavings.toFixed(2)} € vs le + cher</div>}
               </div>
             </div>
@@ -2276,11 +2281,6 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle }) {
         {/* Logo PM */}
         <div style={{ background:"#E5181B", borderRadius:12, width:44, height:44, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:F, fontWeight:900, fontSize:17, color:"#fff", boxShadow:"0 3px 12px rgba(229,24,27,0.45)", letterSpacing:"-0.5px" }}>
           PM
-        </div>
-
-        {/* Localisation */}
-        <div style={{ display:"flex", alignItems:"center", gap:6, background:"rgba(255,255,255,0.88)", borderRadius:99, padding:"9px 16px", fontFamily:F, fontWeight:800, fontSize:14, color:"#111", boxShadow:"0 2px 10px rgba(0,0,0,0.1)", cursor:"pointer" }}>
-          📍 Belleville <span style={{ fontSize:10, color:"#888", marginLeft:2 }}>▼</span>
         </div>
 
         {/* Avatar Moi */}
