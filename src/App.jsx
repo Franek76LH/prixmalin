@@ -630,6 +630,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [] }) {
   const [scanning,      setScanning]      = useState(false);
   const [galleryScanning, setGalleryScanning] = useState(false);
   const [pdfScanning,   setPdfScanning]   = useState(false);
+  const [saving,        setSaving]        = useState(false);
   const [storeNameEdit, setStoreNameEdit] = useState("");
   const [storeLocation, setStoreLocation] = useState("");
   const fileInputRef    = useRef(null);
@@ -670,11 +671,14 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [] }) {
   const updatePrice = (id,val) => setEditableProducts(prev=>prev.map(p=>p.id===id?{...p,price:parseFloat(val)||0}:p));
 
   const confirm = (idsToShare) => {
+    if (saving) return;
+    setSaving(true);
     const toImport=editableProducts.filter(p=>p.keep&&p.name&&p.price>0).map(p=>({
       id:Date.now()+p.id,
       brand:  p.brand||"",
       product:p.name,
       format: p.format||"",
+      qty:    p.qty||1,
       storeId:selectedStore||"autre",
       store_name: storeNameEdit.trim() || result?.store || "",
       store_address: storeLocation.trim(),
@@ -918,12 +922,12 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [] }) {
                 })}
               </div>
 
-              <button onClick={()=>confirm(shareChecked)}
-                style={{ width:"100%", padding:"16px", border:"none", borderRadius:12, background:C.green, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.white, cursor:"pointer", marginBottom:10, boxShadow:"0 6px 20px rgba(0,179,65,0.35)" }}>
+              <button onClick={()=>confirm(shareChecked)} disabled={saving}
+                style={{ width:"100%", padding:"16px", border:"none", borderRadius:12, background:saving?C.grayLight:C.green, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.white, cursor:saving?"default":"pointer", marginBottom:10, boxShadow:saving?"none":"0 6px 20px rgba(0,179,65,0.35)" }}>
                 👥 Partager {shareChecked.size} article{shareChecked.size !== 1 ? "s" : ""}
               </button>
-              <button onClick={()=>confirm(new Set())}
-                style={{ width:"100%", padding:"14px", border:`2px solid ${C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.textLight, cursor:"pointer" }}>
+              <button onClick={()=>confirm(new Set())} disabled={saving}
+                style={{ width:"100%", padding:"14px", border:`2px solid ${C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:saving?C.gray:C.textLight, cursor:saving?"default":"pointer" }}>
                 Non merci — garder tout privé
               </button>
             </>
@@ -1701,7 +1705,7 @@ function EconomiesTab({ priceDB, archives, items, setTab }) {
           {/* Dernières courses scannées */}
           <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:24 }}>
             {[...scannedArchives].reverse().slice(0,8).map((arc,i) => {
-              const store = arc.store;
+              const store = arc.store || {};
               const pos = (arc.realized_saving || 0) >= 0;
               return (
                 <div key={arc.id||i} style={{ background:C.white, borderRadius:12, padding:"12px 14px", border:`1px solid ${C.grayLight}`, display:"flex", alignItems:"center", gap:10 }}>
@@ -1813,7 +1817,7 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
         date:    entries[0]?.date || new Date().toISOString(),
         store:   storeInfo,
         total,
-        items:   entries.map(e => ({ id: Date.now()+Math.random(), product: e.product, format: e.format||"", brand: e.brand||"", qty: 1, checked: false })),
+        items:   entries.map(e => ({ id: Date.now()+Math.random(), product: e.product, format: e.format||"", brand: e.brand||"", qty: e.qty||1, checked: false })),
         potential_saving: 0,
         realized_saving:  0,
         ticket_scanned:   true,
@@ -2353,7 +2357,7 @@ function ArchiveTab({ archives, onDelete, onAddToList, priceDB }) {
             <div key={arc.id} style={{ background:C.white, borderRadius:14, border:`1px solid ${C.grayLight}`, overflow:"hidden", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", animation:`slideIn 0.25s ease ${i*0.06}s both` }}>
               <div style={{ background:C.blueLight, padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                 <div>
-                  <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.blue }}>{arc.store.logo} {arc.store.name}</div>
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.blue }}>{arc.store?.logo} {arc.store?.name}</div>
                   <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, marginTop:1 }}>{new Date(arc.date).toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}</div>
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:8 }}>
