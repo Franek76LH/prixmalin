@@ -2238,9 +2238,10 @@ function CompareTab({ items, priceDB, onValidate }) {
 }
 
 // ── ARCHIVE TAB ───────────────────────────────────────────────────────────────
-function ArchiveTab({ archives, onDelete, onAddToList }) {
+function ArchiveTab({ archives, onDelete, onAddToList, priceDB }) {
   const [pendingDeleteArc, setPendingDeleteArc] = useState(null);
   const [added, setAdded] = useState(new Set());
+  const [sort, setSort] = useState("date");
 
   if(archives.length===0) return (
     <div style={{ padding:"40px 20px 100px", textAlign:"center" }}>
@@ -2250,6 +2251,24 @@ function ArchiveTab({ archives, onDelete, onAddToList }) {
     </div>
   );
   const totalSpent=archives.reduce((a,arc)=>a+arc.total,0);
+  const FILTERS=[{id:"date",label:"Date ↓"},{id:"magasin",label:"Magasin"},{id:"produit",label:"Produit"},{id:"montant",label:"Montant"}];
+  const sorted=[...archives];
+  if(sort==="date")    sorted.reverse();
+  else if(sort==="magasin") sorted.sort((a,b)=>a.store.name.localeCompare(b.store.name,"fr"));
+  else if(sort==="montant") sorted.sort((a,b)=>b.total-a.total);
+  const productList=useMemo(()=>{
+    const seen=new Set(); const result=[];
+    [...archives].reverse().forEach(arc=>arc.items.forEach(item=>{
+      const key=`${normName(item.brand||"")}_${normName(item.product)}_${normName(item.format||"")}`;
+      if(!seen.has(key)){
+        seen.add(key);
+        const matches=(priceDB||[]).filter(p=>normName(p.product)===normName(item.product)&&normName(p.format||"")===normName(item.format||"")&&normName(p.brand||"")===normName(item.brand||""));
+        const best=matches.sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
+        result.push({...item,unitPrice:best?.price??null});
+      }
+    }));
+    return result.sort((a,b)=>a.product.localeCompare(b.product,"fr"));
+  },[archives,priceDB]);
   return (
     <div style={{ padding:"16px 16px 110px" }}>
       <div style={{ display:"flex", gap:10, marginBottom:16 }}>
@@ -2262,39 +2281,59 @@ function ArchiveTab({ archives, onDelete, onAddToList }) {
           <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:24, color:C.white }}>{totalSpent.toFixed(0)} €</div>
         </div>
       </div>
-      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-        {[...archives].reverse().map((arc,i)=>(
-          <div key={arc.id} style={{ background:C.white, borderRadius:14, border:`1px solid ${C.grayLight}`, overflow:"hidden", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", animation:`slideIn 0.25s ease ${i*0.06}s both` }}>
-            <div style={{ background:C.blueLight, padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-              <div>
-                <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.blue }}>{arc.store.logo} {arc.store.name}</div>
-                <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, marginTop:1 }}>{new Date(arc.date).toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}</div>
-              </div>
-              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                <div style={{ background:C.blue, borderRadius:10, padding:"6px 14px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:18, color:C.white }}>{arc.total.toFixed(2)} €</div>
-                {pendingDeleteArc === arc.id ? (
-                  <div style={{ display:"flex", gap:4 }}>
-                    <button onClick={()=>setPendingDeleteArc(null)} style={{ background:C.grayLight, border:"none", borderRadius:6, padding:"4px 9px", fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:11, cursor:"pointer", color:C.text }}>Non</button>
-                    <button onClick={()=>{ onDelete(arc); setPendingDeleteArc(null); }} style={{ background:C.red, border:"none", borderRadius:6, padding:"4px 9px", fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:11, cursor:"pointer", color:C.white }}>Oui</button>
-                  </div>
-                ) : (
-                  <button onClick={()=>setPendingDeleteArc(arc.id)} style={{ background:"none", border:"none", fontSize:14, cursor:"pointer", color:C.gray, padding:"4px" }}>✕</button>
-                )}
-              </div>
-            </div>
-            <div style={{ padding:"10px 16px 14px", display:"flex", flexWrap:"wrap", gap:6 }}>
-              {arc.items.map((item,j)=>(
-                <span key={j} style={{ background:C.grayLight, borderRadius:99, padding:"4px 8px 4px 12px", fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:700, color:C.textLight, display:"inline-flex", alignItems:"center", gap:6 }}>
-                  {item.brand?`${item.brand} · `:""}{item.product} {item.format} ×{item.qty}
-                  {(()=>{ const key=`${arc.id}_${j}`; const done=added.has(key); return (
-                    <button onClick={()=>{ if(!done){ onAddToList(item); setAdded(prev=>new Set(prev).add(key)); } }} style={{ background:done?C.green:C.blue, border:"none", borderRadius:99, width:18, height:18, display:"inline-flex", alignItems:"center", justifyContent:"center", cursor:done?"default":"pointer", color:C.white, fontSize:11, fontWeight:900, padding:0, flexShrink:0 }}>{done?"✓":"+"}</button>
-                  );})()}
-                </span>
-              ))}
-            </div>
-          </div>
+      <div style={{ display:"flex", gap:8, overflowX:"auto", marginBottom:14, paddingBottom:2, WebkitOverflowScrolling:"touch" }}>
+        {FILTERS.map(f=>(
+          <button key={f.id} onClick={()=>setSort(f.id)} style={{ flexShrink:0, background:sort===f.id?C.blue:C.grayLight, color:sort===f.id?C.white:C.textLight, border:"none", borderRadius:99, padding:"6px 14px", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, cursor:"pointer", whiteSpace:"nowrap" }}>{f.label}</button>
         ))}
       </div>
+      {sort==="produit" ? (
+        <div style={{ display:"flex", flexDirection:"column" }}>
+          {productList.map((item,i)=>{ const key=`pl_${i}`; const done=added.has(key); return (
+            <div key={i} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 4px", borderBottom:`1px solid ${C.grayLight}` }}>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:700, color:C.text }}>{item.brand?`${item.brand} · `:""}{item.product}{item.format?` ${item.format}`:""}</div>
+              <div style={{ display:"flex", alignItems:"center", gap:10, flexShrink:0, marginLeft:12 }}>
+                <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:900, color:C.blue }}>{item.unitPrice!=null?`${item.unitPrice.toFixed(2)} €`:"—"}</div>
+                <button onClick={()=>{ if(!done){ onAddToList(item); setAdded(prev=>new Set(prev).add(key)); } }} style={{ background:done?C.green:C.red, border:"none", borderRadius:99, width:22, height:22, display:"inline-flex", alignItems:"center", justifyContent:"center", cursor:done?"default":"pointer", color:C.white, fontSize:13, fontWeight:900, padding:0, flexShrink:0 }}>{done?"✓":"+"}</button>
+              </div>
+            </div>
+          );})}
+
+        </div>
+      ) : (
+        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+          {sorted.map((arc,i)=>(
+            <div key={arc.id} style={{ background:C.white, borderRadius:14, border:`1px solid ${C.grayLight}`, overflow:"hidden", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", animation:`slideIn 0.25s ease ${i*0.06}s both` }}>
+              <div style={{ background:C.blueLight, padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                <div>
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.blue }}>{arc.store.logo} {arc.store.name}</div>
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, marginTop:1 }}>{new Date(arc.date).toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}</div>
+                </div>
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  <div style={{ background:C.blue, borderRadius:10, padding:"6px 14px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:18, color:C.white }}>{arc.total.toFixed(2)} €</div>
+                  {pendingDeleteArc === arc.id ? (
+                    <div style={{ display:"flex", gap:4 }}>
+                      <button onClick={()=>setPendingDeleteArc(null)} style={{ background:C.grayLight, border:"none", borderRadius:6, padding:"4px 9px", fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:11, cursor:"pointer", color:C.text }}>Non</button>
+                      <button onClick={()=>{ onDelete(arc); setPendingDeleteArc(null); }} style={{ background:C.red, border:"none", borderRadius:6, padding:"4px 9px", fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:11, cursor:"pointer", color:C.white }}>Oui</button>
+                    </div>
+                  ) : (
+                    <button onClick={()=>setPendingDeleteArc(arc.id)} style={{ background:"none", border:"none", fontSize:14, cursor:"pointer", color:C.gray, padding:"4px" }}>✕</button>
+                  )}
+                </div>
+              </div>
+              <div style={{ padding:"10px 16px 14px", display:"flex", flexWrap:"wrap", gap:6 }}>
+                {arc.items.map((item,j)=>(
+                  <span key={j} style={{ background:C.grayLight, borderRadius:99, padding:"4px 8px 4px 12px", fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:700, color:C.textLight, display:"inline-flex", alignItems:"center", gap:6 }}>
+                    {item.brand?`${item.brand} · `:""}{item.product} {item.format} ×{item.qty}
+                    {(()=>{ const key=`${arc.id}_${j}`; const done=added.has(key); return (
+                      <button onClick={()=>{ if(!done){ onAddToList(item); setAdded(prev=>new Set(prev).add(key)); } }} style={{ background:done?C.green:C.blue, border:"none", borderRadius:99, width:18, height:18, display:"inline-flex", alignItems:"center", justifyContent:"center", cursor:done?"default":"pointer", color:C.white, fontSize:11, fontWeight:900, padding:0, flexShrink:0 }}>{done?"✓":"+"}</button>
+                    );})()}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -2722,7 +2761,7 @@ export default function App() {
           {loaded && tab==="catalog"   && <CatalogTab   items={items} setItems={saveItems} setTab={setTab} catalog={catalog} priceDB={priceDB}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate}/>}
           {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} userId={session?.user?.id} produitsRef={produitsRef}/>}
-          {loaded && tab==="archive"   && <ArchiveTab   archives={archives} onDelete={deleteArchive} onAddToList={arcItem=>{
+          {loaded && tab==="archive"   && <ArchiveTab   archives={archives} onDelete={deleteArchive} priceDB={priceDB} onAddToList={arcItem=>{
             const newItem={id:Date.now()+Math.random(),product:arcItem.product,format:arcItem.format||"",brand:arcItem.brand||"",qty:arcItem.qty||1,checked:false};
             saveItems([...items,newItem]);
             showAppToast(`✓ ${arcItem.product} ajouté à ta liste`);
