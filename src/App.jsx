@@ -1758,7 +1758,7 @@ function EconomiesTab({ priceDB, archives, items, setTab }) {
 }
 
 // ── PRICES TAB ────────────────────────────────────────────────────────────────
-function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValidated, userId, produitsRef = [] }) {
+function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValidated, onCreateArchive, userId, produitsRef = [] }) {
   const [showImport,    setShowImport]    = useState(false);
   const [showEntry,     setShowEntry]     = useState(false);
   const [editPrice,     setEditPrice]     = useState(null);
@@ -1805,6 +1805,20 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
       realizedSaving = Math.round(realizedSaving * 100) / 100;
       updateArchive(openArchive.id, { ticket_scanned: true, realized_saving: realizedSaving });
       onTicketValidated?.(openArchive.id, openArchive.store);
+    } else {
+      const storeId = entries[0]?.storeId || "autre";
+      const storeInfo = STORES.find(s => s.id === storeId) || { id:"autre", name: entries[0]?.store_name || "Autre", logo:"🏪" };
+      const total = Math.round(entries.reduce((s,e) => s + e.price, 0) * 100) / 100;
+      const newArc = {
+        date:    entries[0]?.date || new Date().toISOString(),
+        store:   storeInfo,
+        total,
+        items:   entries.map(e => ({ id: Date.now()+Math.random(), product: e.product, format: e.format||"", brand: e.brand||"", qty: 1, checked: false })),
+        potential_saving: 0,
+        realized_saving:  0,
+        ticket_scanned:   true,
+      };
+      onCreateArchive?.(newArc);
     }
 
     let updated = [...priceDB];
@@ -2822,7 +2836,16 @@ export default function App() {
           {loaded && tab==="list"      && <ListTab      items={items} setItems={saveItems} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} setItems={saveItems} setTab={setTab} catalog={catalog} priceDB={priceDB}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate}/>}
-          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} onTicketValidated={(id,store)=>setShowRating({id,store})} userId={session?.user?.id} produitsRef={produitsRef}/>}
+          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
+            const {id:_id,...rest}=newArc;
+            const {data,error}=await supabase.from('archives').insert({...rest,user_id:session?.user?.id}).select('id').single();
+            if(error){ console.error("Erreur création archive ticket :",error); showAppToast("⚠️ Archive non sauvegardée, vérifie ta connexion",false); }
+            else {
+              const {data:all}=await supabase.from('archives').select('*').order('date');
+              if(all) setArchives(all);
+              setShowRating({id:data.id,store:newArc.store});
+            }
+          }} userId={session?.user?.id} produitsRef={produitsRef}/>}
           {loaded && tab==="archive"   && <ArchiveTab   archives={archives} onDelete={deleteArchive} priceDB={priceDB} onAddToList={arcItem=>{
             const newItem={id:Date.now()+Math.random(),product:arcItem.product,format:arcItem.format||"",brand:arcItem.brand||"",qty:arcItem.qty||1,checked:false};
             saveItems([...items,newItem]);
