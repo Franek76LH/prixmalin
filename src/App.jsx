@@ -2303,13 +2303,13 @@ function ArchiveTab({ archives, onDelete, onAddToList, priceDB }) {
       </div>
       <div style={{ display:"flex", gap:8, overflowX:"auto", marginBottom:14, paddingBottom:2, WebkitOverflowScrolling:"touch" }}>
         {FILTERS.map(f=>(
-          <button key={f.id} onClick={()=>setSort(f.id)} style={{ flexShrink:0, background:sort===f.id?C.blue:C.grayLight, color:sort===f.id?C.white:C.textLight, border:"none", borderRadius:99, padding:"6px 14px", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, cursor:"pointer", whiteSpace:"nowrap" }}>{f.label}</button>
+          <button key={f.id} onClick={()=>{ setSort(f.id); setExpandedProduct(null); }} style={{ flexShrink:0, background:sort===f.id?C.blue:C.grayLight, color:sort===f.id?C.white:C.textLight, border:"none", borderRadius:99, padding:"6px 14px", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, cursor:"pointer", whiteSpace:"nowrap" }}>{f.label}</button>
         ))}
       </div>
       {sort==="produit" ? (
         <div style={{ display:"flex", flexDirection:"column" }}>
           {productList.map((item,i)=>{
-            const key=`pl_${i}`; const done=added.has(key); const isOpen=expandedProduct===key;
+            const key=`pl_${normName(item.brand||"")}_${normName(item.product)}_${normName(item.format||"")}`; const done=added.has(key); const isOpen=expandedProduct===key;
             const history=(priceDB||[]).filter(p=>normName(p.product)===normName(item.product)&&normName(p.format||"")===normName(item.format||"")&&normName(p.brand||"")===normName(item.brand||"")).sort((a,b)=>new Date(a.date)-new Date(b.date));
             return (
               <div key={i} style={{ borderBottom:`1px solid ${C.grayLight}` }}>
@@ -2359,6 +2359,7 @@ function ArchiveTab({ archives, onDelete, onAddToList, priceDB }) {
                 <div>
                   <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.blue }}>{arc.store?.logo} {arc.store?.name}</div>
                   <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, marginTop:1 }}>{new Date(arc.date).toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}</div>
+                  {arc.store_rating && <div style={{ fontSize:11, marginTop:2, letterSpacing:1 }}>{[1,2,3,4,5].map(n=><span key={n} style={{ color:n<=arc.store_rating?"#F5C200":"#D0D0D0" }}>★</span>)}</div>}
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                   <div style={{ background:C.blue, borderRadius:10, padding:"6px 14px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:18, color:C.white }}>{arc.total.toFixed(2)} €</div>
