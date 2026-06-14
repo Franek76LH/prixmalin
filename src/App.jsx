@@ -1758,7 +1758,7 @@ function EconomiesTab({ priceDB, archives, items, setTab }) {
 }
 
 // ── PRICES TAB ────────────────────────────────────────────────────────────────
-function PricesTab({ priceDB, setPriceDB, archives, updateArchive, userId, produitsRef = [] }) {
+function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValidated, userId, produitsRef = [] }) {
   const [showImport,    setShowImport]    = useState(false);
   const [showEntry,     setShowEntry]     = useState(false);
   const [editPrice,     setEditPrice]     = useState(null);
@@ -1804,6 +1804,7 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, userId, produ
       });
       realizedSaving = Math.round(realizedSaving * 100) / 100;
       updateArchive(openArchive.id, { ticket_scanned: true, realized_saving: realizedSaving });
+      onTicketValidated?.(openArchive.id, openArchive.store);
     }
 
     let updated = [...priceDB];
@@ -2492,6 +2493,33 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle }) {
   );
 }
 
+function StoreRatingScreen({ store, onSave, onSkip }) {
+  const [rating, setRating] = useState(0);
+  const [hover,  setHover]  = useState(0);
+  const F = "'Nunito',sans-serif";
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:300, animation:"fadeIn 0.2s ease" }}>
+      <div style={{ background:C.white, borderRadius:20, padding:"32px 28px", textAlign:"center", maxWidth:320, width:"90%", animation:"popIn 0.35s ease", boxShadow:"0 20px 60px rgba(0,0,0,0.25)" }}>
+        <div style={{ fontFamily:F, fontWeight:900, fontSize:18, color:C.blue, marginBottom:6 }}>{store.logo} {store.name}</div>
+        <div style={{ fontFamily:F, fontSize:14, color:C.text, marginBottom:20 }}>Comment était ce magasin ?</div>
+        <div style={{ display:"flex", justifyContent:"center", gap:6, marginBottom:24 }}>
+          {[1,2,3,4,5].map(n=>(
+            <button key={n} onClick={()=>setRating(n)} onMouseEnter={()=>setHover(n)} onMouseLeave={()=>setHover(0)}
+              style={{ background:"none", border:"none", cursor:"pointer", fontSize:52, lineHeight:1, padding:0, color:(hover||rating)>=n?"#F5C200":"#D0D0D0", transition:"color 0.1s" }}>★</button>
+          ))}
+        </div>
+        <button onClick={()=>onSave(rating)} disabled={rating===0}
+          style={{ width:"100%", padding:"13px", border:"none", borderRadius:12, background:rating>0?C.blue:"#ccc", fontFamily:F, fontWeight:900, fontSize:15, color:C.white, cursor:rating>0?"pointer":"default", marginBottom:10 }}>
+          Enregistrer
+        </button>
+        <button onClick={onSkip} style={{ background:"none", border:"none", fontFamily:F, fontSize:14, fontWeight:700, color:C.textLight, cursor:"pointer", padding:"8px" }}>
+          Passer
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── ROOT ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const [session,   setSession]   = useState(null);
@@ -2501,6 +2529,7 @@ export default function App() {
   const [priceDB, setPriceDB]     = useState([]);
   const [archives, setArchives]   = useState([]);
   const [showSuccess, setShowSuccess] = useState(null);
+  const [showRating,  setShowRating]  = useState(null);
   const [favorites, setFavorites] = useState([]);
   const [loaded, setLoaded]       = useState(false);
   const [produitsRef, setProduitsRef] = useState([]);
@@ -2793,7 +2822,7 @@ export default function App() {
           {loaded && tab==="list"      && <ListTab      items={items} setItems={saveItems} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} setItems={saveItems} setTab={setTab} catalog={catalog} priceDB={priceDB}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate}/>}
-          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} userId={session?.user?.id} produitsRef={produitsRef}/>}
+          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} onTicketValidated={(id,store)=>setShowRating({id,store})} userId={session?.user?.id} produitsRef={produitsRef}/>}
           {loaded && tab==="archive"   && <ArchiveTab   archives={archives} onDelete={deleteArchive} priceDB={priceDB} onAddToList={arcItem=>{
             const newItem={id:Date.now()+Math.random(),product:arcItem.product,format:arcItem.format||"",brand:arcItem.brand||"",qty:arcItem.qty||1,checked:false};
             saveItems([...items,newItem]);
@@ -2805,6 +2834,13 @@ export default function App() {
         {appToast && <Toast msg={appToast.msg} ok={appToast.ok}/>}
         {showCircle && <ProfilSheet circles={circles} userId={session.user.id} userEmail={session.user.email} profileMap={profileMap} pseudo={pseudo} archives={archives} onClose={()=>setShowCircle(false)} onInvite={inviteToCircle} onUpdateStatus={updateCircleStatus} onLogout={handleLogout}/>}
         {loaded && pseudo === null && <PseudoModal onSave={savePseudo}/>}
+        {showRating && (
+          <StoreRatingScreen
+            store={showRating.store}
+            onSave={rating=>{ updateArchive(showRating.id,{store_rating:rating}); setShowRating(null); setTab("home"); }}
+            onSkip={()=>{ setShowRating(null); setTab("home"); }}
+          />
+        )}
         {showSuccess && (
           <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:300, animation:"fadeIn 0.2s ease" }}>
             <div style={{ background:C.white, borderRadius:20, padding:"36px 32px", textAlign:"center", maxWidth:300, width:"90%", animation:"popIn 0.35s ease", boxShadow:"0 20px 60px rgba(0,0,0,0.25)" }}>
