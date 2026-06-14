@@ -2242,6 +2242,7 @@ function ArchiveTab({ archives, onDelete, onAddToList, priceDB }) {
   const [pendingDeleteArc, setPendingDeleteArc] = useState(null);
   const [added, setAdded] = useState(new Set());
   const [sort, setSort] = useState("date");
+  const [expandedProduct, setExpandedProduct] = useState(null);
 
   if(archives.length===0) return (
     <div style={{ padding:"40px 20px 100px", textAlign:"center" }}>
@@ -2288,15 +2289,47 @@ function ArchiveTab({ archives, onDelete, onAddToList, priceDB }) {
       </div>
       {sort==="produit" ? (
         <div style={{ display:"flex", flexDirection:"column" }}>
-          {productList.map((item,i)=>{ const key=`pl_${i}`; const done=added.has(key); return (
-            <div key={i} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 4px", borderBottom:`1px solid ${C.grayLight}` }}>
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:700, color:C.text }}>{item.brand?`${item.brand} · `:""}{item.product}{item.format?` ${item.format}`:""}</div>
-              <div style={{ display:"flex", alignItems:"center", gap:10, flexShrink:0, marginLeft:12 }}>
-                <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:900, color:C.blue }}>{item.unitPrice!=null?`${item.unitPrice.toFixed(2)} €`:"—"}</div>
-                <button onClick={()=>{ if(!done){ onAddToList(item); setAdded(prev=>new Set(prev).add(key)); } }} style={{ background:done?C.green:C.red, border:"none", borderRadius:99, width:22, height:22, display:"inline-flex", alignItems:"center", justifyContent:"center", cursor:done?"default":"pointer", color:C.white, fontSize:13, fontWeight:900, padding:0, flexShrink:0 }}>{done?"✓":"+"}</button>
+          {productList.map((item,i)=>{
+            const key=`pl_${i}`; const done=added.has(key); const isOpen=expandedProduct===key;
+            const history=(priceDB||[]).filter(p=>normName(p.product)===normName(item.product)&&normName(p.format||"")===normName(item.format||"")&&normName(p.brand||"")===normName(item.brand||"")).sort((a,b)=>new Date(a.date)-new Date(b.date));
+            return (
+              <div key={i} style={{ borderBottom:`1px solid ${C.grayLight}` }}>
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 4px" }}>
+                  <div onClick={()=>setExpandedProduct(isOpen?null:key)} style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:700, color:C.text, cursor:"pointer", flex:1 }}>{item.brand?`${item.brand} · `:""}{item.product}{item.format?` ${item.format}`:""} <span style={{ fontSize:10, color:C.textLight }}>{isOpen?"▲":"▼"}</span></div>
+                  <div style={{ display:"flex", alignItems:"center", gap:10, flexShrink:0, marginLeft:12 }}>
+                    <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:900, color:C.blue }}>{item.unitPrice!=null?`${item.unitPrice.toFixed(2)} €`:"—"}</div>
+                    <button onClick={()=>{ if(!done){ onAddToList(item); setAdded(prev=>new Set(prev).add(key)); } }} style={{ background:done?C.green:C.red, border:"none", borderRadius:99, width:22, height:22, display:"inline-flex", alignItems:"center", justifyContent:"center", cursor:done?"default":"pointer", color:C.white, fontSize:13, fontWeight:900, padding:0, flexShrink:0 }}>{done?"✓":"+"}</button>
+                  </div>
+                </div>
+                {isOpen && (history.length<=1
+                  ? <div style={{ padding:"6px 4px 12px", fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, fontStyle:"italic" }}>Pas assez de données</div>
+                  : (()=>{
+                      const W=280,H=72,px=12,py=10;
+                      const ts=history.map(p=>new Date(p.date).getTime());
+                      const ps=history.map(p=>p.price);
+                      const minT=Math.min(...ts),maxT=Math.max(...ts),minP=Math.min(...ps),maxP=Math.max(...ps);
+                      const xOf=t=>px+(t-minT)/((maxT-minT)||1)*(W-2*px);
+                      const yOf=p=>H-py-((p-minP)/((maxP-minP)||1))*(H-2*py);
+                      const pts=history.map(p=>`${xOf(new Date(p.date).getTime())},${yOf(p.price)}`).join(" ");
+                      return (
+                        <div style={{ padding:"4px 4px 12px" }}>
+                          <svg viewBox={`0 0 ${W} ${H+14}`} width="100%" style={{ display:"block", overflow:"visible" }}>
+                            <polyline points={pts} fill="none" stroke={C.blue} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"/>
+                            {history.map((p,j)=>(
+                              <circle key={j} cx={xOf(new Date(p.date).getTime())} cy={yOf(p.price)} r="3" fill={C.blue}/>
+                            ))}
+                            <text x={xOf(ts[0])} y={H+12} fontFamily="'Nunito',sans-serif" fontSize="8" fill={C.textLight} textAnchor="start">{new Date(history[0].date).toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}</text>
+                            <text x={xOf(ts[ts.length-1])} y={H+12} fontFamily="'Nunito',sans-serif" fontSize="8" fill={C.textLight} textAnchor="end">{new Date(history[history.length-1].date).toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}</text>
+                            <text x={W-px} y={yOf(maxP)-3} fontFamily="'Nunito',sans-serif" fontSize="8" fill={C.blue} textAnchor="end">{maxP.toFixed(2)} €</text>
+                            <text x={W-px} y={yOf(minP)+9} fontFamily="'Nunito',sans-serif" fontSize="8" fill={C.textLight} textAnchor="end">{minP.toFixed(2)} €</text>
+                          </svg>
+                        </div>
+                      );
+                    })()
+                )}
               </div>
-            </div>
-          );})}
+            );
+          })}
 
         </div>
       ) : (
