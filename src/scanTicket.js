@@ -37,7 +37,7 @@ export async function scanTicketWithClaude(imageBase64, apiKey, refProducts = []
     },
     body: JSON.stringify({
       model: "anthropic/claude-sonnet-4-5",
-      max_tokens: 1500,
+      max_tokens: 4000,
       messages: [
         {
           role: "user",
@@ -56,10 +56,12 @@ export async function scanTicketWithClaude(imageBase64, apiKey, refProducts = []
   "date": "YYYY-MM-DD",
   "address": "adresse complète du magasin si présente sur le ticket (numéro, rue, code postal, ville), sinon chaîne vide",
   "products": [
-    { "brand": "marque ou vide", "name": "nom du produit normalisé", "format": "format ou vide", "price": 0.00 }
+    { "brand": "marque ou vide", "name": "nom du produit normalisé", "format": "format ou vide", "qty": 1, "price": 0.00 }
   ]
 }
-Ignore les lignes qui ne sont pas des produits (total, TVA, remises globales, etc).${refSection}`,
+Le champ "qty" est la quantité achetée (entier ≥ 1, défaut 1 si non précisée). Le champ "price" est le prix unitaire (pas le total ligne).
+Ignore les lignes qui ne sont pas des produits (total, TVA, remises globales, etc).
+Il est impératif d'extraire TOUS les articles listés sur le ticket, du premier au dernier, sans en oublier aucun.${refSection}`,
             },
           ],
         },
