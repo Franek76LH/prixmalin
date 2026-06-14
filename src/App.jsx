@@ -2238,8 +2238,9 @@ function CompareTab({ items, priceDB, onValidate }) {
 }
 
 // ── ARCHIVE TAB ───────────────────────────────────────────────────────────────
-function ArchiveTab({ archives, onDelete }) {
+function ArchiveTab({ archives, onDelete, onAddToList }) {
   const [pendingDeleteArc, setPendingDeleteArc] = useState(null);
+  const [added, setAdded] = useState(new Set());
 
   if(archives.length===0) return (
     <div style={{ padding:"40px 20px 100px", textAlign:"center" }}>
@@ -2283,8 +2284,11 @@ function ArchiveTab({ archives, onDelete }) {
             </div>
             <div style={{ padding:"10px 16px 14px", display:"flex", flexWrap:"wrap", gap:6 }}>
               {arc.items.map((item,j)=>(
-                <span key={j} style={{ background:C.grayLight, borderRadius:99, padding:"4px 12px", fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:700, color:C.textLight }}>
+                <span key={j} style={{ background:C.grayLight, borderRadius:99, padding:"4px 8px 4px 12px", fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:700, color:C.textLight, display:"inline-flex", alignItems:"center", gap:6 }}>
                   {item.brand?`${item.brand} · `:""}{item.product} {item.format} ×{item.qty}
+                  {(()=>{ const key=`${arc.id}_${j}`; const done=added.has(key); return (
+                    <button onClick={()=>{ if(!done){ onAddToList(item); setAdded(prev=>new Set(prev).add(key)); } }} style={{ background:done?C.green:C.blue, border:"none", borderRadius:99, width:18, height:18, display:"inline-flex", alignItems:"center", justifyContent:"center", cursor:done?"default":"pointer", color:C.white, fontSize:11, fontWeight:900, padding:0, flexShrink:0 }}>{done?"✓":"+"}</button>
+                  );})()}
                 </span>
               ))}
             </div>
@@ -2718,7 +2722,11 @@ export default function App() {
           {loaded && tab==="catalog"   && <CatalogTab   items={items} setItems={saveItems} setTab={setTab} catalog={catalog} priceDB={priceDB}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate}/>}
           {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} userId={session?.user?.id} produitsRef={produitsRef}/>}
-          {loaded && tab==="archive"   && <ArchiveTab   archives={archives} onDelete={deleteArchive}/>}
+          {loaded && tab==="archive"   && <ArchiveTab   archives={archives} onDelete={deleteArchive} onAddToList={arcItem=>{
+            const newItem={id:Date.now()+Math.random(),product:arcItem.product,format:arcItem.format||"",brand:arcItem.brand||"",qty:arcItem.qty||1,checked:false};
+            saveItems([...items,newItem]);
+            showAppToast(`✓ ${arcItem.product} ajouté à ta liste`);
+          }}/>}
           {loaded && tab==="economies" && <EconomiesTab priceDB={priceDB} archives={archives} items={items} setTab={setTab}/>}
         </div>
         <TabBar tab={tab} setTab={setTab}/>
