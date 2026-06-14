@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { scanTicketWithClaude, imageFileToJpegBase64 } from "./scanTicket";
-import { scanPdfWithClaude } from "./scanPdf";
 import { STORES, CATEGORY_META, PRODUCT_SUGGESTIONS, STALE_DAYS } from "./constants";
 import { supabase } from "./lib/supabase";
 
@@ -629,13 +628,11 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [] }) {
   const [editableProducts, setEditableProducts] = useState([]);
   const [scanning,      setScanning]      = useState(false);
   const [galleryScanning, setGalleryScanning] = useState(false);
-  const [pdfScanning,   setPdfScanning]   = useState(false);
   const [saving,        setSaving]        = useState(false);
   const [storeNameEdit, setStoreNameEdit] = useState("");
   const [storeLocation, setStoreLocation] = useState("");
   const fileInputRef    = useRef(null);
   const galleryInputRef = useRef(null);
-  const pdfInputRef     = useRef(null);
   const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
 
   const EXAMPLE = `{
@@ -713,7 +710,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [] }) {
               <div style={{ background:C.blueLight, borderRadius:14, padding:"16px", marginBottom:16 }}>
                 <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.blue, marginBottom:10 }}>Comment ça marche :</div>
                 {[
-                  {n:"1",t:"📷 Scanne un ticket photo ou 📄 importe un PDF"},
+                  {n:"1",t:"📷 Scanne un ticket photo"},
                   {n:"2",t:"L'IA lit le ticket et extrait produits, prix et magasin"},
                   {n:"3",t:"Vérifie et importe dans Mes prix !"},
                 ].map(s=>(
@@ -747,7 +744,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [] }) {
                 } catch(e) { setError("Erreur scan : " + e.message); }
                 setScanning(false);
               }} style={{ display:"none" }} />
-              <button onClick={()=>fileInputRef.current?.click()} disabled={scanning||galleryScanning||pdfScanning} style={{ width:"100%", padding:"15px", marginTop:10, border:"none", borderRadius:12, background:scanning?"#999":"#00B341", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:"white", cursor:scanning?"default":"pointer" }}>
+              <button onClick={()=>fileInputRef.current?.click()} disabled={scanning||galleryScanning} style={{ width:"100%", padding:"15px", marginTop:10, border:"none", borderRadius:12, background:scanning?"#999":"#00B341", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:"white", cursor:scanning?"default":"pointer" }}>
                 {scanning ? "⏳ Analyse en cours..." : "📷 Scanner un ticket"}
               </button>
 
@@ -768,32 +765,11 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [] }) {
                 setGalleryScanning(false);
                 e.target.value = "";
               }} style={{ display:"none" }} />
-              <button onClick={()=>galleryInputRef.current?.click()} disabled={scanning||galleryScanning||pdfScanning}
+              <button onClick={()=>galleryInputRef.current?.click()} disabled={scanning||galleryScanning}
                 style={{ width:"100%", padding:"15px", marginTop:10, border:"none", borderRadius:12, background:galleryScanning?"#999":"#4A90D9", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:"white", cursor:galleryScanning?"default":"pointer" }}>
                 {galleryScanning ? "⏳ Analyse en cours..." : "🖼️ Importer une photo"}
               </button>
 
-              {/* PDF import */}
-              <input ref={pdfInputRef} type="file" accept="application/pdf" onChange={async (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                setPdfScanning(true); setError("");
-                try {
-                  const parsed = await scanPdfWithClaude(file, apiKey, refProducts);
-                  setResult(parsed);
-                  setSelectedStore(storeIdFromName(parsed.store));
-                  setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true, share:true})));
-                  setStoreNameEdit(parsed.store || "");
-                  setStoreLocation(parsed.address || "");
-                  setStatus("store");
-                } catch(e) { setError("Erreur PDF : " + e.message); }
-                setPdfScanning(false);
-                e.target.value = "";
-              }} style={{ display:"none" }} />
-              <button onClick={()=>pdfInputRef.current?.click()} disabled={scanning||pdfScanning}
-                style={{ width:"100%", padding:"15px", marginTop:10, border:`2px solid ${pdfScanning?"#999":"#CC0000"}`, borderRadius:12, background:"transparent", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:pdfScanning?"#999":"#CC0000", cursor:pdfScanning?"default":"pointer" }}>
-                {pdfScanning ? "⏳ Lecture PDF en cours..." : "📄 Importer un ticket PDF"}
-              </button>
             </>
           )}
 
@@ -1844,7 +1820,7 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
         is_private:    e.share === false,
       }));
       supabase.from('community_prices').insert(communityEntries)
-        .then(({ error }) => { if (error) console.error("Erreur community_prices :", error); });
+        .then(({ error }) => { if (error) { console.error("Erreur community_prices :", error); showToast("⚠️ Partage communauté échoué", false); } });
     }
 
     const savingMsg = realizedSaving !== null
@@ -2736,6 +2712,7 @@ export default function App() {
     } else {
       console.error("Erreur mise à jour archive :", error);
     }
+    return { error };
   };
 
   const handleValidate = (store, potentialSaving = 0) => {
@@ -2865,7 +2842,7 @@ export default function App() {
         {showRating && (
           <StoreRatingScreen
             store={showRating.store}
-            onSave={rating=>{ updateArchive(showRating.id,{store_rating:rating}); setShowRating(null); setTab("home"); }}
+            onSave={async rating=>{ const {error}=await updateArchive(showRating.id,{store_rating:rating}); if(error) showAppToast("⚠️ Note non sauvegardée, vérifie ta connexion",false); setShowRating(null); setTab("home"); }}
             onSkip={()=>{ setShowRating(null); setTab("home"); }}
           />
         )}
