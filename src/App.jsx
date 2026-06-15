@@ -641,6 +641,17 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   const galleryInputRef = useRef(null);
   const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
 
+  useEffect(() => {
+    if (!(scanning || galleryScanning)) return;
+    const block = e => e.preventDefault();
+    document.addEventListener('touchstart', block, { passive: false });
+    document.addEventListener('touchmove',  block, { passive: false });
+    return () => {
+      document.removeEventListener('touchstart', block);
+      document.removeEventListener('touchmove',  block);
+    };
+  }, [scanning, galleryScanning]);
+
   const EXAMPLE = `{
   "store": "Intermarché",
   "date": "2026-04-11",
@@ -944,6 +955,12 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
           )}
         </div>
       </div>
+      {(scanning || galleryScanning) && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.75)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", zIndex:999, pointerEvents:"all" }}>
+          <div style={{ width:48, height:48, border:"4px solid rgba(255,255,255,0.2)", borderTopColor:"#F5C200", borderRadius:"50%", animation:"spin 0.8s linear infinite", marginBottom:20 }}/>
+          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:16, color:"#fff" }}>Analyse en cours...</div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2114,6 +2131,22 @@ function CompareTab({ items, priceDB, onValidate }) {
   const totalItems   = items.reduce((a,i)=>a+i.qty,0);
   const missingGlobal= items.filter(item=>!priceDB.some(p=>itemMatchesPrice(item,p)));
 
+  const [lastVerified, setLastVerified] = useState(null);
+  useEffect(() => {
+    if (!best) { setLastVerified(null); return; }
+    let mostRecent = null;
+    analysis.forEach(({ byStore }) => {
+      const p = byStore[best.id];
+      if (p && (!mostRecent || new Date(p.date) > new Date(mostRecent.date))) mostRecent = p;
+    });
+    if (!mostRecent?.user_id) { setLastVerified(null); return; }
+    supabase.from('profiles').select('pseudo').eq('id', mostRecent.user_id).maybeSingle()
+      .then(({ data }) => {
+        const days = Math.floor((Date.now() - new Date(mostRecent.date)) / 86400000);
+        const dateLabel = days === 0 ? "aujourd'hui" : days === 1 ? "hier" : `il y a ${days} jours`;
+        setLastVerified({ dateLabel, pseudo: data?.pseudo || 'un utilisateur' });
+      });
+  }, [best?.id]);
 
   return (
     <div style={{ padding:"16px 16px 110px" }}>
@@ -2187,6 +2220,11 @@ function CompareTab({ items, priceDB, onValidate }) {
                     {best.found}/{items.length} produit{items.length>1?"s":""} trouvé{best.found>1?"s":""}
                     {best.missing.length>0 && <span style={{ color:"#FFD700" }}> · {best.missing.length} manquant{best.missing.length>1?"s":""}</span>}
                   </div>
+                  {lastVerified && (
+                    <div style={{ fontFamily:F, fontSize:11, color:"rgba(255,255,255,0.85)", fontWeight:500, marginTop:3 }}>
+                      Dernier prix vérifié {lastVerified.dateLabel} par {lastVerified.pseudo}
+                    </div>
+                  )}
                 </div>
               </div>
               <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
