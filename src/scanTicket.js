@@ -56,11 +56,13 @@ export async function scanTicketWithClaude(imageBase64, apiKey, refProducts = []
   "date": "YYYY-MM-DD",
   "address": "adresse complète du magasin si présente sur le ticket (numéro, rue, code postal, ville), sinon chaîne vide",
   "products": [
-    { "brand": "marque ou vide", "name": "nom du produit normalisé", "format": "format ou vide", "qty": 1, "price": 0.00 }
+    { "brand": "marque ou vide", "name": "nom du produit normalisé", "format": "format ou vide", "qty": 1, "unit_price": 0.00, "price": 0.00, "total": 0.00 }
   ]
 }
 CODES TVA : sur les tickets Carrefour et certaines enseignes, chaque ligne produit commence par un chiffre isolé (2, 4, 6…) qui est un CODE TVA — ce n'est PAS la quantité. Ignore ce chiffre de début de ligne.
-Le champ "qty" est la quantité achetée (entier ≥ 1, défaut 1 si non précisée). La quantité est indiquée uniquement par une notation du type "prix_unitaire x quantité" (ex : 1,95x2 ou 10,13 x2) ; dans ce cas qty = 2 et price = prix_unitaire × quantité. Si aucun multiplicateur "x" n'est présent sur la ligne, qty = 1 et price = le montant affiché sur cette ligne.
+Règles pour qty, unit_price, price et total :
+- Si la ligne affiche un multiplicateur "x" (ex : 1,95x2 ou 10,13 x2) : qty = le nombre après le x, unit_price = price = le montant avant le x, total = unit_price × qty.
+- Si pas de multiplicateur : qty = 1, unit_price = price = total = le montant affiché sur la ligne.
 Ignore uniquement les lignes non-produits : total, sous-total, TVA, remises globales, modes de paiement, points fidélité.
 RÈGLE ABSOLUE : extraire CHAQUE article du ticket sans exception.
 - Parcours le ticket de haut en bas, ligne par ligne, sans en sauter aucune.

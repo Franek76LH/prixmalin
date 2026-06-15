@@ -1793,7 +1793,7 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
         date:    entries[0]?.date || new Date().toISOString(),
         store:   storeInfo,
         total,
-        items:   entries.map(e => ({ id: Date.now()+Math.random(), product: e.product, format: e.format||"", brand: e.brand||"", qty: e.qty||1, price: e.price||null, checked: false })),
+        items:   entries.map(e => ({ id: Date.now()+Math.random(), product: e.product, format: e.format||"", brand: e.brand||"", qty: e.qty||1, unit_price: e.unit_price||null, price: e.price||null, total: e.total||null, checked: false })),
         potential_saving: 0,
         realized_saving:  0,
         ticket_scanned:   true,
@@ -2352,7 +2352,7 @@ function ArchiveTab({ archives, onDelete, onAddToList, priceDB }) {
               <div style={{ padding:"10px 16px 14px", display:"flex", flexWrap:"wrap", gap:6 }}>
                 {arc.items.map((item,j)=>(
                   <span key={j} style={{ background:C.grayLight, borderRadius:99, padding:"4px 8px 4px 12px", fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:700, color:C.textLight, display:"inline-flex", alignItems:"center", gap:6 }}>
-                    {item.brand?`${item.brand} · `:""}{item.product} {item.format} ×{item.qty}{item.price!=null?` — ${Number(item.price).toFixed(2).replace('.',',')} €`:""}
+                    {item.brand?`${item.brand} · `:""}{item.product} {item.format} ×{item.qty}{item.unit_price!=null?` — ${Number(item.unit_price).toFixed(2).replace('.',',')} €`:item.price!=null?` — ${Number(item.price).toFixed(2).replace('.',',')} €`:""}{item.total!=null&&item.qty>1?` (total : ${Number(item.total).toFixed(2).replace('.',',')} €)`:""}
                     {(()=>{ const key=`${arc.id}_${j}`; const done=added.has(key); return (
                       <button onClick={()=>{ if(!done){ onAddToList(item); setAdded(prev=>new Set(prev).add(key)); } }} style={{ background:done?C.green:C.blue, border:"none", borderRadius:99, width:18, height:18, display:"inline-flex", alignItems:"center", justifyContent:"center", cursor:done?"default":"pointer", color:C.white, fontSize:11, fontWeight:900, padding:0, flexShrink:0 }}>{done?"✓":"+"}</button>
                     );})()}
