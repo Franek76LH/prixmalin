@@ -757,7 +757,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true})));
                   setStoreNameEdit(parsed.store||"");
                   setStoreLocation(parsed.address||"");
-                  setStatus("store");
+                  if (parsed.store && parsed.address) { setStatus("preview"); } else { setStatus("store"); }
                 } catch(e) { setError("Erreur scan : " + e.message); }
                 setScanning(false);
               }} style={{ display:"none" }} />
@@ -777,7 +777,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true, share:true})));
                   setStoreNameEdit(parsed.store || "");
                   setStoreLocation(parsed.address || "");
-                  setStatus("store");
+                  if (parsed.store && parsed.address) { setStatus("preview"); } else { setStatus("store"); }
                 } catch(e) { setError("Erreur scan : " + e.message); }
                 setGalleryScanning(false);
                 e.target.value = "";
@@ -803,7 +803,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true})));
                   setStoreNameEdit(parsed.store||"");
                   setStoreLocation(parsed.address||"");
-                  setStatus("store");
+                  if (parsed.store && parsed.address) { setStatus("preview"); } else { setStatus("store"); }
                 } catch(e) { setError("Erreur scan : " + e.message); }
                 setScanning(false);
               }} style={{ display:"none" }} />
