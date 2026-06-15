@@ -619,9 +619,9 @@ function AddItemSheet({ onClose, onAdd }) {
 }
 
 // ── IMPORT TICKET SHEET ───────────────────────────────────────────────────────
-function ImportTicketSheet({ onClose, onImport, refProducts = [] }) {
+function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera = false }) {
   const [jsonText, setJsonText] = useState("");
-  const [status,   setStatus]   = useState("idle");
+  const [status,   setStatus]   = useState(directCamera ? "camera" : "idle");
   const [error,    setError]    = useState("");
   const [result,   setResult]   = useState(null);
   const [selectedStore, setSelectedStore] = useState("");
@@ -694,7 +694,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [] }) {
   };
 
   return (
-    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", zIndex:200, animation:"fadeIn 0.2s ease" }} onClick={status==="idle"?onClose:undefined}>
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", zIndex:200, animation:"fadeIn 0.2s ease" }} onClick={(status==="idle"||status==="camera")?onClose:undefined}>
       <div onClick={e=>e.stopPropagation()} style={{ background:C.white, borderRadius:"20px 20px 0 0", width:"100%", maxHeight:"92vh", display:"flex", flexDirection:"column", animation:"slideUp 0.3s ease", overflow:"hidden" }}>
         <div style={{ background:C.orange, padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0 }}>
           <div>
@@ -770,6 +770,34 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [] }) {
                 {galleryScanning ? "⏳ Analyse en cours..." : "🖼️ Importer une photo"}
               </button>
 
+            </>
+          )}
+
+          {status==="camera" && (
+            <>
+              <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={async (e) => {
+                const file = e.target.files[0];
+                if(!file) return;
+                setScanning(true); setError("");
+                try {
+                  const base64 = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.readAsDataURL(file); });
+                  const parsed = await scanTicketWithClaude(base64, apiKey, refProducts);
+                  setResult(parsed); setSelectedStore(storeIdFromName(parsed.store));
+                  setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true})));
+                  setStoreNameEdit(parsed.store||"");
+                  setStoreLocation(parsed.address||"");
+                  setStatus("store");
+                } catch(e) { setError("Erreur scan : " + e.message); }
+                setScanning(false);
+              }} style={{ display:"none" }} />
+              {error && <div style={{ background:"#FEE", borderRadius:10, padding:"10px 14px", marginBottom:16, fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.red, fontWeight:700 }}>⚠️ {error}</div>}
+              <button onClick={()=>fileInputRef.current?.click()} disabled={scanning} style={{ width:"100%", padding:"28px 20px", border:"none", borderRadius:16, background:scanning?"#999":"#00B341", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:20, color:"white", cursor:scanning?"default":"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:12 }}>
+                <span style={{ fontSize:48 }}>📷</span>
+                {scanning ? "⏳ Analyse en cours..." : "Ouvrir la caméra"}
+              </button>
+              <button onClick={()=>setStatus("idle")} style={{ width:"100%", padding:"14px", marginTop:12, border:`2px solid ${C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.textLight, cursor:"pointer" }}>
+                Autres options
+              </button>
             </>
           )}
 
@@ -1738,8 +1766,12 @@ function EconomiesTab({ priceDB, archives, items, setTab }) {
 }
 
 // ── PRICES TAB ────────────────────────────────────────────────────────────────
-function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValidated, onCreateArchive, userId, produitsRef = [] }) {
+function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValidated, onCreateArchive, userId, produitsRef = [], autoOpenCamera = false, onAutoOpenConsumed }) {
   const [showImport,    setShowImport]    = useState(false);
+
+  useEffect(() => {
+    if (autoOpenCamera) setShowImport(true);
+  }, []);
   const [showEntry,     setShowEntry]     = useState(false);
   const [editPrice,     setEditPrice]     = useState(null);
   const [filterStore,    setFilterStore]    = useState("all");
@@ -2023,7 +2055,7 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
         ✏️ Saisie manuelle
       </button>
 
-      {showImport    && <ImportTicketSheet onClose={()=>setShowImport(false)} onImport={importPrices} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))}/>}
+      {showImport    && <ImportTicketSheet onClose={()=>{setShowImport(false);onAutoOpenConsumed?.();}} onImport={importPrices} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))} directCamera={autoOpenCamera}/>}
       {showEntry     && <PriceEntrySheet  onClose={()=>{setShowEntry(false);setEditPrice(null);}} onSave={savePrice} existingPrice={editPrice}/>}
       {toast && <Toast msg={toast.msg} ok={toast.ok}/>}
     </div>
@@ -2368,7 +2400,7 @@ function ArchiveTab({ archives, onDelete, onAddToList, priceDB }) {
 }
 
 // ── HOME TAB ─────────────────────────────────────────────────────────────────
-function HomeTab({ items, circles, profileMap, userId, setTab, onCircle }) {
+function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash }) {
   const F = "'Nunito',sans-serif";
   const unchecked = items.filter(i => !i.checked).length;
   const members   = circles.filter(c => c.status === 'accepted');
@@ -2458,7 +2490,7 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle }) {
 
           {/* Bouton Flasher — centre */}
           <div style={{ position:"absolute", top:"50%", left:"50%", transform:"translate(-50%, -46%)", display:"flex", flexDirection:"column", alignItems:"center", gap:10 }}>
-            <button onClick={() => setTab("prices")} style={{
+            <button onClick={() => onFlash()} style={{
               width:118, height:118,
               borderRadius:"50%",
               background:"#E5181B",
@@ -2529,6 +2561,8 @@ export default function App() {
   const [loaded, setLoaded]       = useState(false);
   const [produitsRef, setProduitsRef] = useState([]);
   const [circles,    setCircles]    = useState([]);
+  const [autoOpenCamera, setAutoOpenCamera] = useState(false);
+  const handleFlash = () => { setAutoOpenCamera(true); setTab("prices"); };
   const [showCircle, setShowCircle] = useState(false);
   const [pseudo,     setPseudo]     = useState(null);
   const [profileMap, setProfileMap] = useState({});
@@ -2814,11 +2848,11 @@ export default function App() {
               <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:14, color:"#999" }}>Chargement...</div>
             </div>
           )}
-          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircle(true)}/>}
+          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircle(true)} onFlash={handleFlash}/>}
           {loaded && tab==="list"      && <ListTab      items={items} setItems={saveItems} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} setItems={saveItems} setTab={setTab} catalog={catalog} priceDB={priceDB}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate}/>}
-          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
+          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;
             const {data,error}=await supabase.from('archives').insert({...rest,user_id:session?.user?.id}).select('id').single();
             if(error){ console.error("Erreur création archive ticket :",error); showAppToast("⚠️ Archive non sauvegardée, vérifie ta connexion",false); }
