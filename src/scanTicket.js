@@ -59,9 +59,14 @@ export async function scanTicketWithClaude(imageBase64, apiKey, refProducts = []
     { "brand": "marque ou vide", "name": "nom du produit normalisé", "format": "format ou vide", "qty": 1, "price": 0.00 }
   ]
 }
-Le champ "qty" est la quantité achetée (entier ≥ 1, défaut 1 si non précisée). Le champ "price" est le prix unitaire (pas le total ligne).
-Ignore les lignes qui ne sont pas des produits (total, TVA, remises globales, etc).
-Il est impératif d'extraire TOUS les articles listés sur le ticket, du premier au dernier, sans en oublier aucun.${refSection}`,
+CODES TVA : sur les tickets Carrefour et certaines enseignes, chaque ligne produit commence par un chiffre isolé (2, 4, 6…) qui est un CODE TVA — ce n'est PAS la quantité. Ignore ce chiffre de début de ligne.
+Le champ "qty" est la quantité achetée (entier ≥ 1, défaut 1 si non précisée). La quantité est indiquée uniquement par une notation du type "prix_unitaire x quantité" (ex : 1,95x2 ou 10,13 x2) ; dans ce cas qty = 2 et price = prix_unitaire × quantité. Si aucun multiplicateur "x" n'est présent sur la ligne, qty = 1 et price = le montant affiché sur cette ligne.
+Ignore uniquement les lignes non-produits : total, sous-total, TVA, remises globales, modes de paiement, points fidélité.
+RÈGLE ABSOLUE : extraire CHAQUE article du ticket sans exception.
+- Parcours le ticket de haut en bas, ligne par ligne, sans en sauter aucune.
+- Inclus les articles dans TOUTES les sections, quelle que soit leur catégorie : alimentaire, "Entretien", "Hygiène-Beauté", "Non alimentaire", "Bazar", etc.
+- Inclus les articles situés en bas du ticket, juste avant le total.
+- Si une ligne ressemble à un produit avec un prix, inclus-la. Un article manquant est une erreur grave.${refSection}`,
             },
           ],
         },
