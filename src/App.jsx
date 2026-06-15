@@ -1793,7 +1793,7 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
         date:    entries[0]?.date || new Date().toISOString(),
         store:   storeInfo,
         total,
-        items:   entries.map(e => ({ id: Date.now()+Math.random(), product: e.product, format: e.format||"", brand: e.brand||"", qty: e.qty||1, checked: false })),
+        items:   entries.map(e => ({ id: Date.now()+Math.random(), product: e.product, format: e.format||"", brand: e.brand||"", qty: e.qty||1, price: e.price||null, checked: false })),
         potential_saving: 0,
         realized_saving:  0,
         ticket_scanned:   true,
