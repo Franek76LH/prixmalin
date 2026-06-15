@@ -66,9 +66,11 @@ Règles pour qty, unit_price, price et total :
 Ignore uniquement les lignes non-produits : total, sous-total, TVA, remises globales, modes de paiement, points fidélité.
 RÈGLE ABSOLUE : extraire CHAQUE article du ticket sans exception.
 - Parcours le ticket de haut en bas, ligne par ligne, sans en sauter aucune.
-- Inclus les articles dans TOUTES les sections, quelle que soit leur catégorie : alimentaire, "Entretien", "Hygiène-Beauté", "Non alimentaire", "Bazar", etc.
-- Inclus les articles situés en bas du ticket, juste avant le total.
-- Si une ligne ressemble à un produit avec un prix, inclus-la. Un article manquant est une erreur grave.${refSection}`,
+- Inclus les articles dans TOUTES les sections sans exception : alimentaire, "Entretien", "Entretien Hyg-Beauté", "Hygiène", "Non alimentaire", "Bazar", et toute autre section.
+- Inclus ABSOLUMENT le dernier article de chaque section, y compris ceux situés juste avant une ligne de total ou de sous-total.
+- Ne t'arrête pas à la première section : continue jusqu'à la fin du ticket.
+- Si une ligne comporte un nom de produit et un prix, c'est un article à extraire — quelle que soit sa position sur le ticket.
+- Un article manquant est une erreur grave.${refSection}`,
             },
           ],
         },
