@@ -1788,7 +1788,7 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
     } else {
       const storeId = entries[0]?.storeId || "autre";
       const storeInfo = STORES.find(s => s.id === storeId) || { id:"autre", name: entries[0]?.store_name || "Autre", logo:"🏪" };
-      const total = Math.round(entries.reduce((s,e) => s + e.price, 0) * 100) / 100;
+      const total = Math.round(entries.reduce((s,e) => s + (e.price||0) * (e.qty||1), 0) * 100) / 100;
       const newArc = {
         date:    entries[0]?.date || new Date().toISOString(),
         store:   storeInfo,
@@ -2338,7 +2338,7 @@ function ArchiveTab({ archives, onDelete, onAddToList, priceDB }) {
                   {arc.store_rating && <div style={{ fontSize:11, marginTop:2, letterSpacing:1 }}>{[1,2,3,4,5].map(n=><span key={n} style={{ color:n<=arc.store_rating?"#F5C200":"#D0D0D0" }}>★</span>)}</div>}
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                  <div style={{ background:C.blue, borderRadius:10, padding:"6px 14px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:18, color:C.white }}>{arc.total.toFixed(2)} €</div>
+                  <div style={{ background:C.blue, borderRadius:10, padding:"6px 14px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:18, color:C.white }}>{(arc.items?.reduce((s,i)=>{ const up=i.unit_price??i.price??0; return s+(up*(i.qty||1)); },0)||arc.total||0).toFixed(2)} €</div>
                   {pendingDeleteArc === arc.id ? (
                     <div style={{ display:"flex", gap:4 }}>
                       <button onClick={()=>setPendingDeleteArc(null)} style={{ background:C.grayLight, border:"none", borderRadius:6, padding:"4px 9px", fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:11, cursor:"pointer", color:C.text }}>Non</button>
