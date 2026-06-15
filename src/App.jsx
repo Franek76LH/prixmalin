@@ -477,7 +477,6 @@ function Header({ tab, itemCount, userEmail, displayName, onLogout, pendingCount
 function TabBar({ tab, setTab }) {
   const tabs = [
     { id:"home",      icon:"🏠", label:"Accueil"   },
-    { id:"prices",    icon:"🏷️", label:"Mes prix"  },
     { id:"archive",   icon:"📦", label:"Historique"},
     { id:"economies", icon:"💰", label:"Économies" },
   ];
@@ -2265,28 +2264,57 @@ function CompareTab({ items, priceDB, onValidate }) {
 }
 
 // ── ARCHIVE TAB ───────────────────────────────────────────────────────────────
-function ArchiveTab({ archives, onDelete, onAddToList, priceDB }) {
+function ArchiveTab({ archives, onDelete, onAddToList, priceDB, onImport, onSavePrice, produitsRef = [] }) {
   const [pendingDeleteArc, setPendingDeleteArc] = useState(null);
   const [added, setAdded] = useState(new Set());
   const [sort, setSort] = useState("date");
   const [expandedProduct, setExpandedProduct] = useState(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterCategory, setFilterCategory] = useState("all");
+  const [filterPeriod, setFilterPeriod] = useState("all");
+  const [showImport, setShowImport] = useState(false);
+  const [showEntry, setShowEntry] = useState(false);
 
-  if(archives.length===0) return (
-    <div style={{ padding:"40px 20px 100px", textAlign:"center" }}>
-      <div style={{ fontSize:60, marginBottom:14 }}>📦</div>
-      <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:17, color:C.blue, marginBottom:6 }}>Pas encore d'historique</div>
-      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>Valide ta première liste pour voir l'historique</div>
-    </div>
-  );
-  const totalSpent=archives.reduce((a,arc)=>a+arc.total,0);
+  const categories = useMemo(() => {
+    const seen = new Set();
+    archives.forEach(arc => arc.items.forEach(item => {
+      const cat = item.category || guessCategory(item.product);
+      if (cat) seen.add(cat);
+    }));
+    return [...seen].sort();
+  }, [archives]);
+
+  const periodCutoff = useMemo(() => {
+    if (filterPeriod === "week")  return Date.now() - 7  * 86400000;
+    if (filterPeriod === "month") return Date.now() - 30 * 86400000;
+    if (filterPeriod === "3m")    return Date.now() - 90 * 86400000;
+    return 0;
+  }, [filterPeriod]);
+
+  const filteredArchives = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    return archives.filter(arc => {
+      if (periodCutoff && new Date(arc.date).getTime() < periodCutoff) return false;
+      if (q && !arc.items.some(i =>
+        i.product.toLowerCase().includes(q) ||
+        (i.brand||"").toLowerCase().includes(q)
+      )) return false;
+      if (filterCategory !== "all" && !arc.items.some(i =>
+        (i.category || guessCategory(i.product)) === filterCategory
+      )) return false;
+      return true;
+    });
+  }, [archives, searchQuery, filterCategory, periodCutoff]);
+
+  const totalSpent = filteredArchives.reduce((a,arc)=>a+arc.total,0);
   const FILTERS=[{id:"date",label:"Date ↓"},{id:"magasin",label:"Magasin"},{id:"produit",label:"Produit"},{id:"montant",label:"Montant"}];
-  const sorted=[...archives];
+  const sorted=[...filteredArchives];
   if(sort==="date")    sorted.reverse();
   else if(sort==="magasin") sorted.sort((a,b)=>a.store.name.localeCompare(b.store.name,"fr"));
   else if(sort==="montant") sorted.sort((a,b)=>b.total-a.total);
   const productList=useMemo(()=>{
     const seen=new Set(); const result=[];
-    [...archives].reverse().forEach(arc=>arc.items.forEach(item=>{
+    [...filteredArchives].reverse().forEach(arc=>arc.items.forEach(item=>{
       const key=`${normName(item.brand||"")}_${normName(item.product)}_${normName(item.format||"")}`;
       if(!seen.has(key)){
         seen.add(key);
@@ -2296,105 +2324,144 @@ function ArchiveTab({ archives, onDelete, onAddToList, priceDB }) {
       }
     }));
     return result.sort((a,b)=>a.product.localeCompare(b.product,"fr"));
-  },[archives,priceDB]);
+  },[filteredArchives,priceDB]);
   return (
     <div style={{ padding:"16px 16px 110px" }}>
-      <div style={{ display:"flex", gap:10, marginBottom:16 }}>
-        <div style={{ flex:1, background:C.blue, borderRadius:12, padding:"12px 14px" }}>
-          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:800, color:"rgba(255,255,255,0.65)", textTransform:"uppercase", letterSpacing:"0.06em" }}>Courses</div>
-          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:24, color:C.white }}>{archives.length}</div>
-        </div>
-        <div style={{ flex:1, background:C.green, borderRadius:12, padding:"12px 14px" }}>
-          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:800, color:"rgba(255,255,255,0.65)", textTransform:"uppercase", letterSpacing:"0.06em" }}>Total dépensé</div>
-          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:24, color:C.white }}>{totalSpent.toFixed(0)} €</div>
-        </div>
-      </div>
-      <div style={{ display:"flex", gap:8, overflowX:"auto", marginBottom:14, paddingBottom:2, WebkitOverflowScrolling:"touch" }}>
-        {FILTERS.map(f=>(
-          <button key={f.id} onClick={()=>{ setSort(f.id); setExpandedProduct(null); }} style={{ flexShrink:0, background:sort===f.id?C.blue:C.grayLight, color:sort===f.id?C.white:C.textLight, border:"none", borderRadius:99, padding:"6px 14px", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, cursor:"pointer", whiteSpace:"nowrap" }}>{f.label}</button>
-        ))}
-      </div>
-      {sort==="produit" ? (
-        <div style={{ display:"flex", flexDirection:"column" }}>
-          {productList.map((item,i)=>{
-            const key=`pl_${normName(item.brand||"")}_${normName(item.product)}_${normName(item.format||"")}`; const done=added.has(key); const isOpen=expandedProduct===key;
-            const history=(priceDB||[]).filter(p=>normName(p.product)===normName(item.product)&&normName(p.format||"")===normName(item.format||"")&&normName(p.brand||"")===normName(item.brand||"")).sort((a,b)=>new Date(a.date)-new Date(b.date));
-            return (
-              <div key={i} style={{ borderBottom:`1px solid ${C.grayLight}` }}>
-                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 4px" }}>
-                  <div onClick={()=>setExpandedProduct(isOpen?null:key)} style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:700, color:C.text, cursor:"pointer", flex:1 }}>{item.brand?`${item.brand} · `:""}{item.product}{item.format?` ${item.format}`:""} <span style={{ fontSize:10, color:C.textLight }}>{isOpen?"▲":"▼"}</span></div>
-                  <div style={{ display:"flex", alignItems:"center", gap:10, flexShrink:0, marginLeft:12 }}>
-                    <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:900, color:C.blue }}>{item.unitPrice!=null?`${item.unitPrice.toFixed(2)} €`:"—"}</div>
-                    <button onClick={()=>{ if(!done){ onAddToList(item); setAdded(prev=>new Set(prev).add(key)); } }} style={{ background:done?C.green:C.red, border:"none", borderRadius:99, width:22, height:22, display:"inline-flex", alignItems:"center", justifyContent:"center", cursor:done?"default":"pointer", color:C.white, fontSize:13, fontWeight:900, padding:0, flexShrink:0 }}>{done?"✓":"+"}</button>
-                  </div>
-                </div>
-                {isOpen && (history.length<=1
-                  ? <div style={{ padding:"6px 4px 12px", fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, fontStyle:"italic" }}>Pas assez de données</div>
-                  : (()=>{
-                      const W=280,H=72,px=12,py=10;
-                      const ts=history.map(p=>new Date(p.date).getTime());
-                      const ps=history.map(p=>p.price);
-                      const minT=Math.min(...ts),maxT=Math.max(...ts),minP=Math.min(...ps),maxP=Math.max(...ps);
-                      const xOf=t=>px+(t-minT)/((maxT-minT)||1)*(W-2*px);
-                      const yOf=p=>H-py-((p-minP)/((maxP-minP)||1))*(H-2*py);
-                      const pts=history.map(p=>`${xOf(new Date(p.date).getTime())},${yOf(p.price)}`).join(" ");
-                      return (
-                        <div style={{ padding:"4px 4px 12px" }}>
-                          <svg viewBox={`0 0 ${W} ${H+14}`} width="100%" style={{ display:"block", overflow:"visible" }}>
-                            <polyline points={pts} fill="none" stroke={C.blue} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"/>
-                            {history.map((p,j)=>(
-                              <circle key={j} cx={xOf(new Date(p.date).getTime())} cy={yOf(p.price)} r="3" fill={C.blue}/>
-                            ))}
-                            <text x={xOf(ts[0])} y={H+12} fontFamily="'Nunito',sans-serif" fontSize="8" fill={C.textLight} textAnchor="start">{new Date(history[0].date).toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}</text>
-                            <text x={xOf(ts[ts.length-1])} y={H+12} fontFamily="'Nunito',sans-serif" fontSize="8" fill={C.textLight} textAnchor="end">{new Date(history[history.length-1].date).toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}</text>
-                            <text x={W-px} y={yOf(maxP)-3} fontFamily="'Nunito',sans-serif" fontSize="8" fill={C.blue} textAnchor="end">{maxP.toFixed(2)} €</text>
-                            <text x={W-px} y={yOf(minP)+9} fontFamily="'Nunito',sans-serif" fontSize="8" fill={C.textLight} textAnchor="end">{minP.toFixed(2)} €</text>
-                          </svg>
-                        </div>
-                      );
-                    })()
-                )}
-              </div>
-            );
-          })}
-
+      <button onClick={()=>setShowImport(true)} style={{ width:"100%", padding:"16px", marginBottom:12, background:"linear-gradient(135deg,#CC0000,#FF1A1A)", border:"none", borderRadius:14, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 6px 20px rgba(180,0,0,0.35)" }}>
+        <span style={{ fontSize:20 }}>🧾</span> Importer un ticket
+      </button>
+      <input value={searchQuery} onChange={e=>setSearchQuery(e.target.value)}
+        placeholder="🔍 Chercher un produit ou une marque..."
+        style={{ width:"100%", padding:"11px 14px", borderRadius:10, border:`2px solid ${searchQuery?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:14 }}
+      />
+      {archives.length === 0 ? (
+        <div style={{ textAlign:"center", padding:"40px 0 20px" }}>
+          <div style={{ fontSize:60, marginBottom:14 }}>📦</div>
+          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:17, color:C.blue, marginBottom:6 }}>Pas encore d'historique</div>
+          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>Valide ta première liste pour voir l'historique</div>
         </div>
       ) : (
-        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-          {sorted.map((arc,i)=>(
-            <div key={arc.id} style={{ background:C.white, borderRadius:14, border:`1px solid ${C.grayLight}`, overflow:"hidden", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", animation:`slideIn 0.25s ease ${i*0.06}s both` }}>
-              <div style={{ background:C.blueLight, padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-                <div>
-                  <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.blue }}>{arc.store?.logo} {arc.store?.name}</div>
-                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, marginTop:1 }}>{new Date(arc.date).toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}</div>
-                  {arc.store_rating && <div style={{ fontSize:11, marginTop:2, letterSpacing:1 }}>{[1,2,3,4,5].map(n=><span key={n} style={{ color:n<=arc.store_rating?"#F5C200":"#D0D0D0" }}>★</span>)}</div>}
-                </div>
-                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                  <div style={{ background:C.blue, borderRadius:10, padding:"6px 14px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:18, color:C.white }}>{(arc.items?.reduce((s,i)=>{ const up=i.unit_price??i.price??0; return s+(up*(i.qty||1)); },0)||arc.total||0).toFixed(2)} €</div>
-                  {pendingDeleteArc === arc.id ? (
-                    <div style={{ display:"flex", gap:4 }}>
-                      <button onClick={()=>setPendingDeleteArc(null)} style={{ background:C.grayLight, border:"none", borderRadius:6, padding:"4px 9px", fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:11, cursor:"pointer", color:C.text }}>Non</button>
-                      <button onClick={()=>{ onDelete(arc); setPendingDeleteArc(null); }} style={{ background:C.red, border:"none", borderRadius:6, padding:"4px 9px", fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:11, cursor:"pointer", color:C.white }}>Oui</button>
-                    </div>
-                  ) : (
-                    <button onClick={()=>setPendingDeleteArc(arc.id)} style={{ background:"none", border:"none", fontSize:14, cursor:"pointer", color:C.gray, padding:"4px" }}>✕</button>
-                  )}
-                </div>
-              </div>
-              <div style={{ padding:"10px 16px 14px", display:"flex", flexWrap:"wrap", gap:6 }}>
-                {arc.items.map((item,j)=>(
-                  <span key={j} style={{ background:C.grayLight, borderRadius:99, padding:"4px 8px 4px 12px", fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:700, color:C.textLight, display:"inline-flex", alignItems:"center", gap:6 }}>
-                    {(()=>{ const up=item.unit_price??item.price??null; const qty=item.qty||1; const tot=up!=null?up*qty:null; return `${item.brand?item.brand+' · ':""}${item.product} ${item.format} | ×${qty} | ${up!=null?Number(up).toFixed(2).replace('.',','):"—"} € | = ${tot!=null?Number(tot).toFixed(2).replace('.',','):"—"} €`; })()}
-                    {(()=>{ const key=`${arc.id}_${j}`; const done=added.has(key); return (
-                      <button onClick={()=>{ if(!done){ onAddToList(item); setAdded(prev=>new Set(prev).add(key)); } }} style={{ background:done?C.green:C.blue, border:"none", borderRadius:99, width:18, height:18, display:"inline-flex", alignItems:"center", justifyContent:"center", cursor:done?"default":"pointer", color:C.white, fontSize:11, fontWeight:900, padding:0, flexShrink:0 }}>{done?"✓":"+"}</button>
-                    );})()}
-                  </span>
-                ))}
-              </div>
+        <>
+          <div style={{ display:"flex", gap:10, marginBottom:16 }}>
+            <div style={{ flex:1, background:C.blue, borderRadius:12, padding:"12px 14px" }}>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:800, color:"rgba(255,255,255,0.65)", textTransform:"uppercase", letterSpacing:"0.06em" }}>Courses</div>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:24, color:C.white }}>{filteredArchives.length}</div>
             </div>
-          ))}
-        </div>
+            <div style={{ flex:1, background:C.green, borderRadius:12, padding:"12px 14px" }}>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:800, color:"rgba(255,255,255,0.65)", textTransform:"uppercase", letterSpacing:"0.06em" }}>Total dépensé</div>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:24, color:C.white }}>{totalSpent.toFixed(0)} €</div>
+            </div>
+          </div>
+          <div style={{ display:"flex", gap:8, overflowX:"auto", marginBottom:10, paddingBottom:2, WebkitOverflowScrolling:"touch" }}>
+            {FILTERS.map(f=>(
+              <button key={f.id} onClick={()=>{ setSort(f.id); setExpandedProduct(null); }} style={{ flexShrink:0, background:sort===f.id?C.blue:C.grayLight, color:sort===f.id?C.white:C.textLight, border:"none", borderRadius:99, padding:"6px 14px", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, cursor:"pointer", whiteSpace:"nowrap" }}>{f.label}</button>
+            ))}
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:14 }}>
+            <select value={filterCategory} onChange={e=>setFilterCategory(e.target.value)}
+              style={{ padding:"9px 12px", borderRadius:10, border:`1.5px solid ${C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:700, color:C.text, background:C.white, outline:"none", cursor:"pointer", boxSizing:"border-box" }}>
+              <option value="all">Toutes catégories</option>
+              {categories.map(cat=><option key={cat} value={cat}>{cat}</option>)}
+            </select>
+            <select value={filterPeriod} onChange={e=>setFilterPeriod(e.target.value)}
+              style={{ padding:"9px 12px", borderRadius:10, border:`1.5px solid ${C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:700, color:C.text, background:C.white, outline:"none", cursor:"pointer", boxSizing:"border-box" }}>
+              <option value="all">Toute période</option>
+              <option value="week">Cette semaine</option>
+              <option value="month">Ce mois</option>
+              <option value="3m">3 derniers mois</option>
+            </select>
+          </div>
+          {filteredArchives.length === 0 ? (
+            <div style={{ textAlign:"center", padding:"24px 0", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>
+              Aucun résultat pour cette recherche
+            </div>
+          ) : sort==="produit" ? (
+            <div style={{ display:"flex", flexDirection:"column" }}>
+              {productList.map((item,i)=>{
+                const key=`pl_${normName(item.brand||"")}_${normName(item.product)}_${normName(item.format||"")}`; const done=added.has(key); const isOpen=expandedProduct===key;
+                const history=(priceDB||[]).filter(p=>normName(p.product)===normName(item.product)&&normName(p.format||"")===normName(item.format||"")&&normName(p.brand||"")===normName(item.brand||"")).sort((a,b)=>new Date(a.date)-new Date(b.date));
+                return (
+                  <div key={i} style={{ borderBottom:`1px solid ${C.grayLight}` }}>
+                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 4px" }}>
+                      <div onClick={()=>setExpandedProduct(isOpen?null:key)} style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:700, color:C.text, cursor:"pointer", flex:1 }}>{item.brand?`${item.brand} · `:""}{item.product}{item.format?` ${item.format}`:""} <span style={{ fontSize:10, color:C.textLight }}>{isOpen?"▲":"▼"}</span></div>
+                      <div style={{ display:"flex", alignItems:"center", gap:10, flexShrink:0, marginLeft:12 }}>
+                        <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:900, color:C.blue }}>{item.unitPrice!=null?`${item.unitPrice.toFixed(2)} €`:"—"}</div>
+                        <button onClick={()=>{ if(!done){ onAddToList(item); setAdded(prev=>new Set(prev).add(key)); } }} style={{ background:done?C.green:C.red, border:"none", borderRadius:99, width:22, height:22, display:"inline-flex", alignItems:"center", justifyContent:"center", cursor:done?"default":"pointer", color:C.white, fontSize:13, fontWeight:900, padding:0, flexShrink:0 }}>{done?"✓":"+"}</button>
+                      </div>
+                    </div>
+                    {isOpen && (history.length<=1
+                      ? <div style={{ padding:"6px 4px 12px", fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, fontStyle:"italic" }}>Pas assez de données</div>
+                      : (()=>{
+                          const W=280,H=72,px=12,py=10;
+                          const ts=history.map(p=>new Date(p.date).getTime());
+                          const ps=history.map(p=>p.price);
+                          const minT=Math.min(...ts),maxT=Math.max(...ts),minP=Math.min(...ps),maxP=Math.max(...ps);
+                          const xOf=t=>px+(t-minT)/((maxT-minT)||1)*(W-2*px);
+                          const yOf=p=>H-py-((p-minP)/((maxP-minP)||1))*(H-2*py);
+                          const pts=history.map(p=>`${xOf(new Date(p.date).getTime())},${yOf(p.price)}`).join(" ");
+                          return (
+                            <div style={{ padding:"4px 4px 12px" }}>
+                              <svg viewBox={`0 0 ${W} ${H+14}`} width="100%" style={{ display:"block", overflow:"visible" }}>
+                                <polyline points={pts} fill="none" stroke={C.blue} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"/>
+                                {history.map((p,j)=>(
+                                  <circle key={j} cx={xOf(new Date(p.date).getTime())} cy={yOf(p.price)} r="3" fill={C.blue}/>
+                                ))}
+                                <text x={xOf(ts[0])} y={H+12} fontFamily="'Nunito',sans-serif" fontSize="8" fill={C.textLight} textAnchor="start">{new Date(history[0].date).toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}</text>
+                                <text x={xOf(ts[ts.length-1])} y={H+12} fontFamily="'Nunito',sans-serif" fontSize="8" fill={C.textLight} textAnchor="end">{new Date(history[history.length-1].date).toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}</text>
+                                <text x={W-px} y={yOf(maxP)-3} fontFamily="'Nunito',sans-serif" fontSize="8" fill={C.blue} textAnchor="end">{maxP.toFixed(2)} €</text>
+                                <text x={W-px} y={yOf(minP)+9} fontFamily="'Nunito',sans-serif" fontSize="8" fill={C.textLight} textAnchor="end">{minP.toFixed(2)} €</text>
+                              </svg>
+                            </div>
+                          );
+                        })()
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+              {sorted.map((arc,i)=>(
+                <div key={arc.id} style={{ background:C.white, borderRadius:14, border:`1px solid ${C.grayLight}`, overflow:"hidden", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", animation:`slideIn 0.25s ease ${i*0.06}s both` }}>
+                  <div style={{ background:C.blueLight, padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                    <div>
+                      <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.blue }}>{arc.store?.logo} {arc.store?.name}</div>
+                      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, marginTop:1 }}>{new Date(arc.date).toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}</div>
+                      {arc.store_rating && <div style={{ fontSize:11, marginTop:2, letterSpacing:1 }}>{[1,2,3,4,5].map(n=><span key={n} style={{ color:n<=arc.store_rating?"#F5C200":"#D0D0D0" }}>★</span>)}</div>}
+                    </div>
+                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                      <div style={{ background:C.blue, borderRadius:10, padding:"6px 14px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:18, color:C.white }}>{(arc.items?.reduce((s,i)=>{ const up=i.unit_price??i.price??0; return s+(up*(i.qty||1)); },0)||arc.total||0).toFixed(2)} €</div>
+                      {pendingDeleteArc === arc.id ? (
+                        <div style={{ display:"flex", gap:4 }}>
+                          <button onClick={()=>setPendingDeleteArc(null)} style={{ background:C.grayLight, border:"none", borderRadius:6, padding:"4px 9px", fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:11, cursor:"pointer", color:C.text }}>Non</button>
+                          <button onClick={()=>{ onDelete(arc); setPendingDeleteArc(null); }} style={{ background:C.red, border:"none", borderRadius:6, padding:"4px 9px", fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:11, cursor:"pointer", color:C.white }}>Oui</button>
+                        </div>
+                      ) : (
+                        <button onClick={()=>setPendingDeleteArc(arc.id)} style={{ background:"none", border:"none", fontSize:14, cursor:"pointer", color:C.gray, padding:"4px" }}>✕</button>
+                      )}
+                    </div>
+                  </div>
+                  <div style={{ padding:"10px 16px 14px", display:"flex", flexWrap:"wrap", gap:6 }}>
+                    {arc.items.map((item,j)=>(
+                      <span key={j} style={{ background:C.grayLight, borderRadius:99, padding:"4px 8px 4px 12px", fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:700, color:C.textLight, display:"inline-flex", alignItems:"center", gap:6 }}>
+                        {(()=>{ const up=item.unit_price??item.price??null; const qty=item.qty||1; const tot=up!=null?up*qty:null; return `${item.brand?item.brand+' · ':""}${item.product} ${item.format} | ×${qty} | ${up!=null?Number(up).toFixed(2).replace('.',','):"—"} € | = ${tot!=null?Number(tot).toFixed(2).replace('.',','):"—"} €`; })()}
+                        {(()=>{ const key=`${arc.id}_${j}`; const done=added.has(key); return (
+                          <button onClick={()=>{ if(!done){ onAddToList(item); setAdded(prev=>new Set(prev).add(key)); } }} style={{ background:done?C.green:C.blue, border:"none", borderRadius:99, width:18, height:18, display:"inline-flex", alignItems:"center", justifyContent:"center", cursor:done?"default":"pointer", color:C.white, fontSize:11, fontWeight:900, padding:0, flexShrink:0 }}>{done?"✓":"+"}</button>
+                        );})()}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
+      <button onClick={()=>setShowEntry(true)} style={{ position:"fixed", bottom:72, right:16, background:"linear-gradient(135deg,#CC0000,#FF1A1A)", border:"none", borderRadius:99, padding:"13px 18px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", gap:6, boxShadow:"0 6px 20px rgba(180,0,0,0.45)", zIndex:40 }}>
+        ✏️ Saisie manuelle
+      </button>
+      {showImport && <ImportTicketSheet onClose={()=>setShowImport(false)} onImport={onImport} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))}/>}
+      {showEntry  && <PriceEntrySheet  onClose={()=>setShowEntry(false)} onSave={onSavePrice}/>}
     </div>
   );
 }
@@ -2805,6 +2872,86 @@ export default function App() {
     if (!error) setPseudo(value);
   };
 
+  const handleImportPrices = entries => {
+    const openArchive = [...archives].reverse().find(a => !a.ticket_scanned);
+    let realizedSaving = null;
+    if (openArchive) {
+      realizedSaving = 0;
+      entries.forEach(e => {
+        const archiveItem = openArchive.items.find(item =>
+          normName(item.product) === normName(e.product) &&
+          normFormat(item.format || '') === normFormat(e.format || '')
+        );
+        if (!archiveItem) return;
+        const qty = archiveItem.qty || 1;
+        const eKey = `${normName(e.brand||'')}_${normName(e.product)}_${normFormat(e.format||'')}`;
+        const alts = priceDB.filter(p => {
+          const pKey = `${normName(p.brand||'')}_${normName(p.product)}_${normFormat(p.format||'')}`;
+          return pKey === eKey && p.storeId !== e.storeId;
+        });
+        if (alts.length > 0) {
+          const avgMarket = alts.reduce((s, p) => s + p.price, 0) / alts.length;
+          realizedSaving += (avgMarket - e.price) * qty;
+        }
+      });
+      realizedSaving = Math.round(realizedSaving * 100) / 100;
+      updateArchive(openArchive.id, { ticket_scanned: true, realized_saving: realizedSaving });
+      setShowRating({ id: openArchive.id, store: openArchive.store });
+    } else {
+      const storeId = entries[0]?.storeId || "autre";
+      const storeInfo = STORES.find(s => s.id === storeId) || { id:"autre", name: entries[0]?.store_name || "Autre", logo:"🏪" };
+      const total = Math.round(entries.reduce((s,e) => s + (e.price||0) * (e.qty||1), 0) * 100) / 100;
+      const newArc = {
+        date:    entries[0]?.date || new Date().toISOString(),
+        store:   storeInfo,
+        total,
+        items:   entries.map(e => ({ id: Date.now()+Math.random(), product: e.product, format: e.format||"", brand: e.brand||"", qty: e.qty||1, unit_price: e.unit_price||null, price: e.price||null, total: e.total||null, checked: false })),
+        potential_saving: 0,
+        realized_saving:  0,
+        ticket_scanned:   true,
+      };
+      (async () => {
+        const {id:_id,...rest}=newArc;
+        const {data,error}=await supabase.from('archives').insert({...rest,user_id:session?.user?.id}).select('id').single();
+        if(error){ console.error("Erreur création archive ticket :",error); showAppToast("⚠️ Archive non sauvegardée, vérifie ta connexion",false); }
+        else {
+          const {data:all}=await supabase.from('archives').select('*').order('date');
+          if(all) setArchives(all);
+          setShowRating({id:data.id,store:newArc.store});
+        }
+      })();
+    }
+    let updated = [...priceDB];
+    entries.forEach(e => { updated = [...updated.filter(p => priceKey(p) !== priceKey(e)), e]; });
+    savePriceDB(updated);
+    if (session?.user?.id) {
+      const communityEntries = entries.map(e => ({
+        user_id:       session.user.id,
+        product:       e.product,
+        brand:         e.brand || '',
+        format:        e.format || '',
+        category:      guessCategory(e.product),
+        price:         e.price,
+        date:          e.date,
+        store_name:    e.store_name || '',
+        store_address: e.store_address || '',
+        is_private:    e.share === false,
+      }));
+      supabase.from('community_prices').insert(communityEntries)
+        .then(({ error }) => { if (error) { console.error("Erreur community_prices :",error); showAppToast("⚠️ Partage communauté échoué",false); } });
+    }
+    const savingMsg = realizedSaving !== null
+      ? ` · Économies : ${realizedSaving >= 0 ? '+' : ''}${realizedSaving.toFixed(2)} €`
+      : '';
+    showAppToast(`✓ ${entries.length} prix importé${entries.length > 1 ? "s" : ""}${savingMsg}`);
+  };
+
+  const handleSavePrice = entry => {
+    const updated=[...priceDB.filter(p=>priceKey(p)!==priceKey(entry)),{...entry,id:Date.now()}];
+    savePriceDB(updated);
+    showAppToast("✓ Prix enregistré");
+  };
+
   const handleLogout = async () => { await supabase.auth.signOut(); };
 
   const globalStyle = (
@@ -2862,7 +3009,7 @@ export default function App() {
               setShowRating({id:data.id,store:newArc.store});
             }
           }} userId={session?.user?.id} produitsRef={produitsRef}/>}
-          {loaded && tab==="archive"   && <ArchiveTab   archives={archives} onDelete={deleteArchive} priceDB={priceDB} onAddToList={arcItem=>{
+          {loaded && tab==="archive"   && <ArchiveTab   archives={archives} onDelete={deleteArchive} priceDB={priceDB} onImport={handleImportPrices} onSavePrice={handleSavePrice} produitsRef={produitsRef} onAddToList={arcItem=>{
             const newItem={id:Date.now()+Math.random(),product:arcItem.product,format:arcItem.format||"",brand:arcItem.brand||"",qty:arcItem.qty||1,checked:false};
             saveItems([...items,newItem]);
             showAppToast(`✓ ${arcItem.product} ajouté à ta liste`);
