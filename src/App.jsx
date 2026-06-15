@@ -704,8 +704,12 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     onClose();
   };
 
-  const goToShare = () => {
-    const ids = new Set(editableProducts.filter(p=>p.keep&&p.name&&p.price>0).map(p=>p.id));
+  const goToShare = (products) => {
+    console.log("[goToShare] products arg:", products);
+    console.log("[goToShare] editableProducts state:", editableProducts);
+    const list = products || editableProducts;
+    const ids = new Set(list.filter(p => p.keep && p.name && p.price > 0).map(p => p.id));
+    console.log("[goToShare] list après filtre — ids:", [...ids]);
     setShareChecked(ids);
     setStatus("share");
   };
@@ -757,7 +761,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true})));
                   setStoreNameEdit(parsed.store||"");
                   setStoreLocation(parsed.address||"");
-                  if (parsed.store && parsed.address) { setStatus("preview"); } else { setStatus("store"); }
+                  if (parsed.store && parsed.address) { goToShare(parsed.products.map((p,i) => ({...p, id:i, keep:true}))); } else { setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true}))); setStatus("store"); }
                 } catch(e) { setError("Erreur scan : " + e.message); }
                 setScanning(false);
               }} style={{ display:"none" }} />
@@ -777,7 +781,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true, share:true})));
                   setStoreNameEdit(parsed.store || "");
                   setStoreLocation(parsed.address || "");
-                  if (parsed.store && parsed.address) { setStatus("preview"); } else { setStatus("store"); }
+                  if (parsed.store && parsed.address) { goToShare(parsed.products.map((p,i) => ({...p, id:i, keep:true}))); } else { setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true}))); setStatus("store"); }
                 } catch(e) { setError("Erreur scan : " + e.message); }
                 setGalleryScanning(false);
                 e.target.value = "";
@@ -803,7 +807,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true})));
                   setStoreNameEdit(parsed.store||"");
                   setStoreLocation(parsed.address||"");
-                  if (parsed.store && parsed.address) { setStatus("preview"); } else { setStatus("store"); }
+                  if (parsed.store && parsed.address) { goToShare(parsed.products.map((p,i) => ({...p, id:i, keep:true}))); } else { setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true}))); setStatus("store"); }
                 } catch(e) { setError("Erreur scan : " + e.message); }
                 setScanning(false);
               }} style={{ display:"none" }} />
@@ -847,14 +851,14 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                 <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Enseigne</div>
                 <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
                   {STORES.map(s=>(
-                    <button key={s.id} onClick={()=>setSelectedStore(s.id)} style={{ padding:"6px 12px", background:selectedStore===s.id?C.blue:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, color:selectedStore===s.id?C.white:C.text, cursor:"pointer" }}>
+                    <button key={s.id} onClick={()=>{ setSelectedStore(s.id); setStoreNameEdit(s.name); }} style={{ padding:"6px 12px", background:selectedStore===s.id?C.blue:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, color:selectedStore===s.id?C.white:C.text, cursor:"pointer" }}>
                       {s.logo} {s.name}
                     </button>
                   ))}
                 </div>
               </div>
 
-              <button onClick={()=>setStatus("preview")} disabled={!storeNameEdit.trim()} style={{ width:"100%", padding:"16px", border:"none", borderRadius:12, background:storeNameEdit.trim()?C.orange:C.grayLight, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:storeNameEdit.trim()?C.white:C.gray, cursor:storeNameEdit.trim()?"pointer":"default", marginBottom:10, boxShadow:storeNameEdit.trim()?"0 6px 20px rgba(204,0,0,0.35)":"none" }}>
+              <button onClick={() => goToShare()} disabled={!storeNameEdit.trim()} style={{ width:"100%", padding:"16px", border:"none", borderRadius:12, background:storeNameEdit.trim()?C.orange:C.grayLight, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:storeNameEdit.trim()?C.white:C.gray, cursor:storeNameEdit.trim()?"pointer":"default", marginBottom:10, boxShadow:storeNameEdit.trim()?"0 6px 20px rgba(204,0,0,0.35)":"none" }}>
                 Continuer →
               </button>
               <button onClick={()=>setStatus("idle")} style={{ width:"100%", padding:"13px", border:`2px solid ${C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.textLight, cursor:"pointer" }}>
@@ -896,7 +900,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                 ))}
               </div>
 
-              <button onClick={goToShare} style={{ width:"100%", padding:"16px", border:"none", borderRadius:12, background:C.orange, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.white, cursor:"pointer", marginBottom:10, boxShadow:"0 6px 20px rgba(204,0,0,0.35)" }}>
+              <button onClick={() => goToShare()} style={{ width:"100%", padding:"16px", border:"none", borderRadius:12, background:C.orange, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.white, cursor:"pointer", marginBottom:10, boxShadow:"0 6px 20px rgba(204,0,0,0.35)" }}>
                 Continuer →
               </button>
               <button onClick={()=>setStatus("idle")} style={{ width:"100%", padding:"13px", border:`2px solid ${C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.textLight, cursor:"pointer" }}>

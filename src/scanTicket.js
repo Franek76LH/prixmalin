@@ -59,7 +59,7 @@ export async function scanTicketWithClaude(imageBase64, apiKey, refProducts = []
     { "brand": "marque ou vide", "name": "nom du produit normalisé", "format": "format ou vide", "qty": 1, "unit_price": 0.00, "price": 0.00, "total": 0.00 }
   ]
 }
-CODES TVA : sur les tickets Carrefour et certaines enseignes, chaque ligne produit commence par un chiffre isolé (2, 4, 6…) qui est un CODE TVA — ce n'est PAS la quantité. Ignore ce chiffre de début de ligne.
+CODES TVA Carrefour : chaque ligne produit commence par UN SEUL chiffre isolé (1, 2, 4, 6, 8…) suivi d'un espace puis du nom du produit. Ce chiffre est TOUJOURS un code TVA, jamais une quantité. La quantité est TOUJOURS 1 sauf si la ligne contient explicitement un multiplicateur 'x' (ex: 1,95x2). Ne jamais utiliser le code TVA comme quantité, même si aucun multiplicateur n'est présent.
 Règles pour qty, unit_price, price et total :
 - Si la ligne affiche un multiplicateur "x" (ex : 1,95x2 ou 10,13 x2) : qty = le nombre après le x, unit_price = price = le montant avant le x, total = unit_price × qty.
 - Si pas de multiplicateur : qty = 1, unit_price = price = total = le montant affiché sur la ligne.
