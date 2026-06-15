@@ -274,6 +274,13 @@ function ProfilSheet({ circles, userId, userEmail, profileMap, pseudo, archives,
   const ringR = 56;
   const ringMembers = accepted.slice(0, 6);
 
+  const thisMonthStr = `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`;
+  const scanned = archives.filter(a => a.ticket_scanned && a.realized_saving != null);
+  const cagnotteTotal = scanned.reduce((s, a) => s + (a.realized_saving || 0), 0);
+  const thisMonthSaving = scanned
+    .filter(a => (a.date || '').startsWith(thisMonthStr))
+    .reduce((s, a) => s + (a.realized_saving || 0), 0);
+
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", zIndex:300, animation:"fadeIn 0.2s ease" }} onClick={onClose}>
       <div onClick={e=>e.stopPropagation()} style={{ background:C.white, borderRadius:"24px 24px 0 0", width:"100%", maxWidth:430, margin:"0 auto", maxHeight:"90vh", display:"flex", flexDirection:"column", animation:"slideUp 0.3s ease" }}>
@@ -294,8 +301,8 @@ function ProfilSheet({ circles, userId, userEmail, profileMap, pseudo, archives,
               <circle cx="84" cy="84" r={ringR} fill="none" stroke={C.grayLight} strokeWidth="2"/>
             </svg>
             <div style={{ position:"absolute", inset:0, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}>
-              <div style={{ fontFamily:F, fontWeight:900, fontSize:28, color:C.text, lineHeight:1 }}>0€</div>
-              <div style={{ fontFamily:F, fontSize:11, color:C.green, fontWeight:700, marginTop:3 }}>+0€ ce mois-ci</div>
+              <div style={{ fontFamily:F, fontWeight:900, fontSize:28, color:C.text, lineHeight:1 }}>{cagnotteTotal >= 0 ? "+" : ""}{cagnotteTotal.toFixed(2)} €</div>
+              <div style={{ fontFamily:F, fontSize:11, color:C.green, fontWeight:700, marginTop:3 }}>{thisMonthSaving >= 0 ? "+" : ""}{thisMonthSaving.toFixed(2)} € ce mois-ci</div>
             </div>
             {ringMembers.length === 0 ? (
               <div style={{ position:"absolute", left:84+ringR-14, top:84-14, width:28, height:28, borderRadius:"50%", background:C.grayLight, display:"flex", alignItems:"center", justifyContent:"center", fontSize:16, color:C.gray, border:"2px solid white" }}>+</div>
