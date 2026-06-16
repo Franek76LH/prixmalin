@@ -2272,7 +2272,7 @@ function CompareTab({ items, priceDB, onValidate }) {
 
             {/* Bouton valider */}
             <div style={{ padding:"0 12px 16px" }}>
-              <button onClick={()=>onValidate(best, maxSavings)} style={{ width:"100%", padding:"15px", border:"none", borderRadius:12, background:C.orange, fontFamily:F, fontWeight:900, fontSize:16, color:"#111", cursor:"pointer", boxShadow:"0 4px 16px rgba(0,0,0,0.25)" }}>
+              <button onClick={()=>onValidate(best, savingsVsSecond)} style={{ width:"100%", padding:"15px", border:"none", borderRadius:12, background:C.orange, fontFamily:F, fontWeight:900, fontSize:16, color:"#111", cursor:"pointer", boxShadow:"0 4px 16px rgba(0,0,0,0.25)" }}>
                 ✅ Je fais mes courses chez {best.name}
               </button>
 
