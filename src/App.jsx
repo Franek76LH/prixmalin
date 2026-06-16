@@ -2124,9 +2124,11 @@ function CompareTab({ items, priceDB, onValidate }) {
     return totals;
   },[analysis]);
 
-  const ranked       = STORES.map(s=>({...s,...storeTotals[s.id]})).filter(s=>s.found>0).sort((a,b)=>b.found!==a.found?b.found-a.found:a.total-b.total);
-  const best         = ranked[0];
-  const worstTotal   = ranked.length>1 ? ranked[ranked.length-1].total : 0;
+  const ranked          = STORES.map(s=>({...s,...storeTotals[s.id]})).filter(s=>s.found>0).sort((a,b)=>b.found!==a.found?b.found-a.found:a.total-b.total);
+  const best            = ranked[0];
+  const secondBest      = ranked[1] ?? null;
+  const worstTotal      = ranked.length>1 ? ranked[ranked.length-1].total : 0;
+  const savingsVsSecond = (best && secondBest) ? secondBest.total - best.total : 0;
 
   const bestStoreEntry = best ? priceDB.find(p => p.storeId === best.id && p.store_address?.trim()) : null;
   const mapsQuery      = best ? `${best.name}${bestStoreEntry ? ' ' + bestStoreEntry.store_address : ''}` : '';
@@ -2273,6 +2275,12 @@ function CompareTab({ items, priceDB, onValidate }) {
               <button onClick={()=>onValidate(best, maxSavings)} style={{ width:"100%", padding:"15px", border:"none", borderRadius:12, background:C.orange, fontFamily:F, fontWeight:900, fontSize:16, color:"#111", cursor:"pointer", boxShadow:"0 4px 16px rgba(0,0,0,0.25)" }}>
                 ✅ Je fais mes courses chez {best.name}
               </button>
+
+              {secondBest && savingsVsSecond > 0 && (
+                <div style={{ fontFamily:F, fontSize:12, color:"rgba(255,255,255,0.75)", textAlign:"center", marginTop:10 }}>
+                  Avec cette liste de courses, aujourd'hui <strong style={{ color:"#FFD700" }}>{best.name}</strong> est le plus malin · tu économises <strong style={{ color:"#FFD700" }}>{savingsVsSecond.toFixed(2)} €</strong>
+                </div>
+              )}
 
             </div>
 
