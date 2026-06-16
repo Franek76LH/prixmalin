@@ -131,11 +131,13 @@ function PseudoModal({ onSave }) {
   const F = "'Nunito',sans-serif";
   const [value,   setValue]   = useState('');
   const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState('');
 
   const handle = async () => {
     if (!value.trim()) return;
-    setLoading(true);
-    await onSave(value.trim());
+    setLoading(true); setError('');
+    const result = await onSave(value.trim());
+    if (result?.error) setError(result.error);
     setLoading(false);
   };
 
@@ -156,8 +158,9 @@ function PseudoModal({ onSave }) {
           value={value} onChange={e=>setValue(e.target.value)}
           onKeyDown={e=>e.key==='Enter'&&handle()}
           placeholder="Nico, Marie, Papy…"
-          style={{ width:"100%", padding:"14px 16px", borderRadius:12, border:`2px solid ${value.trim()?C.blue:C.grayLight}`, fontFamily:F, fontSize:16, color:C.text, boxSizing:"border-box", marginBottom:16, textAlign:"center" }}
+          style={{ width:"100%", padding:"14px 16px", borderRadius:12, border:`2px solid ${value.trim()?C.blue:C.grayLight}`, fontFamily:F, fontSize:16, color:C.text, boxSizing:"border-box", marginBottom:error?8:16, textAlign:"center" }}
         />
+        {error && <div style={{ fontFamily:F, fontSize:12, color:"#CC0000", fontWeight:700, marginBottom:12, textAlign:"center" }}>⚠️ {error}</div>}
         <button onClick={handle} disabled={!canSubmit}
           style={{ width:"100%", padding:"14px", border:"none", borderRadius:12, background:canSubmit?C.red:C.grayLight, fontFamily:F, fontWeight:900, fontSize:15, color:canSubmit?C.white:C.gray, cursor:canSubmit?"pointer":"default" }}>
           {loading ? "…" : "Valider →"}
@@ -258,7 +261,7 @@ function AuthScreen() {
 // ── PROFIL SHEET ─────────────────────────────────────────────────────────────
 function ProfilSheet({ circles, userId, userEmail, profileMap, pseudo, archives, onClose, onInvite, onUpdateStatus, onLogout }) {
   const F = "'Nunito',sans-serif";
-  const [inviteEmail,   setInviteEmail]   = useState('');
+  const [invitePseudo,  setInvitePseudo]  = useState('');
   const [inviteError,   setInviteError]   = useState('');
   const [inviteLoading, setInviteLoading] = useState(false);
   const [sharedCount,   setSharedCount]   = useState(null);
@@ -278,16 +281,15 @@ function ProfilSheet({ circles, userId, userEmail, profileMap, pseudo, archives,
   const sent     = circles.filter(c => c.requester_id === userId && c.status === 'pending');
   const otherDisplay = c => {
     const otherId = c.requester_id === userId ? c.recipient_id : c.requester_id;
-    const email   = c.requester_id === userId ? c.recipient_email : c.requester_email;
-    return (otherId && profileMap[otherId]) || email || '?';
+    return (otherId && profileMap[otherId]) || '?';
   };
   const initial = s => (s || '?')[0].toUpperCase();
 
   const handleInvite = async () => {
-    if (!inviteEmail.trim()) return;
+    if (!invitePseudo.trim()) return;
     setInviteLoading(true); setInviteError('');
-    const { error } = await onInvite(inviteEmail);
-    if (error) setInviteError(error); else setInviteEmail('');
+    const { error } = await onInvite(invitePseudo);
+    if (error) setInviteError(error); else setInvitePseudo('');
     setInviteLoading(false);
   };
 
@@ -350,7 +352,7 @@ function ProfilSheet({ circles, userId, userEmail, profileMap, pseudo, archives,
             {received.map(c => (
               <div key={c.id} style={{ background:"#FFFBEA", borderRadius:12, padding:"12px 14px", marginBottom:8, border:"1.5px solid #FFD000", display:"flex", alignItems:"center", gap:10 }}>
                 <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{(c.requester_id && profileMap[c.requester_id]) || c.requester_email}</div>
+                  <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{profileMap[c.requester_id] || 'Utilisateur inconnu'}</div>
                   <div style={{ fontFamily:F, fontSize:11, color:C.textLight }}>veut partager ses prix avec toi</div>
                 </div>
                 <button onClick={()=>onUpdateStatus(c.id,'accepted')} style={{ padding:"8px 10px", border:"none", borderRadius:8, background:C.green, fontFamily:F, fontWeight:800, fontSize:12, color:"#fff", cursor:"pointer", flexShrink:0 }}>✓</button>
@@ -390,7 +392,7 @@ function ProfilSheet({ circles, userId, userEmail, profileMap, pseudo, archives,
               <div key={c.id} style={{ display:"flex", alignItems:"center", gap:12, paddingTop:accepted.length+i>0?10:0, paddingBottom:10, borderTop:accepted.length+i>0?`1px solid ${C.grayLight}`:"none" }}>
                 <div style={{ width:36, height:36, borderRadius:"50%", background:C.grayLight, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:F, fontWeight:900, fontSize:14, color:C.gray, flexShrink:0 }}>?</div>
                 <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontFamily:F, fontWeight:700, fontSize:13, color:C.textLight, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{c.recipient_email}</div>
+                  <div style={{ fontFamily:F, fontWeight:700, fontSize:13, color:C.textLight, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{(c.recipient_id && profileMap[c.recipient_id]) || 'Invitation en attente'}</div>
                   <div style={{ fontFamily:F, fontSize:11, color:"#FFD000", fontWeight:700 }}>⏳ En attente</div>
                 </div>
                 <button onClick={()=>onUpdateStatus(c.id,'revoked')} style={{ padding:"4px 10px", border:`1px solid ${C.grayLight}`, borderRadius:8, background:"#fff", fontFamily:F, fontSize:11, color:C.gray, cursor:"pointer" }}>Annuler</button>
@@ -414,15 +416,15 @@ function ProfilSheet({ circles, userId, userEmail, profileMap, pseudo, archives,
 
           {/* Invite form */}
           <div style={{ marginBottom:20 }}>
-            <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Inviter par email</div>
+            <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Inviter par pseudo</div>
             <div style={{ display:"flex", gap:8 }}>
-              <input ref={inviteRef} type="email" value={inviteEmail} onChange={e=>setInviteEmail(e.target.value)}
+              <input ref={inviteRef} type="text" value={invitePseudo} onChange={e=>setInvitePseudo(e.target.value)}
                 onKeyDown={e=>e.key==='Enter'&&handleInvite()}
-                placeholder="ami@email.com"
-                style={{ flex:1, padding:"12px 14px", borderRadius:10, border:`2px solid ${inviteEmail?C.blue:C.grayLight}`, fontFamily:F, fontSize:14, color:C.text, outline:"none" }}
+                placeholder="@pseudo de ton ami"
+                style={{ flex:1, padding:"12px 14px", borderRadius:10, border:`2px solid ${invitePseudo?C.blue:C.grayLight}`, fontFamily:F, fontSize:14, color:C.text, outline:"none" }}
               />
-              <button onClick={handleInvite} disabled={inviteLoading||!inviteEmail.trim()}
-                style={{ padding:"12px 16px", border:"none", borderRadius:10, background:inviteLoading||!inviteEmail.trim()?C.grayLight:C.blue, fontFamily:F, fontWeight:900, fontSize:14, color:inviteLoading||!inviteEmail.trim()?C.gray:"#fff", cursor:inviteLoading||!inviteEmail.trim()?"default":"pointer", flexShrink:0 }}>
+              <button onClick={handleInvite} disabled={inviteLoading||!invitePseudo.trim()}
+                style={{ padding:"12px 16px", border:"none", borderRadius:10, background:inviteLoading||!invitePseudo.trim()?C.grayLight:C.blue, fontFamily:F, fontWeight:900, fontSize:14, color:inviteLoading||!invitePseudo.trim()?C.gray:"#fff", cursor:inviteLoading||!invitePseudo.trim()?"default":"pointer", flexShrink:0 }}>
                 {inviteLoading ? "…" : "Inviter"}
               </button>
             </div>
@@ -3126,23 +3128,34 @@ export default function App() {
     setTimeout(()=>{setShowSuccess(null);setTab("archive");},2800);
   };
 
-  const inviteToCircle = async (email) => {
-    const trimmed = email.trim().toLowerCase();
-    if (trimmed === session.user.email.toLowerCase()) return { error: "Tu ne peux pas t'inviter toi-même" };
+  const inviteByPseudo = async (pseudoInput) => {
+    const trimmed = pseudoInput.trim();
+    if (!trimmed) return { error: "Saisis un pseudo" };
+
+    const { data: found } = await supabase
+      .from('profiles').select('id, pseudo')
+      .ilike('pseudo', trimmed)
+      .neq('id', session.user.id)
+      .maybeSingle();
+
+    if (!found) return { error: "Aucun utilisateur avec ce pseudo" };
+
     const existing = circles.find(c =>
-      (c.requester_id === session.user.id && c.recipient_email?.toLowerCase() === trimmed) ||
-      (c.recipient_id === session.user.id && c.requester_email?.toLowerCase() === trimmed)
+      (c.requester_id === session.user.id && c.recipient_id === found.id) ||
+      (c.recipient_id === session.user.id && c.requester_id === found.id)
     );
     if (existing && existing.status !== 'revoked' && existing.status !== 'declined') {
       return { error: "Invitation déjà envoyée ou cercle déjà actif" };
     }
+
     const { data, error } = await supabase.from('circles').insert({
       requester_id: session.user.id,
-      requester_email: session.user.email,
-      recipient_email: trimmed,
+      recipient_id: found.id,
     }).select().single();
+
     if (error) return { error: error.message };
     setCircles(prev => [...prev, data]);
+    setProfileMap(prev => ({ ...prev, [found.id]: found.pseudo }));
     return {};
   };
 
@@ -3161,8 +3174,16 @@ export default function App() {
   };
 
   const savePseudo = async (value) => {
+    const { data: taken } = await supabase
+      .from('profiles').select('id')
+      .ilike('pseudo', value)
+      .neq('id', session.user.id)
+      .maybeSingle();
+    if (taken) return { error: "Ce pseudo est déjà pris, choisis-en un autre" };
     const { error } = await supabase.from('profiles').upsert({ id: session.user.id, pseudo: value });
-    if (!error) setPseudo(value);
+    if (error) return { error: error.message };
+    setPseudo(value);
+    return {};
   };
 
   const handleImportPrices = entries => {
@@ -3312,7 +3333,7 @@ export default function App() {
         </div>
         <TabBar tab={tab} setTab={setTab}/>
         {appToast && <Toast msg={appToast.msg} ok={appToast.ok}/>}
-        {showCircle && <ProfilSheet circles={circles} userId={session.user.id} userEmail={session.user.email} profileMap={profileMap} pseudo={pseudo} archives={archives} onClose={()=>setShowCircle(false)} onInvite={inviteToCircle} onUpdateStatus={updateCircleStatus} onLogout={handleLogout}/>}
+        {showCircle && <ProfilSheet circles={circles} userId={session.user.id} userEmail={session.user.email} profileMap={profileMap} pseudo={pseudo} archives={archives} onClose={()=>setShowCircle(false)} onInvite={inviteByPseudo} onUpdateStatus={updateCircleStatus} onLogout={handleLogout}/>}
         {loaded && pseudo === null && <PseudoModal onSave={savePseudo}/>}
         {showRating && (
           <StoreRatingScreen
