@@ -74,6 +74,26 @@ function fmtUnitPrice(price, format) {
 const MOIS=['jan.','fév.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'];
 function formatMonth(yyyymm){ if(!yyyymm) return ''; const [y,m]=yyyymm.split('-'); return `${MOIS[parseInt(m)-1]} ${y}`; }
 
+async function geocodeAddress(address) {
+  try {
+    const r = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(address)}&limit=1`);
+    const d = await r.json();
+    const f = d.features?.[0];
+    if (!f) return null;
+    const [lng, lat] = f.geometry.coordinates;
+    return { lat, lng };
+  } catch { return null; }
+}
+
+async function insertStoreInDB(enseigne, address, lat, lng) {
+  try {
+    const { data } = await supabase.from('stores')
+      .insert({ enseigne, address, latitude: lat, longitude: lng })
+      .select('id').single();
+    return data?.id ?? null;
+  } catch { return null; }
+}
+
 // Devine la catégorie d'un produit à partir de mots-clés dans son nom
 function guessCategory(name) {
   const n = (name || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
@@ -637,6 +657,13 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   const [saving,        setSaving]        = useState(false);
   const [storeNameEdit, setStoreNameEdit] = useState("");
   const [storeLocation, setStoreLocation] = useState("");
+  const [knownStores, setKnownStores] = useState([]);
+  const [knownStoresLoading, setKnownStoresLoading] = useState(false);
+  const [resolvedStoreId, setResolvedStoreId] = useState(null);
+  const [newStoreSubMode, setNewStoreSubMode] = useState(null);
+  const [gpsLoading, setGpsLoading] = useState(false);
+  const [manualAddress, setManualAddress] = useState('');
+  const [manualGeocoding, setManualGeocoding] = useState(false);
   const fileInputRef    = useRef(null);
   const galleryInputRef = useRef(null);
   const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
@@ -652,6 +679,20 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     };
   }, [scanning, galleryScanning]);
 
+  const fetchKnownStores = async (enseigne) => {
+    if (!enseigne || enseigne === 'autre') { setKnownStores([]); return; }
+    setKnownStoresLoading(true);
+    setResolvedStoreId(null);
+    setNewStoreSubMode(null);
+    setManualAddress('');
+    const { data } = await supabase.from('stores').select('*').eq('enseigne', enseigne);
+    const stores = data || [];
+    setKnownStores(stores);
+    const lastId = localStorage.getItem(`prixmalin_lastStore_${enseigne}`);
+    if (lastId && stores.some(s => s.id === lastId)) setResolvedStoreId(lastId);
+    setKnownStoresLoading(false);
+  };
+
   const EXAMPLE = `{
   "store": "Intermarché",
   "date": "2026-04-11",
@@ -663,17 +704,19 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   ]
 }`;
 
-  const parseAndPreview = (text) => {
+  const parseAndPreview = async (text) => {
     try {
       const clean=(text||"").replace(/```json|```/g,"").trim();
       const parsed=JSON.parse(clean);
       if(!parsed.products||!Array.isArray(parsed.products)) throw new Error("Champ 'products' manquant");
+      const enseigne = storeIdFromName(parsed.store);
       setResult(parsed);
-      setSelectedStore(storeIdFromName(parsed.store));
+      setSelectedStore(enseigne);
       setEditableProducts(parsed.products.map((p,i)=>({...p,id:i,keep:true,share:true})));
       setStoreNameEdit(parsed.store||"");
       setStoreLocation(parsed.address||"");
       setError("");
+      await fetchKnownStores(enseigne);
       setStatus("store");
     } catch(e) { setError("JSON invalide : "+e.message); }
   };
@@ -684,21 +727,25 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   const toggleProduct = id => setEditableProducts(prev=>prev.map(p=>p.id===id?{...p,keep:!p.keep}:p));
   const updatePrice = (id,val) => setEditableProducts(prev=>prev.map(p=>p.id===id?{...p,price:parseFloat(val)||0}:p));
 
-  const confirm = (idsToShare) => {
+  const confirm = async (idsToShare) => {
     if (saving) return;
     setSaving(true);
+    if (resolvedStoreId && selectedStore && selectedStore !== 'autre') {
+      localStorage.setItem(`prixmalin_lastStore_${selectedStore}`, resolvedStoreId);
+    }
     const toImport=editableProducts.filter(p=>p.keep&&p.name&&p.price>0).map(p=>({
-      id:Date.now()+p.id,
-      brand:  p.brand||"",
-      product:p.name,
-      format: p.format||"",
-      qty:    p.qty||1,
-      storeId:selectedStore||"autre",
-      store_name: storeNameEdit.trim() || result?.store || "",
-      store_address: storeLocation.trim(),
-      price:  p.price,
-      date:   result?.date?new Date(result.date).toISOString():new Date().toISOString(),
-      share:  idsToShare.has(p.id),
+      id:           Date.now()+p.id,
+      brand:        p.brand||"",
+      product:      p.name,
+      format:       p.format||"",
+      qty:          p.qty||1,
+      storeId:      selectedStore||"autre",
+      store_name:   storeNameEdit.trim() || result?.store || "",
+      store_address:storeLocation.trim(),
+      store_id:     resolvedStoreId,
+      price:        p.price,
+      date:         result?.date?new Date(result.date).toISOString():new Date().toISOString(),
+      share:        idsToShare.has(p.id),
     }));
     onImport(toImport);
     onClose();
@@ -757,11 +804,13 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                 try {
                   const base64 = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.readAsDataURL(file); });
                   const parsed = await scanTicketWithClaude(base64, apiKey, refProducts);
-                  setResult(parsed); setSelectedStore(storeIdFromName(parsed.store));
+                  const enseigne = storeIdFromName(parsed.store);
+                  setResult(parsed); setSelectedStore(enseigne);
                   setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true})));
                   setStoreNameEdit(parsed.store||"");
                   setStoreLocation(parsed.address||"");
-                  if (parsed.store && parsed.address) { goToShare(parsed.products.map((p,i) => ({...p, id:i, keep:true}))); } else { setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true}))); setStatus("store"); }
+                  await fetchKnownStores(enseigne);
+                  setStatus("store");
                 } catch(e) { setError("Erreur scan : " + e.message); }
                 setScanning(false);
               }} style={{ display:"none" }} />
@@ -777,11 +826,13 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                 try {
                   const base64 = await imageFileToJpegBase64(file);
                   const parsed = await scanTicketWithClaude(base64, apiKey, refProducts);
-                  setResult(parsed); setSelectedStore(storeIdFromName(parsed.store));
+                  const enseigne = storeIdFromName(parsed.store);
+                  setResult(parsed); setSelectedStore(enseigne);
                   setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true, share:true})));
                   setStoreNameEdit(parsed.store || "");
                   setStoreLocation(parsed.address || "");
-                  if (parsed.store && parsed.address) { goToShare(parsed.products.map((p,i) => ({...p, id:i, keep:true}))); } else { setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true}))); setStatus("store"); }
+                  await fetchKnownStores(enseigne);
+                  setStatus("store");
                 } catch(e) { setError("Erreur scan : " + e.message); }
                 setGalleryScanning(false);
                 e.target.value = "";
@@ -803,11 +854,13 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                 try {
                   const base64 = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.readAsDataURL(file); });
                   const parsed = await scanTicketWithClaude(base64, apiKey, refProducts);
-                  setResult(parsed); setSelectedStore(storeIdFromName(parsed.store));
+                  const enseigne = storeIdFromName(parsed.store);
+                  setResult(parsed); setSelectedStore(enseigne);
                   setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true})));
                   setStoreNameEdit(parsed.store||"");
                   setStoreLocation(parsed.address||"");
-                  if (parsed.store && parsed.address) { goToShare(parsed.products.map((p,i) => ({...p, id:i, keep:true}))); } else { setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true}))); setStatus("store"); }
+                  await fetchKnownStores(enseigne);
+                  setStatus("store");
                 } catch(e) { setError("Erreur scan : " + e.message); }
                 setScanning(false);
               }} style={{ display:"none" }} />
@@ -824,41 +877,158 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
 
           {status==="store" && result && (
             <>
-              <div style={{ background:C.blueLight, borderRadius:12, padding:"12px 16px", marginBottom:20 }}>
+              {/* Product count banner */}
+              <div style={{ background:C.blueLight, borderRadius:12, padding:"12px 16px", marginBottom:16 }}>
                 <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:C.blue, marginBottom:4 }}>
                   ✅ {editableProducts.length} produit{editableProducts.length>1?"s":""} détecté{editableProducts.length>1?"s":""}
                 </div>
                 {result.date && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>📅 {new Date(result.date).toLocaleDateString("fr-FR",{day:"numeric",month:"long",year:"numeric"})}</div>}
               </div>
 
+              {/* Store name */}
               <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Nom du magasin *</div>
-              <input
-                value={storeNameEdit}
-                onChange={e=>setStoreNameEdit(e.target.value)}
+              <input value={storeNameEdit} onChange={e=>setStoreNameEdit(e.target.value)}
                 placeholder="Ex : Intermarché, Lidl..."
-                style={{ width:"100%", padding:"13px 14px", borderRadius:12, border:`2px solid ${storeNameEdit.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:15, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:14 }}
-              />
+                style={{ width:"100%", padding:"13px 14px", borderRadius:12, border:`2px solid ${storeNameEdit.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:15, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:14 }} />
 
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Adresse (optionnel)</div>
-              <input
-                value={storeLocation}
-                onChange={e=>setStoreLocation(e.target.value)}
-                placeholder="Ex : 12 Rue de la Paix, 75001 Paris"
-                style={{ width:"100%", padding:"13px 14px", borderRadius:12, border:`2px solid ${storeLocation.trim()?C.blue:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:15, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:20 }}
-              />
+              {/* GPS linking section */}
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Localisation du magasin</div>
 
-              <div style={{ marginBottom:20 }}>
+              {knownStoresLoading ? (
+                <div style={{ textAlign:"center", padding:"16px 0", fontFamily:"'Nunito',sans-serif", fontSize:14, color:C.textLight }}>⏳ Recherche des magasins connus...</div>
+              ) : resolvedStoreId ? (
+                <div style={{ background:"#F0FFF5", borderRadius:12, padding:"12px 14px", marginBottom:12, border:`1.5px solid ${C.green}`, display:"flex", alignItems:"center", gap:10 }}>
+                  <span style={{ fontSize:18 }}>✅</span>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:C.green }}>Magasin lié avec succès</div>
+                    <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight }}>
+                      {knownStores.find(s=>s.id===resolvedStoreId)?.address || "Position GPS enregistrée"}
+                    </div>
+                  </div>
+                  <button onClick={()=>{ setResolvedStoreId(null); setNewStoreSubMode(null); setManualAddress(''); setError(""); }}
+                    style={{ background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.blue, fontWeight:800, cursor:"pointer", padding:"4px 8px", borderRadius:8, flexShrink:0 }}>
+                    Changer
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {/* List of known stores */}
+                  {newStoreSubMode===null && knownStores.length>0 && (
+                    <>
+                      <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:10 }}>
+                        {knownStores.map(s=>{
+                          const isLast = localStorage.getItem(`prixmalin_lastStore_${selectedStore}`)===s.id;
+                          return (
+                            <div key={s.id} onClick={()=>setResolvedStoreId(s.id)}
+                              style={{ borderRadius:12, border:`2px solid ${C.grayLight}`, background:C.white, padding:"12px 14px", cursor:"pointer", display:"flex", alignItems:"center", gap:10 }}>
+                              <div style={{ width:20, height:20, borderRadius:99, border:`2px solid ${C.gray}`, background:C.white, flexShrink:0 }} />
+                              <div style={{ flex:1 }}>
+                                <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:C.text }}>{s.address}</div>
+                                {isLast && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.green, fontWeight:700 }}>Dernier magasin utilisé</div>}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <button onClick={()=>setNewStoreSubMode('new')}
+                        style={{ width:"100%", padding:"12px", marginBottom:4, border:`2px dashed ${C.gray}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:C.textLight, cursor:"pointer" }}>
+                        ➕ Nouveau magasin / Autre adresse
+                      </button>
+                      <button onClick={()=>goToShare()}
+                        style={{ width:"100%", marginBottom:8, background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.gray, cursor:"pointer", padding:"8px 0", textDecoration:"underline" }}>
+                        Passer — ne pas lier à un magasin
+                      </button>
+                    </>
+                  )}
+
+                  {/* New store: choose method */}
+                  {(newStoreSubMode==='new' || (newStoreSubMode===null && knownStores.length===0)) && (
+                    <>
+                      {knownStores.length===0 && (
+                        <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight, marginBottom:12, fontWeight:600 }}>
+                          Aucun magasin connu pour cette enseigne.
+                        </div>
+                      )}
+                      <button onClick={()=>{
+                        setNewStoreSubMode('gps'); setGpsLoading(true); setError("");
+                        navigator.geolocation.getCurrentPosition(
+                          async pos=>{
+                            const {latitude:lat,longitude:lng}=pos.coords;
+                            const id=await insertStoreInDB(selectedStore, storeNameEdit.trim()||"", lat, lng);
+                            setResolvedStoreId(id);
+                            setGpsLoading(false);
+                          },
+                          ()=>{ setError("Géolocalisation refusée ou indisponible"); setGpsLoading(false); setNewStoreSubMode('new'); }
+                        );
+                      }} style={{ width:"100%", padding:"14px", marginBottom:10, border:"none", borderRadius:12, background:"#0066CC", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:"white", cursor:"pointer" }}>
+                        📍 Utiliser ma position actuelle
+                      </button>
+                      <button onClick={()=>setNewStoreSubMode('manual')}
+                        style={{ width:"100%", padding:"13px", marginBottom:10, border:`2px solid ${"#0066CC"}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:"#0066CC", cursor:"pointer" }}>
+                        ✍️ Saisir l'adresse manuellement
+                      </button>
+                      {knownStores.length>0 && (
+                        <button onClick={()=>setNewStoreSubMode(null)}
+                          style={{ width:"100%", padding:"11px", marginBottom:8, border:`2px solid ${C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:C.textLight, cursor:"pointer" }}>
+                          ← Retour à la liste
+                        </button>
+                      )}
+                      <button onClick={()=>goToShare()}
+                        style={{ width:"100%", marginBottom:8, background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.gray, cursor:"pointer", padding:"8px 0", textDecoration:"underline" }}>
+                        Passer — ne pas lier à un magasin
+                      </button>
+                    </>
+                  )}
+
+                  {/* GPS loading */}
+                  {newStoreSubMode==='gps' && gpsLoading && (
+                    <div style={{ textAlign:"center", padding:"20px 0", fontFamily:"'Nunito',sans-serif", fontSize:14, color:C.textLight }}>⏳ Localisation en cours...</div>
+                  )}
+
+                  {/* Manual address input */}
+                  {newStoreSubMode==='manual' && (
+                    <>
+                      <input value={manualAddress} onChange={e=>setManualAddress(e.target.value)}
+                        placeholder="Ex : 25 Bd Michelet, 13009 Marseille"
+                        style={{ width:"100%", padding:"13px 14px", borderRadius:12, border:`2px solid ${manualAddress.trim()?C.blue:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:15, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:10 }} />
+                      <button disabled={!manualAddress.trim()||manualGeocoding} onClick={async()=>{
+                        setManualGeocoding(true); setError("");
+                        const coords=await geocodeAddress(manualAddress.trim());
+                        if(coords){
+                          const id=await insertStoreInDB(selectedStore, manualAddress.trim(), coords.lat, coords.lng);
+                          setResolvedStoreId(id);
+                        } else {
+                          setError("Adresse introuvable — vérifie et réessaie");
+                        }
+                        setManualGeocoding(false);
+                      }} style={{ width:"100%", padding:"14px", marginBottom:10, border:"none", borderRadius:12, background:!manualAddress.trim()||manualGeocoding?C.grayLight:"#0066CC", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:!manualAddress.trim()||manualGeocoding?C.gray:"white", cursor:!manualAddress.trim()||manualGeocoding?"default":"pointer" }}>
+                        {manualGeocoding?"⏳ Géocodage...":"📍 Valider l'adresse"}
+                      </button>
+                      <button onClick={()=>setNewStoreSubMode('new')}
+                        style={{ width:"100%", padding:"11px", marginBottom:8, border:`2px solid ${C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:C.textLight, cursor:"pointer" }}>
+                        ← Retour
+                      </button>
+                    </>
+                  )}
+
+                  {error && <div style={{ background:"#FEE", borderRadius:10, padding:"10px 14px", marginBottom:12, fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.red, fontWeight:700 }}>⚠️ {error}</div>}
+                </>
+              )}
+
+              {/* Enseigne chips — re-fetch on change */}
+              <div style={{ marginBottom:16, marginTop:8 }}>
                 <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Enseigne</div>
                 <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
                   {STORES.map(s=>(
-                    <button key={s.id} onClick={()=>{ setSelectedStore(s.id); setStoreNameEdit(s.name); }} style={{ padding:"6px 12px", background:selectedStore===s.id?C.blue:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, color:selectedStore===s.id?C.white:C.text, cursor:"pointer" }}>
+                    <button key={s.id} onClick={async()=>{ setSelectedStore(s.id); setStoreNameEdit(s.name); await fetchKnownStores(s.id); }}
+                      style={{ padding:"6px 12px", background:selectedStore===s.id?C.blue:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, color:selectedStore===s.id?C.white:C.text, cursor:"pointer" }}>
                       {s.logo} {s.name}
                     </button>
                   ))}
                 </div>
               </div>
 
-              <button onClick={() => goToShare()} disabled={!storeNameEdit.trim()} style={{ width:"100%", padding:"16px", border:"none", borderRadius:12, background:storeNameEdit.trim()?C.orange:C.grayLight, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:storeNameEdit.trim()?C.white:C.gray, cursor:storeNameEdit.trim()?"pointer":"default", marginBottom:10, boxShadow:storeNameEdit.trim()?"0 6px 20px rgba(204,0,0,0.35)":"none" }}>
+              <button onClick={()=>goToShare()} disabled={!storeNameEdit.trim()} style={{ width:"100%", padding:"16px", border:"none", borderRadius:12, background:storeNameEdit.trim()?C.orange:C.grayLight, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:storeNameEdit.trim()?C.white:C.gray, cursor:storeNameEdit.trim()?"pointer":"default", marginBottom:10, boxShadow:storeNameEdit.trim()?"0 6px 20px rgba(204,0,0,0.35)":"none" }}>
                 Continuer →
               </button>
               <button onClick={()=>setStatus("idle")} style={{ width:"100%", padding:"13px", border:`2px solid ${C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.textLight, cursor:"pointer" }}>
@@ -1812,6 +1982,7 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
         date:          e.date,
         store_name:    e.store_name || '',
         store_address: e.store_address || '',
+        store_id:      e.store_id || null,
         is_private:    e.share === false,
       }));
       supabase.from('community_prices').insert(communityEntries)
@@ -2848,16 +3019,17 @@ export default function App() {
   const savePriceDB = async (v) => {
     setPriceDB(v);
     const clean = v.map(p => ({
-      product: p.product,
-      format: p.format,
-      brand: p.brand || '',
-      storeId: p.storeId || '',
-      store_name: p.store_name || '',
+      product:       p.product,
+      format:        p.format,
+      brand:         p.brand || '',
+      storeId:       p.storeId || '',
+      store_name:    p.store_name || '',
       store_address: p.store_address || '',
-      price: parseFloat(p.price),
-      date: p.date || new Date().toISOString(),
-      category: p.category || guessCategory(p.product),
-      user_id: session?.user?.id,
+      store_id:      p.store_id || null,
+      price:         parseFloat(p.price),
+      date:          p.date || new Date().toISOString(),
+      category:      p.category || guessCategory(p.product),
+      user_id:       session?.user?.id,
     }));
 
     const { error } = await supabase
@@ -3056,6 +3228,7 @@ export default function App() {
         date:          e.date,
         store_name:    e.store_name || '',
         store_address: e.store_address || '',
+        store_id:      e.store_id || null,
         is_private:    e.share === false,
       }));
       supabase.from('community_prices').insert(communityEntries)
