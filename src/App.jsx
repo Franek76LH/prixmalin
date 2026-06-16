@@ -182,8 +182,9 @@ function AuthScreen() {
   const [loading,  setLoading]  = useState(false);
   const [error,    setError]    = useState('');
   const [success,  setSuccess]  = useState('');
+  const [cguAccepted, setCguAccepted] = useState(false);
 
-  const switchMode = (m) => { setMode(m); setError(''); setSuccess(''); setConfirm(''); setShowPwd(false); setShowConf(false); };
+  const switchMode = (m) => { setMode(m); setError(''); setSuccess(''); setConfirm(''); setShowPwd(false); setShowConf(false); setCguAccepted(false); };
 
   const handle = async () => {
     if (!email.trim() || !password.trim()) { setError("Remplis tous les champs"); return; }
@@ -194,7 +195,7 @@ function AuthScreen() {
         ? await supabase.auth.signInWithPassword({ email: email.trim(), password })
         : await supabase.auth.signUp({ email: email.trim(), password });
       if (error) throw error;
-      if (mode === 'register') { setSuccess('Compte créé ! Confirme ton email puis connecte-toi.'); switchMode('login'); }
+      if (mode === 'register') { switchMode('register_success'); }
     } catch(e) {
       setError(e.message);
     } finally {
@@ -214,6 +215,70 @@ function AuthScreen() {
         style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", cursor:"pointer", fontSize:16, color:C.gray, padding:0, lineHeight:1 }}>
         {show ? "🙈" : "👁️"}
       </button>
+    </div>
+  );
+
+  if (mode === 'register_success') return (
+    <div style={{ minHeight:"100vh", background:C.bg, maxWidth:430, margin:"0 auto", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", padding:"32px 24px", overflowY:"auto" }}>
+      <div style={{ fontSize:60, marginBottom:6 }}>🛒</div>
+      <div style={{ fontFamily:F, fontWeight:900, fontSize:28, color:C.red, marginBottom:4 }}>PrixMalin</div>
+      <div style={{ fontFamily:F, fontSize:13, color:C.textLight, marginBottom:24 }}>Comparez. Économisez.</div>
+
+      <div style={{ background:C.white, borderRadius:20, padding:"24px 20px", width:"100%", boxShadow:"0 4px 24px rgba(0,0,0,0.08)" }}>
+        <div style={{ fontFamily:F, fontWeight:900, fontSize:18, color:C.text, marginBottom:20 }}>Bienvenue sur PrixMalin ✨</div>
+
+        <div style={{ background:"#FFFBEA", borderRadius:12, padding:"14px 16px", marginBottom:14, border:"1.5px solid #FFD000" }}>
+          <div style={{ fontFamily:F, fontWeight:900, fontSize:13, color:"#7A5800", marginBottom:6 }}>📧 Vérifie ta boîte mail !</div>
+          <div style={{ fontFamily:F, fontSize:12, color:"#5A4000", lineHeight:1.6 }}>
+            Tu vas recevoir un email de confirmation de la part de Supabase (expéditeur du type <b>noreply@mail.app.supabase.io</b>). Ce n'est pas un email indésirable, c'est nécessaire pour activer ton compte. Clique sur le lien pour confirmer, puis reviens ici pour te connecter.
+          </div>
+        </div>
+
+        <div style={{ background:"#F0FFF5", borderRadius:12, padding:"14px 16px", marginBottom:14, border:`1.5px solid ${C.green}` }}>
+          <div style={{ fontFamily:F, fontWeight:900, fontSize:13, color:"#006B27", marginBottom:6 }}>🔒 Tes données restent privées</div>
+          <div style={{ fontFamily:F, fontSize:12, color:"#004D1C", lineHeight:1.6 }}>
+            Les prix que tu scannes restent privés par défaut. Ils ne sont visibles par les autres que si tu choisis de les partager avec ta communauté (ton cercle de proches).
+          </div>
+        </div>
+
+        <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Conditions générales d'utilisation</div>
+        <div style={{ background:C.bg, borderRadius:12, padding:"14px 16px", maxHeight:200, overflowY:"auto", marginBottom:16, border:`1px solid ${C.grayLight}` }}>
+          <div style={{ fontFamily:F, fontWeight:800, fontSize:12, color:C.text, marginBottom:10 }}>📋 EN BREF</div>
+          {[
+            "PrixMalin est un projet personnel en phase de test, pas une entreprise. L'app peut évoluer, et son fonctionnement n'est pas garanti à 100%.",
+            "Tes prix scannés (produit, prix, magasin, date) restent privés. Ils ne sont visibles par personne d'autre, sauf si tu choisis toi-même de les partager avec ton cercle, article par article.",
+            "Ton email n'est jamais visible par les autres utilisateurs. Pour t'identifier auprès de tes proches, seul ton pseudo (unique sur l'app) est utilisé.",
+            "Si tu rejoins un cercle, les prix que tu partages restent visibles aux membres de ce cercle même si tu le quittes plus tard, sauf demande contraire de ta part.",
+            "Les prix affichés (les tiens ou ceux partagés par ta communauté) sont fournis à titre indicatif. PrixMalin ne garantit pas qu'ils correspondent exactement au prix réel en magasin.",
+            "Le créateur de l'app peut suspendre un compte en cas d'usage abusif ou de mauvaise foi (informations volontairement fausses, etc.).",
+            "Tu peux demander la suppression de ton compte et de tes données à tout moment via le formulaire de contact de l'app.",
+            "Ces règles peuvent évoluer ; tu seras informé des changements importants.",
+          ].map((item, i) => (
+            <div key={i} style={{ display:"flex", gap:8, marginBottom:8, fontFamily:F, fontSize:12, color:C.textLight, lineHeight:1.6 }}>
+              <span style={{ flexShrink:0, color:C.red, fontWeight:900 }}>·</span>
+              <span>{item}</span>
+            </div>
+          ))}
+          <div style={{ marginTop:10, fontFamily:F, fontSize:12, color:C.text, fontWeight:700, fontStyle:"italic", lineHeight:1.5 }}>
+            En cochant la case ci-dessous, tu confirmes avoir lu et accepté les Conditions Générales d'Utilisation complètes de PrixMalin.
+          </div>
+        </div>
+
+        <div onClick={()=>setCguAccepted(v=>!v)}
+          style={{ display:"flex", alignItems:"flex-start", gap:12, marginBottom:20, cursor:"pointer" }}>
+          <div style={{ width:22, height:22, borderRadius:6, border:`2px solid ${cguAccepted?C.green:C.gray}`, background:cguAccepted?C.green:"#fff", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", marginTop:1 }}>
+            {cguAccepted && <span style={{ color:"#fff", fontSize:14, fontWeight:900, lineHeight:1 }}>✓</span>}
+          </div>
+          <div style={{ fontFamily:F, fontSize:13, color:C.text, fontWeight:700, lineHeight:1.5 }}>
+            J'ai lu et j'accepte les Conditions Générales d'Utilisation
+          </div>
+        </div>
+
+        <button onClick={()=>switchMode('login')} disabled={!cguAccepted}
+          style={{ width:"100%", padding:"14px", border:"none", borderRadius:12, background:cguAccepted?C.red:C.grayLight, fontFamily:F, fontWeight:900, fontSize:15, color:cguAccepted?C.white:C.gray, cursor:cguAccepted?"pointer":"default" }}>
+          Continuer → Se connecter
+        </button>
+      </div>
     </div>
   );
 
