@@ -2331,6 +2331,8 @@ function ArchiveTab({ archives, onDelete, onAddToList, priceDB, onImport, onSave
   const [filterPeriod, setFilterPeriod] = useState("all");
   const [showImport, setShowImport] = useState(false);
   const [showEntry, setShowEntry] = useState(false);
+  const [subTab, setSubTab] = useState("mois");
+  const [selectedMonth, setSelectedMonth] = useState(null);
 
   const categories = useMemo(() => {
     const seen = new Set();
@@ -2382,11 +2384,110 @@ function ArchiveTab({ archives, onDelete, onAddToList, priceDB, onImport, onSave
     }));
     return result.sort((a,b)=>a.product.localeCompare(b.product,"fr"));
   },[filteredArchives,priceDB]);
+
+  const now        = new Date();
+  const currentKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+
+  const months = useMemo(() => {
+    const map = {};
+    archives.forEach(arc => {
+      const d   = new Date(arc.date);
+      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      if (!map[key]) map[key] = { key, year: d.getFullYear(), month: d.getMonth(), saving: 0, count: 0 };
+      map[key].saving += arc.potential_saving || 0;
+      map[key].count  += 1;
+    });
+    if (!map[currentKey])
+      map[currentKey] = { key: currentKey, year: now.getFullYear(), month: now.getMonth(), saving: 0, count: 0 };
+    return Object.values(map).sort((a, b) => b.key.localeCompare(a.key));
+  }, [archives]);
+
+  const monthLabel = (year, month) => {
+    const s = new Date(year, month, 1).toLocaleDateString('fr-FR', { month:'long', year:'numeric' });
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  };
+
+  const monthArchives = useMemo(() => {
+    if (!selectedMonth) return [];
+    return archives
+      .filter(arc => {
+        const d = new Date(arc.date);
+        return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}` === selectedMonth;
+      })
+      .sort((a, b) => new Date(b.date) - new Date(a.date));
+  }, [archives, selectedMonth]);
+
+  if (selectedMonth) {
+    const info = months.find(m => m.key === selectedMonth) || {};
+    return (
+      <div style={{ padding:"16px 16px 110px" }}>
+        <button onClick={() => setSelectedMonth(null)} style={{ background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.blue, cursor:"pointer", padding:"0 0 16px", display:"flex", alignItems:"center", gap:6 }}>
+          ← {monthLabel(info.year, info.month)}
+        </button>
+        {monthArchives.length === 0 ? (
+          <div style={{ textAlign:"center", padding:"40px 0", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>
+            Aucun achat ce mois-ci
+          </div>
+        ) : (
+          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+            {monthArchives.map(arc => (
+              <div key={arc.id} style={{ background:C.white, borderRadius:14, border:`1px solid ${C.grayLight}`, padding:"14px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+                <div>
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.text }}>{arc.store?.logo} {arc.store?.name}</div>
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, marginTop:2 }}>{new Date(arc.date).toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long' })}</div>
+                </div>
+                <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end" }}>
+                  <div style={{ background:C.blue, borderRadius:10, padding:"6px 14px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:18, color:C.white }}>
+                    {(arc.total || 0).toFixed(2)} €
+                  </div>
+                  {arc.potential_saving > 0 && (
+                    <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.green, marginTop:4 }}>
+                      Économie : {arc.potential_saving.toFixed(2)} €
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <button onClick={()=>setShowEntry(true)} style={{ position:"fixed", bottom:72, right:16, background:"linear-gradient(135deg,#CC0000,#FF1A1A)", border:"none", borderRadius:99, padding:"13px 18px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", gap:6, boxShadow:"0 6px 20px rgba(180,0,0,0.45)", zIndex:40 }}>
+          ✏️ Saisie manuelle
+        </button>
+        {showImport && <ImportTicketSheet onClose={()=>setShowImport(false)} onImport={onImport} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))}/>}
+        {showEntry  && <PriceEntrySheet  onClose={()=>setShowEntry(false)} onSave={onSavePrice}/>}
+      </div>
+    );
+  }
+
   return (
     <div style={{ padding:"16px 16px 110px" }}>
       <button onClick={()=>setShowImport(true)} style={{ width:"100%", padding:"16px", marginBottom:12, background:"linear-gradient(135deg,#CC0000,#FF1A1A)", border:"none", borderRadius:14, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 6px 20px rgba(180,0,0,0.35)" }}>
         <span style={{ fontSize:20 }}>🧾</span> Importer un ticket
       </button>
+      <div style={{ display:"flex", gap:8, marginBottom:16 }}>
+        {[{id:"mois",label:"Par mois"},{id:"produit",label:"Par produit"}].map(t=>(
+          <button key={t.id} onClick={()=>setSubTab(t.id)} style={{ flex:1, padding:"10px", border:"none", borderRadius:10, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, cursor:"pointer", background:subTab===t.id?C.blue:C.grayLight, color:subTab===t.id?C.white:C.textLight }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {subTab === "mois" && (
+        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+          {months.map(m => (
+            <div key={m.key} onClick={() => setSelectedMonth(m.key)} style={{ background:C.white, borderRadius:14, border:`1px solid ${C.grayLight}`, padding:"16px 18px", display:"flex", alignItems:"center", justifyContent:"space-between", cursor:"pointer", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+              <div>
+                <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.text }}>{monthLabel(m.year, m.month)}</div>
+                {m.count > 0 && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, marginTop:2 }}>{m.count} course{m.count>1?'s':''}</div>}
+              </div>
+              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                {m.saving > 0.01 && <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.green }}>−{m.saving.toFixed(2)} €</div>}
+                <span style={{ color:C.gray, fontSize:18 }}>›</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {subTab === "produit" && (<>
       <input value={searchQuery} onChange={e=>setSearchQuery(e.target.value)}
         placeholder="🔍 Chercher un produit ou une marque..."
         style={{ width:"100%", padding:"11px 14px", borderRadius:10, border:`2px solid ${searchQuery?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:14 }}
@@ -2514,6 +2615,7 @@ function ArchiveTab({ archives, onDelete, onAddToList, priceDB, onImport, onSave
           )}
         </>
       )}
+      </>)}
       <button onClick={()=>setShowEntry(true)} style={{ position:"fixed", bottom:72, right:16, background:"linear-gradient(135deg,#CC0000,#FF1A1A)", border:"none", borderRadius:99, padding:"13px 18px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", gap:6, boxShadow:"0 6px 20px rgba(180,0,0,0.45)", zIndex:40 }}>
         ✏️ Saisie manuelle
       </button>
