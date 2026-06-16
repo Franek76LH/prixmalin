@@ -1597,30 +1597,8 @@ function ListTab({ items, setItems, setTab, favorites, saveFavorites }) {
 // ── ECONOMIES TAB ─────────────────────────────────────────────────────────────
 function EconomiesTab({ priceDB, archives, items, setTab }) {
   const sLabel = { fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:10 };
+  const [selectedMonth, setSelectedMonth] = useState(null);
 
-  // ── Section 1 : Économies potentielles (liste de courses en cours)
-  const potentials = useMemo(() => {
-    let totalSaving = 0;
-    const details = [];
-    items.forEach(item => {
-      const matches = priceDB.filter(p => itemMatchesPrice(item, p));
-      const byStore = {};
-      matches.forEach(p => { if (!byStore[p.storeId] || p.price < byStore[p.storeId].price) byStore[p.storeId] = p; });
-      const opts = Object.values(byStore).sort((a,b) => a.price - b.price);
-      if (opts.length >= 2) {
-        const saving = (opts[opts.length-1].price - opts[0].price) * item.qty;
-        totalSaving += saving;
-        details.push({
-          item, opts, saving,
-          best:  STORES.find(s => s.id === opts[0].storeId),
-          worst: STORES.find(s => s.id === opts[opts.length-1].storeId),
-        });
-      }
-    });
-    return { totalSaving, details };
-  }, [items, priceDB]);
-
-  // ── Section 2 : Cagnotte réalisées — archives avec ticket scanné
   const scannedArchives = useMemo(() =>
     archives.filter(a => a.ticket_scanned && a.realized_saving != null),
     [archives]
@@ -1630,7 +1608,6 @@ function EconomiesTab({ priceDB, archives, items, setTab }) {
     total: scannedArchives.reduce((a, arc) => a + (arc.realized_saving || 0), 0),
   }), [scannedArchives]);
 
-  // ── Section 3 : Récapitulatif mensuel réalisées
   const monthly = useMemo(() => {
     const map = {};
     scannedArchives.forEach(arc => {
@@ -1642,72 +1619,27 @@ function EconomiesTab({ priceDB, archives, items, setTab }) {
     });
     return Object.entries(map)
       .sort((a,b) => b[0].localeCompare(a[0]))
-      .slice(0,6)
-      .map(([m,d]) => ({ month:m, label:formatMonth(m), ...d }));
+      .map(([m,d]) => ({ month:m, ...d }));
   }, [scannedArchives]);
 
+  const monthArchives = useMemo(() => {
+    if (!selectedMonth) return [];
+    return scannedArchives
+      .filter(arc => (arc.date||'').substring(0,7) === selectedMonth)
+      .sort((a, b) => new Date(b.date) - new Date(a.date));
+  }, [scannedArchives, selectedMonth]);
+
   const thisMonthStr = `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`;
+
+  const fullMonthLabel = (yyyymm) => {
+    const [y, m] = yyyymm.split('-');
+    const s = new Date(parseInt(y), parseInt(m)-1, 1).toLocaleDateString('fr-FR', { month:'long', year:'numeric' });
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  };
 
   return (
     <div style={{ padding:"16px 16px 110px" }}>
 
-      {/* ── SECTION 1 : POTENTIELLES ── */}
-      <div style={sLabel}>💡 Économies potentielles</div>
-      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight, marginBottom:10, marginTop:-6 }}>
-        Calculées depuis ta liste de courses actuelle
-      </div>
-
-      {items.length === 0 ? (
-        <div style={{ background:"#FFFBEA", borderRadius:14, padding:"20px 16px", textAlign:"center", marginBottom:24, border:`2px dashed ${C.orange}` }}>
-          <div style={{ fontSize:36, marginBottom:8 }}>🛒</div>
-          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight, lineHeight:1.6, marginBottom:12 }}>
-            Ajoute des produits à ta liste pour voir combien tu pourrais économiser.
-          </div>
-          <button onClick={()=>setTab("list")} style={{ padding:"10px 20px", background:C.orange, border:"none", borderRadius:10, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:"#111", cursor:"pointer" }}>
-            → Ma liste
-          </button>
-        </div>
-      ) : potentials.details.length === 0 ? (
-        <div style={{ background:"#FFFBEA", borderRadius:14, padding:"16px", textAlign:"center", marginBottom:24, border:`2px dashed ${C.orange}` }}>
-          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight, lineHeight:1.5 }}>
-            Aucune donnée comparative pour les produits de ta liste. Scanne plus de tickets pour enrichir ta base.
-          </div>
-        </div>
-      ) : (
-        <div style={{ background:"#FFFBEA", borderRadius:14, padding:"16px", marginBottom:24, border:`2px solid ${C.orange}` }}>
-          <div style={{ display:"flex", alignItems:"baseline", gap:8, marginBottom:4 }}>
-            <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:30, color:C.orange, lineHeight:1 }}>
-              {potentials.totalSaving > 0.01 ? `+${potentials.totalSaving.toFixed(2)} €` : "Déjà au mieux !"}
-            </div>
-            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>potentiels</div>
-          </div>
-          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight, marginBottom:14 }}>
-            {potentials.details.length} produit{potentials.details.length>1?"s":""} avec comparatif · en achetant chaque produit au magasin le moins cher
-          </div>
-          {potentials.details.map(({item, opts, saving, best, worst}, i) => (
-            <div key={i} style={{ background:C.white, borderRadius:10, padding:"10px 12px", marginBottom:6, display:"flex", alignItems:"center", gap:10 }}>
-              <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                  {item.brand?`${item.brand} · `:""}{item.product} <span style={{ color:C.gray, fontWeight:600 }}>{item.format}</span>
-                </div>
-                <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight, marginTop:2 }}>
-                  <span style={{ color:C.green, fontWeight:800 }}>{best?.logo} {opts[0].price.toFixed(2)} €</span>
-                  {" vs "}
-                  <span style={{ color:"#CC3300" }}>{worst?.logo} {opts[opts.length-1].price.toFixed(2)} €</span>
-                </div>
-              </div>
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.orange, flexShrink:0 }}>
-                {saving > 0.005 ? `+${saving.toFixed(2)} €` : "≈ égal"}
-              </div>
-            </div>
-          ))}
-          <button onClick={()=>setTab("compare")} style={{ width:"100%", padding:"12px", marginTop:6, background:C.orange, border:"none", borderRadius:10, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:"#111", cursor:"pointer" }}>
-            🏪 Voir le comparatif complet
-          </button>
-        </div>
-      )}
-
-      {/* ── SECTION 2 : RÉALISÉES ── */}
       <div style={sLabel}>💰 Économies réalisées</div>
       <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight, marginBottom:10, marginTop:-6 }}>
         Confirmées après chaque scan de ticket de caisse
@@ -1722,9 +1654,9 @@ function EconomiesTab({ priceDB, archives, items, setTab }) {
         </div>
       ) : (
         <>
-          {/* Cagnotte totale */}
+          {/* Cagnotte totale — toujours affiché */}
           <div style={{ background:"linear-gradient(135deg,#00B341,#00C850)", borderRadius:14, padding:"18px 20px", marginBottom:16 }}>
-            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:800, color:"rgba(255,255,255,0.7)", textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:4 }}>Cagnotte · vs prix moyen marché</div>
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:800, color:"rgba(255,255,255,0.7)", textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:4 }}>Cagnotte réalisée sur les prix moyens du marché</div>
             <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:36, color:C.white, lineHeight:1 }}>
               {cagnotte.total >= 0 ? "+" : ""}{cagnotte.total.toFixed(2)} €
             </div>
@@ -1733,59 +1665,63 @@ function EconomiesTab({ priceDB, archives, items, setTab }) {
             </div>
           </div>
 
-          {/* Dernières courses scannées */}
-          <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:24 }}>
-            {[...scannedArchives].reverse().slice(0,8).map((arc,i) => {
-              const store = arc.store || {};
-              const pos = (arc.realized_saving || 0) >= 0;
-              return (
-                <div key={arc.id||i} style={{ background:C.white, borderRadius:12, padding:"12px 14px", border:`1px solid ${C.grayLight}`, display:"flex", alignItems:"center", gap:10 }}>
-                  <span style={{ fontSize:20, flexShrink:0 }}>{store?.logo || "🏪"}</span>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                      {store?.name || "Courses"}
+          {selectedMonth ? (
+            /* VUE DÉTAIL D'UN MOIS */
+            <>
+              <button onClick={() => setSelectedMonth(null)} style={{ background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.blue, cursor:"pointer", padding:"0 0 14px", display:"flex", alignItems:"center", gap:6 }}>
+                ← {fullMonthLabel(selectedMonth)}
+              </button>
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                {monthArchives.map((arc, i) => {
+                  const store = arc.store || {};
+                  const pos = (arc.realized_saving || 0) >= 0;
+                  return (
+                    <div key={arc.id||i} style={{ background:C.white, borderRadius:12, padding:"12px 14px", border:`1px solid ${C.grayLight}`, display:"flex", alignItems:"center", gap:10 }}>
+                      <span style={{ fontSize:20, flexShrink:0 }}>{store?.logo || "🏪"}</span>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                          {store?.name || "Courses"}
+                        </div>
+                        <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight }}>
+                          {new Date(arc.date).toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}
+                        </div>
+                      </div>
+                      <div style={{ textAlign:"right", flexShrink:0 }}>
+                        <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:pos?C.green:"#CC3300" }}>
+                          {pos?"+":""}{(arc.realized_saving||0).toFixed(2)} €
+                        </div>
+                        <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, color:C.textLight }}>vs prix moyen</div>
+                      </div>
                     </div>
-                    <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight }}>
-                      {new Date(arc.date).toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}
-                      {" · "}
-                      {arc.items?.length || 0} produit{(arc.items?.length||0)>1?"s":""}
-                    </div>
-                  </div>
-                  <div style={{ textAlign:"right", flexShrink:0 }}>
-                    <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:pos?C.green:"#CC3300" }}>
-                      {pos?"+":""}{(arc.realized_saving||0).toFixed(2)} €
-                    </div>
-                    <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, color:C.textLight }}>vs prix moyen</div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
-
-      {/* ── SECTION 3 : RÉCAP MENSUEL (réalisées uniquement) ── */}
-      {monthly.length > 0 && (
-        <>
-          <div style={sLabel}>📅 Récapitulatif mensuel · réalisé</div>
-          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-            {monthly.map(m => (
-              <div key={m.month} style={{ display:"flex", alignItems:"center", background:m.month===thisMonthStr?"#F0FFF5":C.white, borderRadius:12, padding:"12px 14px", border:`1.5px solid ${m.month===thisMonthStr?C.green:C.grayLight}` }}>
-                <div style={{ flex:1 }}>
-                  <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{m.label}</div>
-                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight, marginTop:2 }}>
-                    {m.count} course{m.count>1?"s":""}
-                  </div>
-                </div>
-                <div style={{ textAlign:"right" }}>
-                  <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:m.total>=0?C.green:"#CC3300" }}>
-                    {m.total>=0?"+":""}{m.total.toFixed(2)} €
-                  </div>
-                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, color:C.textLight }}>vs prix moyen</div>
-                </div>
+                  );
+                })}
               </div>
-            ))}
-          </div>
+            </>
+          ) : (
+            /* VUE PRINCIPALE — navigation par mois */
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {monthly.map(m => (
+                <div key={m.month} onClick={() => setSelectedMonth(m.month)}
+                  style={{ display:"flex", alignItems:"center", background:m.month===thisMonthStr?"#F0FFF5":C.white, borderRadius:12, padding:"12px 14px", border:`1.5px solid ${m.month===thisMonthStr?C.green:C.grayLight}`, cursor:"pointer" }}>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{fullMonthLabel(m.month)}</div>
+                    <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight, marginTop:2 }}>
+                      {m.count} course{m.count>1?"s":""}
+                    </div>
+                  </div>
+                  <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                    <div style={{ textAlign:"right" }}>
+                      <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:m.total>=0?C.green:"#CC3300" }}>
+                        {m.total>=0?"+":""}{m.total.toFixed(2)} €
+                      </div>
+                      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, color:C.textLight }}>vs prix moyen</div>
+                    </div>
+                    <span style={{ color:C.gray, fontSize:18 }}>›</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </>
       )}
     </div>
@@ -2626,11 +2562,13 @@ function ArchiveTab({ archives, onDelete, onAddToList, priceDB, onImport, onSave
 }
 
 // ── HOME TAB ─────────────────────────────────────────────────────────────────
-function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash }) {
+function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash, archives = [] }) {
   const F = "'Nunito',sans-serif";
   const unchecked = items.filter(i => !i.checked).length;
   const members   = circles.filter(c => c.status === 'accepted');
   const avatarBg  = ["#E5181B","#F5C200","#00B341","#4A90D9","#8E44AD"];
+  const scannedArchives = archives.filter(a => a.ticket_scanned && a.realized_saving != null);
+  const cagnotteTotal   = scannedArchives.reduce((a, arc) => a + (arc.realized_saving || 0), 0);
 
   const NavBtn = ({ label, icon, target, style = {} }) => (
     <button onClick={() => setTab(target)} style={{
@@ -2741,6 +2679,17 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash
 
         </div>
       </div>
+
+      {scannedArchives.length > 0 && (
+        <div style={{ padding:"0 20px 12px", position:"relative", zIndex:10 }}>
+          <div style={{ background:"rgba(0,140,60,0.58)", borderRadius:14, padding:"8px 14px", display:"flex", alignItems:"baseline", gap:6 }}>
+            <div style={{ fontFamily:F, fontSize:10, fontWeight:800, color:"rgba(255,255,255,0.85)", textTransform:"uppercase", letterSpacing:"0.06em" }}>Cagnotte PrixMalin :</div>
+            <div style={{ fontFamily:F, fontWeight:900, fontSize:20, color:C.white, lineHeight:1 }}>
+              {cagnotteTotal >= 0 ? "+" : ""}{cagnotteTotal.toFixed(2)} €
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
@@ -2976,6 +2925,19 @@ export default function App() {
   };
 
   const handleValidate = (store, potentialSaving = 0) => {
+    let totalSaving = 0;
+    const details = [];
+    items.forEach(item => {
+      const matches = priceDB.filter(p => itemMatchesPrice(item, p));
+      const byStore = {};
+      matches.forEach(p => { if (!byStore[p.storeId] || p.price < byStore[p.storeId].price) byStore[p.storeId] = p; });
+      const opts = Object.values(byStore).sort((a,b) => a.price - b.price);
+      if (opts.length >= 2) {
+        const saving = (opts[opts.length-1].price - opts[0].price) * item.qty;
+        totalSaving += saving;
+        details.push({ item, opts, saving, best: STORES.find(s => s.id === opts[0].storeId), worst: STORES.find(s => s.id === opts[opts.length-1].storeId) });
+      }
+    });
     const arc = {
       id: Date.now(),
       date: new Date().toISOString(),
@@ -2988,7 +2950,7 @@ export default function App() {
     };
     saveArchives([...archives, arc]);
     saveItems([]);
-    setShowSuccess(store);
+    setShowSuccess({ store, potentials: { totalSaving, details } });
     setTimeout(()=>{setShowSuccess(null);setTab("archive");},2800);
   };
 
@@ -3154,7 +3116,7 @@ export default function App() {
               <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:14, color:"#999" }}>Chargement...</div>
             </div>
           )}
-          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircle(true)} onFlash={handleFlash}/>}
+          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircle(true)} onFlash={handleFlash} archives={archives}/>}
           {loaded && tab==="list"      && <ListTab      items={items} setItems={saveItems} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} setItems={saveItems} setTab={setTab} catalog={catalog} priceDB={priceDB}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate}/>}
@@ -3187,13 +3149,41 @@ export default function App() {
           />
         )}
         {showSuccess && (
-          <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:300, animation:"fadeIn 0.2s ease" }}>
-            <div style={{ background:C.white, borderRadius:20, padding:"36px 32px", textAlign:"center", maxWidth:300, width:"90%", animation:"popIn 0.35s ease", boxShadow:"0 20px 60px rgba(0,0,0,0.25)" }}>
+          <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:300, animation:"fadeIn 0.2s ease", padding:"20px", overflowY:"auto" }}>
+            <div style={{ background:C.white, borderRadius:20, padding:"32px 24px", textAlign:"center", maxWidth:340, width:"100%", animation:"popIn 0.35s ease", boxShadow:"0 20px 60px rgba(0,0,0,0.25)" }}>
               <div style={{ fontSize:56, marginBottom:12 }}>🎉</div>
               <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:20, color:"#CC0000", marginBottom:8 }}>Bonne course !</div>
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:14, color:C.textLight, lineHeight:1.6 }}>
-                Liste archivée.<br/>Direction <strong style={{ color:"#CC0000" }}>{showSuccess.name}</strong> {showSuccess.logo} !
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:14, color:C.textLight, lineHeight:1.6, marginBottom: showSuccess.potentials.details.length > 0 ? 20 : 0 }}>
+                Liste archivée.<br/>Direction <strong style={{ color:"#CC0000" }}>{showSuccess.store.name}</strong> {showSuccess.store.logo} !
               </div>
+              {showSuccess.potentials.details.length > 0 && (
+                <div style={{ background:"#FFFBEA", borderRadius:14, padding:"14px", textAlign:"left", border:`2px solid ${C.orange}` }}>
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>💡 Économies potentielles</div>
+                  <div style={{ display:"flex", alignItems:"baseline", gap:8, marginBottom:10 }}>
+                    <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:26, color:C.orange, lineHeight:1 }}>
+                      {showSuccess.potentials.totalSaving > 0.01 ? `+${showSuccess.potentials.totalSaving.toFixed(2)} €` : "Déjà au mieux !"}
+                    </div>
+                    <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>potentiels</div>
+                  </div>
+                  {showSuccess.potentials.details.map(({item, opts, saving, best, worst}, i) => (
+                    <div key={i} style={{ background:C.white, borderRadius:10, padding:"8px 10px", marginBottom:4, display:"flex", alignItems:"center", gap:8 }}>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                          {item.brand?`${item.brand} · `:""}{item.product} <span style={{ color:C.gray, fontWeight:600 }}>{item.format}</span>
+                        </div>
+                        <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight, marginTop:1 }}>
+                          <span style={{ color:C.green, fontWeight:800 }}>{best?.logo} {opts[0].price.toFixed(2)} €</span>
+                          {" vs "}
+                          <span style={{ color:"#CC3300" }}>{worst?.logo} {opts[opts.length-1].price.toFixed(2)} €</span>
+                        </div>
+                      </div>
+                      <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, color:C.orange, flexShrink:0 }}>
+                        {saving > 0.005 ? `+${saving.toFixed(2)} €` : "≈ égal"}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
