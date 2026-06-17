@@ -235,9 +235,9 @@ function AuthScreen() {
         </div>
 
         <div style={{ background:"#F0FFF5", borderRadius:12, padding:"14px 16px", marginBottom:14, border:`1.5px solid ${C.green}` }}>
-          <div style={{ fontFamily:F, fontWeight:900, fontSize:13, color:"#006B27", marginBottom:6 }}>🔒 Tes données restent privées</div>
+          <div style={{ fontFamily:F, fontWeight:900, fontSize:13, color:"#006B27", marginBottom:6 }}>🔒 Tes données restent anonymes</div>
           <div style={{ fontFamily:F, fontSize:12, color:"#004D1C", lineHeight:1.6 }}>
-            Les prix que tu scannes restent privés par défaut. Ils ne sont visibles par les autres que si tu choisis de les partager avec ta communauté (ton cercle de proches).
+            Les prix que tu scannes alimentent la comparaison pour toute la communauté, mais toujours de façon anonyme : personne ne sait que c'est toi qui as scanné tel ou tel prix. Ton pseudo n'est visible que si tu choisis de partager un achat avec ton cercle de proches.
           </div>
         </div>
 
@@ -246,7 +246,7 @@ function AuthScreen() {
           <div style={{ fontFamily:F, fontWeight:800, fontSize:12, color:C.text, marginBottom:10 }}>📋 EN BREF</div>
           {[
             "PrixMalin est un projet personnel en phase de test, pas une entreprise. L'app peut évoluer, et son fonctionnement n'est pas garanti à 100%.",
-            "Tes prix scannés (produit, prix, magasin, date) restent privés. Ils ne sont visibles par personne d'autre, sauf si tu choisis toi-même de les partager avec ton cercle, article par article.",
+            "Tes prix scannés alimentent la comparaison de prix pour tous les utilisateurs, mais toujours de façon anonyme — personne ne sait que c'est toi. Ton pseudo n'est visible que si tu choisis de partager un achat avec ton cercle de proches, article par article.",
             "Ton email n'est jamais visible par les autres utilisateurs. Pour t'identifier auprès de tes proches, seul ton pseudo (unique sur l'app) est utilisé.",
             "Si tu rejoins un cercle, les prix que tu partages restent visibles aux membres de ce cercle même si tu le quittes plus tard, sauf demande contraire de ta part.",
             "Les prix affichés (les tiens ou ceux partagés par ta communauté) sont fournis à titre indicatif. PrixMalin ne garantit pas qu'ils correspondent exactement au prix réel en magasin.",
@@ -2963,7 +2963,7 @@ function StoreRatingScreen({ store, onSave, onSkip }) {
 // ── CGU RATTRAPAGE ────────────────────────────────────────────────────────────
 const CGU_ITEMS = [
   "PrixMalin est un projet personnel en phase de test, pas une entreprise. L'app peut évoluer, et son fonctionnement n'est pas garanti à 100%.",
-  "Tes prix scannés (produit, prix, magasin, date) restent privés. Ils ne sont visibles par personne d'autre, sauf si tu choisis toi-même de les partager avec ton cercle, article par article.",
+  "Tes prix scannés alimentent la comparaison de prix pour tous les utilisateurs, mais toujours de façon anonyme — personne ne sait que c'est toi. Ton pseudo n'est visible que si tu choisis de partager un achat avec ton cercle de proches, article par article.",
   "Ton email n'est jamais visible par les autres utilisateurs. Pour t'identifier auprès de tes proches, seul ton pseudo (unique sur l'app) est utilisé.",
   "Si tu rejoins un cercle, les prix que tu partages restent visibles aux membres de ce cercle même si tu le quittes plus tard, sauf demande contraire de ta part.",
   "Les prix affichés (les tiens ou ceux partagés par ta communauté) sont fournis à titre indicatif. PrixMalin ne garantit pas qu'ils correspondent exactement au prix réel en magasin.",
