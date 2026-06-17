@@ -330,6 +330,12 @@ function ProfilSheet({ circles, userId, userEmail, profileMap, pseudo, archives,
   const [inviteError,   setInviteError]   = useState('');
   const [inviteLoading, setInviteLoading] = useState(false);
   const [sharedCount,   setSharedCount]   = useState(null);
+  const [showFeedback,      setShowFeedback]      = useState(false);
+  const [feedbackCategorie, setFeedbackCategorie] = useState('bug');
+  const [feedbackMessage,   setFeedbackMessage]   = useState('');
+  const [feedbackLoading,   setFeedbackLoading]   = useState(false);
+  const [feedbackError,     setFeedbackError]     = useState('');
+  const [feedbackSuccess,   setFeedbackSuccess]   = useState(false);
   const inviteRef = useRef(null);
   const avatarColors = ["#E5181B","#F5C200","#00B341","#4A90D9","#8E44AD","#FF6B35"];
 
@@ -356,6 +362,29 @@ function ProfilSheet({ circles, userId, userEmail, profileMap, pseudo, archives,
     const { error } = await onInvite(invitePseudo);
     if (error) setInviteError(error); else setInvitePseudo('');
     setInviteLoading(false);
+  };
+
+  const handleFeedback = async () => {
+    if (!feedbackMessage.trim()) return;
+    setFeedbackLoading(true); setFeedbackError('');
+    const { error } = await supabase.from('feedback').insert({
+      user_id: userId,
+      pseudo,
+      categorie: feedbackCategorie,
+      message: feedbackMessage.trim(),
+    });
+    if (error) {
+      setFeedbackError("Erreur lors de l'envoi, réessaie.");
+    } else {
+      setFeedbackSuccess(true);
+      setTimeout(() => {
+        setShowFeedback(false);
+        setFeedbackSuccess(false);
+        setFeedbackMessage('');
+        setFeedbackCategorie('bug');
+      }, 2000);
+    }
+    setFeedbackLoading(false);
   };
 
   const ringR = 56;
@@ -494,6 +523,47 @@ function ProfilSheet({ circles, userId, userEmail, profileMap, pseudo, archives,
               </button>
             </div>
             {inviteError && <div style={{ fontFamily:F, fontSize:12, color:"#CC0000", fontWeight:700, marginTop:8 }}>⚠️ {inviteError}</div>}
+          </div>
+
+          {/* Contact / Feedback */}
+          <div style={{ marginBottom:20 }}>
+            {!showFeedback ? (
+              <button onClick={()=>setShowFeedback(true)}
+                style={{ width:"100%", padding:"14px", border:`1.5px solid ${C.blue}`, borderRadius:14, background:"#fff", fontFamily:F, fontWeight:800, fontSize:14, color:C.blue, cursor:"pointer" }}>
+                Contact / Signaler un problème
+              </button>
+            ) : (
+              <div style={{ background:C.bg, borderRadius:16, padding:"14px 16px" }}>
+                <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:12 }}>Contact / Signaler un problème</div>
+                {feedbackSuccess ? (
+                  <div style={{ fontFamily:F, fontSize:14, fontWeight:700, color:C.green, textAlign:"center", padding:"12px 0" }}>Merci, ton message a été envoyé !</div>
+                ) : (<>
+                  <select value={feedbackCategorie} onChange={e=>setFeedbackCategorie(e.target.value)}
+                    style={{ width:"100%", padding:"10px 12px", borderRadius:10, border:`1.5px solid ${C.grayLight}`, fontFamily:F, fontSize:14, color:C.text, background:"#fff", marginBottom:10, outline:"none", boxSizing:"border-box" }}>
+                    <option value="bug">Bug</option>
+                    <option value="suggestion">Suggestion</option>
+                    <option value="question">Question</option>
+                    <option value="autre">Autre</option>
+                  </select>
+                  <textarea value={feedbackMessage} onChange={e=>setFeedbackMessage(e.target.value)}
+                    placeholder="Décris ton problème ou ta suggestion…"
+                    rows={4}
+                    style={{ width:"100%", padding:"10px 12px", borderRadius:10, border:`1.5px solid ${feedbackMessage?C.blue:C.grayLight}`, fontFamily:F, fontSize:14, color:C.text, outline:"none", resize:"none", boxSizing:"border-box", marginBottom:10 }}
+                  />
+                  {feedbackError && <div style={{ fontFamily:F, fontSize:12, color:"#CC0000", fontWeight:700, marginBottom:8 }}>⚠️ {feedbackError}</div>}
+                  <div style={{ display:"flex", gap:8 }}>
+                    <button onClick={()=>{ setShowFeedback(false); setFeedbackMessage(''); setFeedbackError(''); setFeedbackCategorie('bug'); }}
+                      style={{ flex:1, padding:"12px", border:`1px solid ${C.grayLight}`, borderRadius:10, background:"#fff", fontFamily:F, fontWeight:800, fontSize:14, color:C.gray, cursor:"pointer" }}>
+                      Annuler
+                    </button>
+                    <button onClick={handleFeedback} disabled={feedbackLoading||!feedbackMessage.trim()}
+                      style={{ flex:2, padding:"12px", border:"none", borderRadius:10, background:feedbackLoading||!feedbackMessage.trim()?C.grayLight:C.blue, fontFamily:F, fontWeight:900, fontSize:14, color:feedbackLoading||!feedbackMessage.trim()?C.gray:"#fff", cursor:feedbackLoading||!feedbackMessage.trim()?"default":"pointer" }}>
+                      {feedbackLoading ? "…" : "Envoyer"}
+                    </button>
+                  </div>
+                </>)}
+              </div>
+            )}
           </div>
 
           {/* Se déconnecter */}
