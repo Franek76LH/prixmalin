@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { scanTicketWithClaude, imageFileToJpegBase64 } from "./scanTicket";
 import { STORES, CATEGORY_META, PRODUCT_SUGGESTIONS, STALE_DAYS } from "./constants";
 import { supabase } from "./lib/supabase";
@@ -2495,7 +2495,7 @@ function CompareTab({ items, priceDB, onValidate }) {
 }
 
 // ── ARCHIVE TAB ───────────────────────────────────────────────────────────────
-function ArchiveTab({ archives, onDelete, onAddToList, priceDB, onImport, onSavePrice, produitsRef = [] }) {
+function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceDB, onImport, onSavePrice, produitsRef = [] }) {
   const [pendingDeleteArc, setPendingDeleteArc] = useState(null);
   const [added, setAdded] = useState(new Set());
   const [sort, setSort] = useState("date");
@@ -2757,9 +2757,11 @@ function ArchiveTab({ archives, onDelete, onAddToList, priceDB, onImport, onSave
                 <div key={arc.id} style={{ background:C.white, borderRadius:14, border:`1px solid ${C.grayLight}`, overflow:"hidden", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", animation:`slideIn 0.25s ease ${i*0.06}s both` }}>
                   <div style={{ background:C.blueLight, padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                     <div>
-                      <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.blue }}>{arc.store?.logo} {arc.store?.name}</div>
+                      <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                        <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.blue }}>{arc.store?.logo} {arc.store?.name}</div>
+                        {(()=>{ const key=arc.store?.id&&arc.store.id!=='autre'?arc.store.id:(arc.store?.name||'autre'); const avg=storeRatings[key]; if(!avg) return null; const pct=(avg/5*100).toFixed(1)+'%'; return <div style={{ position:"relative", display:"inline-block", fontSize:13, lineHeight:1, letterSpacing:1, whiteSpace:"nowrap" }}><span style={{ color:"#D0D0D0" }}>★★★★★</span><span style={{ position:"absolute", top:0, left:0, width:pct, overflow:"hidden", color:"#F5C200" }}>★★★★★</span></div>; })()}
+                      </div>
                       <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, marginTop:1 }}>{new Date(arc.date).toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}</div>
-                      {arc.store_rating && <div style={{ fontSize:11, marginTop:2, letterSpacing:1 }}>{[1,2,3,4,5].map(n=><span key={n} style={{ color:n<=arc.store_rating?"#F5C200":"#D0D0D0" }}>★</span>)}</div>}
                     </div>
                     <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                       <div style={{ background:C.blue, borderRadius:10, padding:"6px 14px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:18, color:C.white }}>{(arc.items?.reduce((s,i)=>{ const up=i.unit_price??i.price??0; return s+(up*(i.qty||1)); },0)||arc.total||0).toFixed(2)} €</div>
@@ -3026,6 +3028,7 @@ export default function App() {
   const [items, setItems]       = useState([]);
   const [priceDB, setPriceDB]     = useState([]);
   const [archives, setArchives]   = useState([]);
+  const [storeRatings, setStoreRatings] = useState({});
   const [showSuccess, setShowSuccess] = useState(null);
   const [showRating,  setShowRating]  = useState(null);
   const [favorites, setFavorites] = useState([]);
@@ -3077,6 +3080,14 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  const fetchStoreRatings = useCallback(async () => {
+    const { data } = await supabase.rpc('get_store_ratings');
+    if (!data) return;
+    const avgs = {};
+    data.forEach(r => { avgs[r.store_key] = r.avg_rating; });
+    setStoreRatings(avgs);
+  }, []);
+
   // Chargement données — uniquement si session active
   useEffect(()=>{
     if (!session) return;
@@ -3102,6 +3113,7 @@ export default function App() {
           }
         }
         if (arcs.data) setArchives(arcs.data);
+        fetchStoreRatings();
         if (favs.data?.[0]) { setFavorites(favs.data[0].items || []); favRowId.current = favs.data[0].id; }
         if (circs.data) {
           setCircles(circs.data);
@@ -3472,7 +3484,7 @@ export default function App() {
               setShowRating({id:data.id,store:newArc.store});
             }
           }} userId={session?.user?.id} produitsRef={produitsRef}/>}
-          {loaded && tab==="archive"   && <ArchiveTab   archives={archives} onDelete={deleteArchive} priceDB={priceDB} onImport={handleImportPrices} onSavePrice={handleSavePrice} produitsRef={produitsRef} onAddToList={arcItem=>{
+          {loaded && tab==="archive"   && <ArchiveTab   archives={archives} storeRatings={storeRatings} onDelete={deleteArchive} priceDB={priceDB} onImport={handleImportPrices} onSavePrice={handleSavePrice} produitsRef={produitsRef} onAddToList={arcItem=>{
             const newItem={id:Date.now()+Math.random(),product:arcItem.product,format:arcItem.format||"",brand:arcItem.brand||"",qty:arcItem.qty||1,checked:false};
             saveItems([...items,newItem]);
             showAppToast(`✓ ${arcItem.product} ajouté à ta liste`);
@@ -3486,7 +3498,7 @@ export default function App() {
         {showRating && (
           <StoreRatingScreen
             store={showRating.store}
-            onSave={async rating=>{ const {error}=await updateArchive(showRating.id,{store_rating:rating}); if(error) showAppToast("⚠️ Note non sauvegardée, vérifie ta connexion",false); setShowRating(null); setTab("home"); }}
+            onSave={async rating=>{ const {error}=await updateArchive(showRating.id,{store_rating:rating}); if(error) showAppToast("⚠️ Note non sauvegardée, vérifie ta connexion",false); else fetchStoreRatings(); setShowRating(null); setTab("home"); }}
             onSkip={()=>{ setShowRating(null); setTab("home"); }}
           />
         )}
