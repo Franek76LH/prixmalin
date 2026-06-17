@@ -274,7 +274,7 @@ function AuthScreen() {
           </div>
         </div>
 
-        <button onClick={()=>switchMode('login')} disabled={!cguAccepted}
+        <button onClick={()=>{ localStorage.setItem('prixmalin_cgu_pending','true'); switchMode('login'); }} disabled={!cguAccepted}
           style={{ width:"100%", padding:"14px", border:"none", borderRadius:12, background:cguAccepted?C.red:C.grayLight, fontFamily:F, fontWeight:900, fontSize:15, color:cguAccepted?C.white:C.gray, cursor:cguAccepted?"pointer":"default" }}>
           Continuer → Se connecter
         </button>
@@ -2960,6 +2960,64 @@ function StoreRatingScreen({ store, onSave, onSkip }) {
   );
 }
 
+// ── CGU RATTRAPAGE ────────────────────────────────────────────────────────────
+const CGU_ITEMS = [
+  "PrixMalin est un projet personnel en phase de test, pas une entreprise. L'app peut évoluer, et son fonctionnement n'est pas garanti à 100%.",
+  "Tes prix scannés (produit, prix, magasin, date) restent privés. Ils ne sont visibles par personne d'autre, sauf si tu choisis toi-même de les partager avec ton cercle, article par article.",
+  "Ton email n'est jamais visible par les autres utilisateurs. Pour t'identifier auprès de tes proches, seul ton pseudo (unique sur l'app) est utilisé.",
+  "Si tu rejoins un cercle, les prix que tu partages restent visibles aux membres de ce cercle même si tu le quittes plus tard, sauf demande contraire de ta part.",
+  "Les prix affichés (les tiens ou ceux partagés par ta communauté) sont fournis à titre indicatif. PrixMalin ne garantit pas qu'ils correspondent exactement au prix réel en magasin.",
+  "Le créateur de l'app peut suspendre un compte en cas d'usage abusif ou de mauvaise foi (informations volontairement fausses, etc.).",
+  "Tu peux demander la suppression de ton compte et de tes données à tout moment via le formulaire de contact de l'app.",
+  "Ces règles peuvent évoluer ; tu seras informé des changements importants.",
+];
+
+function CguRattrapageScreen({ onAccept }) {
+  const F = "'Nunito',sans-serif";
+  const [accepted, setAccepted] = useState(false);
+  const [saving,   setSaving]   = useState(false);
+  return (
+    <div style={{ minHeight:"100vh", background:C.bg, maxWidth:430, margin:"0 auto", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", padding:"32px 24px", overflowY:"auto" }}>
+      <div style={{ fontSize:60, marginBottom:6 }}>🛒</div>
+      <div style={{ fontFamily:F, fontWeight:900, fontSize:28, color:C.red, marginBottom:4 }}>PrixMalin</div>
+      <div style={{ fontFamily:F, fontSize:13, color:C.textLight, marginBottom:24 }}>Comparez. Économisez.</div>
+      <div style={{ background:C.white, borderRadius:20, padding:"24px 20px", width:"100%", boxShadow:"0 4px 24px rgba(0,0,0,0.08)" }}>
+        <div style={{ fontFamily:F, fontWeight:900, fontSize:18, color:C.text, marginBottom:6 }}>Avant de continuer…</div>
+        <div style={{ fontFamily:F, fontSize:13, color:C.textLight, marginBottom:16, lineHeight:1.5 }}>
+          L'app a évolué depuis ta dernière connexion. Merci de lire et accepter les conditions ci-dessous.
+        </div>
+        <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Conditions générales d'utilisation</div>
+        <div style={{ background:C.bg, borderRadius:12, padding:"14px 16px", maxHeight:260, overflowY:"auto", marginBottom:16, border:`1px solid ${C.grayLight}` }}>
+          <div style={{ fontFamily:F, fontWeight:800, fontSize:12, color:C.text, marginBottom:10 }}>📋 EN BREF</div>
+          {CGU_ITEMS.map((item, i) => (
+            <div key={i} style={{ display:"flex", gap:8, marginBottom:8, fontFamily:F, fontSize:12, color:C.textLight, lineHeight:1.6 }}>
+              <span style={{ flexShrink:0, color:C.red, fontWeight:900 }}>·</span>
+              <span>{item}</span>
+            </div>
+          ))}
+          <div style={{ marginTop:10, fontFamily:F, fontSize:12, color:C.text, fontWeight:700, fontStyle:"italic", lineHeight:1.5 }}>
+            En cochant la case ci-dessous, tu confirmes avoir lu et accepté les Conditions Générales d'Utilisation complètes de PrixMalin.
+          </div>
+        </div>
+        <div onClick={()=>setAccepted(v=>!v)}
+          style={{ display:"flex", alignItems:"flex-start", gap:12, marginBottom:20, cursor:"pointer" }}>
+          <div style={{ width:22, height:22, borderRadius:6, border:`2px solid ${accepted?C.green:C.gray}`, background:accepted?C.green:"#fff", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", marginTop:1 }}>
+            {accepted && <span style={{ color:"#fff", fontSize:14, fontWeight:900, lineHeight:1 }}>✓</span>}
+          </div>
+          <div style={{ fontFamily:F, fontSize:13, color:C.text, fontWeight:700, lineHeight:1.5 }}>
+            J'ai lu et j'accepte les Conditions Générales d'Utilisation
+          </div>
+        </div>
+        <button onClick={async()=>{ setSaving(true); await onAccept(); setSaving(false); }}
+          disabled={!accepted||saving}
+          style={{ width:"100%", padding:"14px", border:"none", borderRadius:12, background:accepted&&!saving?C.red:C.grayLight, fontFamily:F, fontWeight:900, fontSize:15, color:accepted&&!saving?C.white:C.gray, cursor:accepted&&!saving?"pointer":"default" }}>
+          {saving ? "…" : "Continuer →"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── ROOT ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const [session,   setSession]   = useState(null);
@@ -2977,7 +3035,8 @@ export default function App() {
   const [autoOpenCamera, setAutoOpenCamera] = useState(false);
   const handleFlash = () => { setAutoOpenCamera(true); setTab("prices"); };
   const [showCircle, setShowCircle] = useState(false);
-  const [pseudo,     setPseudo]     = useState(null);
+  const [pseudo,        setPseudo]        = useState(null);
+  const [cguAcceptedAt, setCguAcceptedAt] = useState(undefined);
   const [profileMap, setProfileMap] = useState({});
   const catalog = useMemo(() => {
     const split = s => s ? s.split(';').map(x => x.trim()).filter(Boolean) : [];
@@ -3011,7 +3070,7 @@ export default function App() {
       setSession(session);
       if (!session) {
         setItems([]); setPriceDB([]); setArchives([]); setFavorites([]); setCircles([]);
-        setPseudo(null); setProfileMap({});
+        setPseudo(null); setCguAcceptedAt(undefined); setProfileMap({});
         setLoaded(false); listRowId.current = null; favRowId.current = null;
       }
     });
@@ -3031,7 +3090,7 @@ export default function App() {
           supabase.from('favorites').select('id, items').order('id').limit(1),
           supabase.from('produits_ref').select('produit_generique, sous_categorie, formats_courants, marques_nationales, marques_distributeurs').order('id'),
           supabase.from('circles').select('*'),
-          supabase.from('profiles').select('pseudo').eq('id', session.user.id).maybeSingle(),
+          supabase.from('profiles').select('pseudo, cgu_accepted_at').eq('id', session.user.id).maybeSingle(),
         ]);
         if (refs.data)  setProduitsRef(refs.data);
         if (list.data?.[0]) { setItems(list.data[0].items || []); listRowId.current = list.data[0].id; }
@@ -3062,6 +3121,20 @@ export default function App() {
           }
         }
         setPseudo(prof.data?.pseudo ?? null);
+        const cguAt = prof.data?.cgu_accepted_at ?? null;
+        if (!cguAt) {
+          const pending = localStorage.getItem('prixmalin_cgu_pending');
+          if (pending) {
+            const now = new Date().toISOString();
+            await supabase.from('profiles').upsert({ id: session.user.id, cgu_accepted_at: now });
+            localStorage.removeItem('prixmalin_cgu_pending');
+            setCguAcceptedAt(now);
+          } else {
+            setCguAcceptedAt(null);
+          }
+        } else {
+          setCguAcceptedAt(cguAt);
+        }
       } catch(e){ console.log("Supabase load:", e); }
       setLoaded(true);
     })();
@@ -3251,6 +3324,12 @@ export default function App() {
     return {};
   };
 
+  const handleCguAccept = async () => {
+    const now = new Date().toISOString();
+    await supabase.from('profiles').upsert({ id: session.user.id, cgu_accepted_at: now });
+    setCguAcceptedAt(now);
+  };
+
   const handleImportPrices = entries => {
     const openArchive = [...archives].reverse().find(a => !a.ticket_scanned);
     let realizedSaving = null;
@@ -3358,6 +3437,10 @@ export default function App() {
   );
 
   if (!session) return <>{globalStyle}<AuthScreen/></>;
+
+  if (loaded && cguAcceptedAt === null) return (
+    <>{globalStyle}<CguRattrapageScreen onAccept={handleCguAccept}/></>
+  );
 
   return (
     <>
