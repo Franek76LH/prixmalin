@@ -645,11 +645,18 @@ function TabBar({ tab, setTab }) {
     { id:"economies", icon:"💰", label:"Économies" },
   ];
   return (
-    <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:430, background:C.white, borderTop:`3px solid #CC0000`, display:"flex", zIndex:50 }}>
+    <div style={{ position:"fixed", bottom:16, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:430, display:"flex", justifyContent:"space-evenly", alignItems:"center", zIndex:50, pointerEvents:"none" }}>
       {tabs.map(t=>(
-        <button key={t.id} onClick={()=>setTab(t.id)} style={{ flex:1, border:"none", background:tab===t.id?C.blueLight:C.white, padding:"8px 2px 10px", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:2, borderTop:tab===t.id?`3px solid ${C.orange}`:"3px solid transparent", marginTop:-3 }}>
-          <span style={{ fontSize:18, filter:tab===t.id?"none":"grayscale(1) opacity(0.4)" }}>{t.icon}</span>
-          <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:800, color:tab===t.id?C.blue:C.gray, textTransform:"uppercase", letterSpacing:"0.02em" }}>{t.label}</span>
+        <button key={t.id} onClick={()=>setTab(t.id)} style={{ border:"none", background:"none", cursor:"pointer", padding:0, display:"flex", flexDirection:"column", alignItems:"center", pointerEvents:"all" }}>
+          <div style={{
+            width:48, height:48, borderRadius:"50%",
+            background: tab===t.id ? C.blueLight : "#fff",
+            display:"flex", alignItems:"center", justifyContent:"center",
+            boxShadow:"0 4px 12px rgba(0,0,0,0.15)",
+            border: tab===t.id ? `2.5px solid ${C.orange}` : "2.5px solid transparent",
+          }}>
+            <span style={{ fontSize:24, filter:tab===t.id?"none":"grayscale(1) opacity(0.4)" }}>{t.icon}</span>
+          </div>
         </button>
       ))}
     </div>
@@ -2909,68 +2916,51 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash
     }}>
 
       {/* Illustration de fond (fournie par l'utilisateur → /illustration-home.png) */}
-      <img
-        src="/illustration-home.png" alt=""
-        style={{ position:"absolute", bottom:64, left:0, width:"100%", pointerEvents:"none", zIndex:1 }}
-        onError={e => { e.target.style.display = "none"; }}
-      />
+      <div style={{ position:"absolute", top:0, left:0, width:"100%", height:"100%", overflow:"hidden", zIndex:1, pointerEvents:"none" }}>
+        <img
+          src="/illustration-home.png" alt=""
+          style={{ width:"100%", height:"100%", objectFit:"cover", objectPosition:"center -64px", pointerEvents:"none" }}
+          onError={e => { e.target.parentElement.style.display = "none"; }}
+        />
+      </div>
 
       {/* ── Barre du haut ── */}
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"18px 20px 0", position:"relative", zIndex:10 }}>
 
-        {/* Logo PM */}
-        <div style={{ background:"#E5181B", borderRadius:12, width:44, height:44, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:F, fontWeight:900, fontSize:17, color:"#fff", boxShadow:"0 3px 12px rgba(229,24,27,0.45)", letterSpacing:"-0.5px" }}>
-          PM
-        </div>
-
-        {/* Avatar Moi */}
+        {/* Bouton Moi — haut gauche */}
         <div onClick={onCircle} style={{ background:"#E5181B", borderRadius:99, width:44, height:44, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:F, fontWeight:900, fontSize:12, color:"#fff", boxShadow:"0 3px 12px rgba(229,24,27,0.45)", cursor:"pointer" }}>
           Moi
+        </div>
+
+        {/* Bouton caddie Ma liste — haut droite */}
+        <div onClick={() => setTab("list")} style={{ position:"relative", background:"#E5181B", borderRadius:99, width:44, height:44, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, boxShadow:"0 3px 12px rgba(229,24,27,0.45)", cursor:"pointer" }}>
+          🛒
+          {unchecked > 0 && (
+            <span style={{ position:"absolute", top:-4, right:-4, background:"#E5181B", border:"2px solid #fff", color:"#fff", borderRadius:99, minWidth:18, height:18, fontSize:10, fontWeight:900, display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4px", boxSizing:"border-box" }}>
+              {unchecked}
+            </span>
+          )}
         </div>
       </div>
 
       {/* ── Navigation circulaire ── */}
-      <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", position:"relative", zIndex:10, paddingBottom:20 }}>
+      <div style={{ flex:1, display:"flex", alignItems:"flex-start", justifyContent:"center", position:"relative", zIndex:10, paddingTop:24 }}>
         <div style={{ position:"relative", width:300, height:290 }}>
 
-          {/* Ma liste — haut centre */}
-          <div style={{ position:"absolute", top:0, left:"50%", transform:"translateX(-50%)" }}>
-            <button onClick={() => setTab("list")} style={{
-              background:"#fff", border:"none", borderRadius:16,
-              padding:"11px 18px",
-              fontFamily:F, fontWeight:900, fontSize:14, color:"#111",
-              cursor:"pointer", boxShadow:"0 4px 20px rgba(0,0,0,0.13)",
-              display:"flex", alignItems:"center", gap:7, whiteSpace:"nowrap",
-            }}>
-              <span style={{ fontSize:16 }}>📋</span>
-              Ma liste
-              {unchecked > 0 && (
-                <span style={{ background:"#E5181B", color:"#fff", borderRadius:99, padding:"2px 8px", fontSize:11, fontWeight:900 }}>
-                  {unchecked}
-                </span>
-              )}
-            </button>
-          </div>
-
-          {/* Catalogue — bas gauche */}
-          <div style={{ position:"absolute", bottom:0, left:0 }}>
+          {/* Catalogue — bas centre */}
+          <div style={{ position:"absolute", bottom:0, left:"50%", transform:"translateX(-50%)" }}>
             <NavBtn label="Catalogue" icon="🛍️" target="catalog" />
           </div>
 
-          {/* Comparer — bas droite */}
-          <div style={{ position:"absolute", bottom:0, right:0 }}>
-            <NavBtn label="Comparer" icon="🏪" target="compare" />
-          </div>
-
           {/* Bouton Flasher — centre */}
-          <div style={{ position:"absolute", top:"50%", left:"50%", transform:"translate(-50%, -46%)", display:"flex", flexDirection:"column", alignItems:"center", gap:10 }}>
+          <div style={{ position:"absolute", top:"50%", left:"50%", transform:"translate(-50%, -46%)", display:"flex", flexDirection:"column", alignItems:"center" }}>
             <button onClick={() => onFlash()} style={{
-              width:118, height:118,
+              width:125, height:125,
               borderRadius:"50%",
               background:"#E5181B",
               border:"5px solid #fff",
               cursor:"pointer",
-              display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:5,
+              display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:4,
               boxShadow:"0 8px 36px rgba(229,24,27,0.55), 0 0 0 10px rgba(229,24,27,0.12)",
               transition:"transform 0.15s ease",
             }}
@@ -2981,10 +2971,8 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash
             >
               <span style={{ fontSize:28 }}>📷</span>
               <span style={{ fontFamily:F, fontWeight:900, fontSize:16, color:"#fff", letterSpacing:"0.01em" }}>Flasher</span>
+              <span style={{ fontFamily:F, fontWeight:500, fontSize:11, color:"rgba(255,255,255,0.85)", letterSpacing:"0.01em" }}>ticket de caisse</span>
             </button>
-            <div style={{ fontFamily:F, fontSize:13, color:"rgba(0,0,0,0.55)", fontWeight:700, textAlign:"center" }}>
-              un ticket de caisse
-            </div>
           </div>
 
         </div>
