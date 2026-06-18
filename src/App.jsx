@@ -951,7 +951,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                 if(!file) return;
                 setScanning(true); setError("");
                 try {
-                  const base64 = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.readAsDataURL(file); });
+                  const base64 = await imageFileToJpegBase64(file);
                   const parsed = await scanTicketWithClaude(base64, apiKey, refProducts);
                   const enseigne = storeIdFromName(parsed.store);
                   setResult(parsed); setSelectedStore(enseigne);
@@ -1001,7 +1001,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                 if(!file) return;
                 setScanning(true); setError("");
                 try {
-                  const base64 = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.readAsDataURL(file); });
+                  const base64 = await imageFileToJpegBase64(file);
                   const parsed = await scanTicketWithClaude(base64, apiKey, refProducts);
                   const enseigne = storeIdFromName(parsed.store);
                   setResult(parsed); setSelectedStore(enseigne);
