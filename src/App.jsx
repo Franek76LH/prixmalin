@@ -2934,6 +2934,9 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash
           Moi
         </div>
 
+        {/* Logo PrixMalin — centre */}
+        <img src="/prixmalin-logo.png" alt="PrixMalin" style={{ height:64, width:"auto", filter:"drop-shadow(0 3px 10px rgba(0,0,0,0.35))" }} />
+
         {/* Bouton caddie Ma liste — haut droite */}
         <div onClick={() => setTab("list")} style={{ position:"relative", background:"#E5181B", borderRadius:99, width:44, height:44, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, boxShadow:"0 3px 12px rgba(229,24,27,0.45)", cursor:"pointer" }}>
           🛒
