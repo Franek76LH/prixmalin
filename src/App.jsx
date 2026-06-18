@@ -594,8 +594,8 @@ function Header({ tab, itemCount, userEmail, displayName, onLogout, pendingCount
       <div style={{ display:"flex", alignItems:"center", gap:10 }}>
         <div style={{ width:36, height:36, borderRadius:10, background:"#FFFFFF", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, boxShadow:"0 2px 8px rgba(0,0,0,0.15)" }}>🛒</div>
         <div>
-          <div style={{ fontFamily:F, fontWeight:900, fontSize:18, color:C.white, lineHeight:1 }}>PrixMalin</div>
-          <div style={{ fontFamily:F, fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:1 }}>{titles[tab]}</div>
+          <div style={{ fontFamily:F, fontWeight:700, fontSize:11, color:"rgba(255,255,255,0.7)", lineHeight:1 }}>PrixMalin</div>
+          <div style={{ fontFamily:F, fontWeight:900, fontSize:20, color:C.white, marginTop:1 }}>{titles[tab]}</div>
           {tab==="archive" && (
             <div style={{ fontFamily:F, fontSize:10, color:"rgba(255,255,255,0.55)", marginTop:2 }}>
               Tous tes tickets scannés, par mois ou par produit
