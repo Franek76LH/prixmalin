@@ -596,6 +596,11 @@ function Header({ tab, itemCount, userEmail, displayName, onLogout, pendingCount
         <div>
           <div style={{ fontFamily:F, fontWeight:900, fontSize:18, color:C.white, lineHeight:1 }}>PrixMalin</div>
           <div style={{ fontFamily:F, fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:1 }}>{titles[tab]}</div>
+          {tab==="archive" && (
+            <div style={{ fontFamily:F, fontSize:10, color:"rgba(255,255,255,0.55)", marginTop:2 }}>
+              Tous tes tickets scannés, par mois ou par produit
+            </div>
+          )}
         </div>
       </div>
       <div style={{ display:"flex", alignItems:"center", gap:8 }}>
@@ -2712,9 +2717,6 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
 
   return (
     <div style={{ padding:"16px 16px 110px" }}>
-      <button onClick={()=>setShowImport(true)} style={{ width:"100%", padding:"16px", marginBottom:12, background:"linear-gradient(135deg,#CC0000,#FF1A1A)", border:"none", borderRadius:14, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 6px 20px rgba(180,0,0,0.35)" }}>
-        <span style={{ fontSize:20 }}>🧾</span> Importer un ticket
-      </button>
       <div style={{ display:"flex", gap:8, marginBottom:16 }}>
         {[{id:"mois",label:"Par mois"},{id:"produit",label:"Par produit"}].map(t=>(
           <button key={t.id} onClick={()=>setSubTab(t.id)} style={{ flex:1, padding:"10px", border:"none", borderRadius:10, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, cursor:"pointer", background:subTab===t.id?C.blue:C.grayLight, color:subTab===t.id?C.white:C.textLight }}>
