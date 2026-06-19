@@ -1907,8 +1907,8 @@ function ListTab({ items, setItems, setTab, favorites, saveFavorites }) {
 
 // ── ECONOMIES TAB ─────────────────────────────────────────────────────────────
 function EconomiesTab({ priceDB, archives, items, setTab }) {
-  const sLabel = { fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:10 };
   const [selectedMonth, setSelectedMonth] = useState(null);
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
 
   const scannedArchives = useMemo(() =>
     archives.filter(a => a.ticket_scanned && a.realized_saving != null),
@@ -1940,6 +1940,26 @@ function EconomiesTab({ priceDB, archives, items, setTab }) {
       .sort((a, b) => new Date(b.date) - new Date(a.date));
   }, [scannedArchives, selectedMonth]);
 
+  const years = useMemo(() => {
+    const set = new Set();
+    scannedArchives.forEach(arc => {
+      const y = parseInt((arc.date||'').substring(0,4));
+      if (y >= 2025) set.add(y);
+    });
+    return Array.from(set).sort((a,b) => b-a);
+  }, [scannedArchives]);
+
+  const bestMonth = useMemo(() => {
+    const map = {};
+    scannedArchives.forEach(arc => {
+      const m = (arc.date||'').substring(0,7);
+      if (!m) return;
+      map[m] = (map[m] || 0) + (arc.realized_saving || 0);
+    });
+    const best = Object.entries(map).sort((a,b) => b[1]-a[1])[0];
+    return (best && best[1] > 0) ? best[0] : null;
+  }, [scannedArchives]);
+
   const thisMonthStr = `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`;
 
   const fullMonthLabel = (yyyymm) => {
@@ -1950,11 +1970,6 @@ function EconomiesTab({ priceDB, archives, items, setTab }) {
 
   return (
     <div style={{ padding:"16px 16px 110px" }}>
-
-      <div style={sLabel}>💰 Économies réalisées</div>
-      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight, marginBottom:10, marginTop:-6 }}>
-        Confirmées après chaque scan de ticket de caisse
-      </div>
 
       {scannedArchives.length === 0 ? (
         <div style={{ background:"#F0FFF5", borderRadius:14, padding:"20px 16px", textAlign:"center", marginBottom:24, border:`2px dashed ${C.green}` }}>
@@ -1974,6 +1989,11 @@ function EconomiesTab({ priceDB, archives, items, setTab }) {
             <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:6 }}>
               {scannedArchives.length} course{scannedArchives.length>1?"s":""} analysée{scannedArchives.length>1?"s":""}
             </div>
+            {bestMonth && (
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:"rgba(255,255,255,0.85)", marginTop:4 }}>
+                Meilleur mois : {fullMonthLabel(bestMonth)}
+              </div>
+            )}
           </div>
 
           {selectedMonth ? (
@@ -2010,28 +2030,43 @@ function EconomiesTab({ priceDB, archives, items, setTab }) {
             </>
           ) : (
             /* VUE PRINCIPALE — navigation par mois */
-            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-              {monthly.map(m => (
-                <div key={m.month} onClick={() => setSelectedMonth(m.month)}
-                  style={{ display:"flex", alignItems:"center", background:m.month===thisMonthStr?"#F0FFF5":C.white, borderRadius:12, padding:"12px 14px", border:`1.5px solid ${m.month===thisMonthStr?C.green:C.grayLight}`, cursor:"pointer" }}>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{fullMonthLabel(m.month)}</div>
-                    <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight, marginTop:2 }}>
-                      {m.count} course{m.count>1?"s":""}
-                    </div>
-                  </div>
-                  <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                    <div style={{ textAlign:"right" }}>
-                      <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:m.total>=0?C.green:"#CC3300" }}>
-                        {m.total>=0?"+":""}{m.total.toFixed(2)} €
-                      </div>
-                      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, color:C.textLight }}>vs prix moyen</div>
-                    </div>
-                    <span style={{ color:C.gray, fontSize:18 }}>›</span>
-                  </div>
+            <>
+              {years.length > 1 && (
+                <div style={{ display:"flex", gap:8, marginBottom:12, flexWrap:"wrap" }}>
+                  {years.map(y => (
+                    <button key={y} onClick={() => setSelectedYear(y)}
+                      style={{ borderRadius:20, padding:"6px 16px", fontSize:13, border:"none", cursor:"pointer", fontFamily:"'Nunito',sans-serif", fontWeight:y===selectedYear?900:400, background:y===selectedYear?C.red:C.grayLight, color:y===selectedYear?"#fff":C.textLight }}>
+                      {y}
+                    </button>
+                  ))}
                 </div>
-              ))}
-            </div>
+              )}
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                {monthly.filter(m => m.month.startsWith(`${selectedYear}-`)).map(m => {
+                  const isZero = m.total === 0;
+                  return (
+                    <div key={m.month} onClick={() => setSelectedMonth(m.month)}
+                      style={{ display:"flex", alignItems:"center", background:isZero?"#EBEBEB":m.month===thisMonthStr?"#F0FFF5":C.white, borderRadius:12, padding:"12px 14px", border:`1.5px solid ${isZero?C.grayLight:m.month===thisMonthStr?C.green:C.grayLight}`, cursor:"pointer" }}>
+                      <div style={{ flex:1 }}>
+                        <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:isZero?C.textLight:C.text, fontStyle:isZero?"italic":"normal" }}>{fullMonthLabel(m.month)}</div>
+                        <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight, marginTop:2 }}>
+                          {m.count} course{m.count>1?"s":""}
+                        </div>
+                      </div>
+                      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                        <div style={{ textAlign:"right" }}>
+                          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:isZero?C.gray:m.total>=0?C.green:"#CC3300" }}>
+                            {m.total>=0?"+":""}{m.total.toFixed(2)} €
+                          </div>
+                          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, color:C.textLight }}>vs prix moyen</div>
+                        </div>
+                        <span style={{ color:C.gray, fontSize:18, opacity:isZero?0.4:1 }}>›</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
           )}
         </>
       )}
