@@ -2920,7 +2920,7 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
 }
 
 // ── HOME TAB ─────────────────────────────────────────────────────────────────
-function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash, archives = [] }) {
+function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash, archives = [], pseudo }) {
   const F = "'Nunito',sans-serif";
   const unchecked = items.filter(i => !i.checked).length;
   const members   = circles.filter(c => c.status === 'accepted');
@@ -2969,8 +2969,8 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"18px 20px 0", position:"relative", zIndex:10 }}>
 
         {/* Bouton Moi — haut gauche */}
-        <div onClick={onCircle} style={{ background:"#E5181B", borderRadius:99, width:44, height:44, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:F, fontWeight:900, fontSize:12, color:"#fff", boxShadow:"0 3px 12px rgba(229,24,27,0.45)", cursor:"pointer" }}>
-          Moi
+        <div onClick={onCircle} style={{ background:"#E5181B", borderRadius:99, width:54, height:54, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:F, fontWeight:900, fontSize:13, color:"#fff", boxShadow:"0 3px 12px rgba(229,24,27,0.45)", cursor:"pointer" }}>
+          {pseudo ? pseudo.substring(0, 6) : "Moi"}
         </div>
 
         {/* Logo PrixMalin — centre */}
@@ -3572,7 +3572,7 @@ export default function App() {
               <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:14, color:"#999" }}>Chargement...</div>
             </div>
           )}
-          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircle(true)} onFlash={handleFlash} archives={archives}/>}
+          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircle(true)} onFlash={handleFlash} archives={archives} pseudo={pseudo}/>}
           {loaded && tab==="list"      && <ListTab      items={items} setItems={saveItems} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} setItems={saveItems} setTab={setTab} catalog={catalog} priceDB={priceDB}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate}/>}
