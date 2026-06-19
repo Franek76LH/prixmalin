@@ -827,6 +827,9 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   const [newStoreSubMode, setNewStoreSubMode] = useState(null);
   const [gpsLoading, setGpsLoading] = useState(false);
   const [manualAddress, setManualAddress] = useState('');
+  const [manualRue, setManualRue] = useState('');
+  const [manualCP, setManualCP] = useState('');
+  const [manualVille, setManualVille] = useState('');
   const [manualGeocoding, setManualGeocoding] = useState(false);
   const fileInputRef    = useRef(null);
   const galleryInputRef = useRef(null);
@@ -1119,8 +1122,18 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                       }} style={{ width:"100%", padding:"14px", marginBottom:10, border:"none", borderRadius:12, background:"#0066CC", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:"white", cursor:"pointer" }}>
                         📍 Utiliser ma position actuelle
                       </button>
-                      <button onClick={()=>setNewStoreSubMode('manual')}
-                        style={{ width:"100%", padding:"13px", marginBottom:10, border:`2px solid ${"#0066CC"}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:"#0066CC", cursor:"pointer" }}>
+                      <button onClick={()=>{
+                        setNewStoreSubMode('manual');
+                        if (storeLocation) {
+                          const parts = storeLocation.split(',').map(s => s.trim());
+                          setManualRue(parts[0] || '');
+                          const lastPart = parts[parts.length - 1] || '';
+                          const cpMatch = lastPart.match(/(\d{5})/);
+                          setManualCP(cpMatch ? cpMatch[1] : '');
+                          const villeClean = lastPart.replace(/\d{5}/,'').trim();
+                          setManualVille(villeClean.toLowerCase() === 'france' ? '' : villeClean);
+                        }
+                      }} style={{ width:"100%", padding:"13px", marginBottom:10, border:`2px solid ${"#0066CC"}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:"#0066CC", cursor:"pointer" }}>
                         ✍️ Saisir l'adresse manuellement
                       </button>
                       {knownStores.length>0 && (
@@ -1144,20 +1157,29 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   {/* Manual address input */}
                   {newStoreSubMode==='manual' && (
                     <>
-                      <input value={manualAddress} onChange={e=>setManualAddress(e.target.value)}
-                        placeholder="Ex : 25 Bd Michelet, 13009 Marseille"
-                        style={{ width:"100%", padding:"13px 14px", borderRadius:12, border:`2px solid ${manualAddress.trim()?C.blue:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:15, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:10 }} />
-                      <button disabled={!manualAddress.trim()||manualGeocoding} onClick={async()=>{
+                      <input value={manualRue} onChange={e=>setManualRue(e.target.value)}
+                        placeholder="Rue et numéro"
+                        style={{ width:"100%", padding:"13px 14px", borderRadius:12, border:`2px solid ${manualRue.trim()?C.blue:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:15, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:8 }} />
+                      <div style={{ display:"flex", gap:8, marginBottom:10 }}>
+                        <input value={manualCP} onChange={e=>setManualCP(e.target.value)}
+                          placeholder="Code postal"
+                          style={{ width:"40%", padding:"13px 14px", borderRadius:12, border:`2px solid ${manualCP.trim()?C.blue:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:15, color:C.text, outline:"none", boxSizing:"border-box" }} />
+                        <input value={manualVille} onChange={e=>setManualVille(e.target.value)}
+                          placeholder="Ville"
+                          style={{ flex:1, padding:"13px 14px", borderRadius:12, border:`2px solid ${manualVille.trim()?C.blue:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:15, color:C.text, outline:"none", boxSizing:"border-box" }} />
+                      </div>
+                      <button disabled={!manualRue.trim()||!manualVille.trim()||manualGeocoding} onClick={async()=>{
+                        const fullAddress = `${manualRue.trim()}, ${manualCP.trim()} ${manualVille.trim()}`.trim();
                         setManualGeocoding(true); setError("");
-                        const coords=await geocodeAddress(manualAddress.trim());
+                        const coords=await geocodeAddress(fullAddress);
                         if(coords){
-                          const id=await insertStoreInDB(selectedStore, manualAddress.trim(), coords.lat, coords.lng);
+                          const id=await insertStoreInDB(selectedStore, fullAddress, coords.lat, coords.lng);
                           setResolvedStoreId(id);
                         } else {
                           setError("Adresse introuvable — vérifie et réessaie");
                         }
                         setManualGeocoding(false);
-                      }} style={{ width:"100%", padding:"14px", marginBottom:10, border:"none", borderRadius:12, background:!manualAddress.trim()||manualGeocoding?C.grayLight:"#0066CC", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:!manualAddress.trim()||manualGeocoding?C.gray:"white", cursor:!manualAddress.trim()||manualGeocoding?"default":"pointer" }}>
+                      }} style={{ width:"100%", padding:"14px", marginBottom:10, border:"none", borderRadius:12, background:!manualRue.trim()||!manualVille.trim()||manualGeocoding?C.grayLight:"#0066CC", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:!manualRue.trim()||!manualVille.trim()||manualGeocoding?C.gray:"white", cursor:!manualRue.trim()||!manualVille.trim()||manualGeocoding?"default":"pointer" }}>
                         {manualGeocoding?"⏳ Géocodage...":"📍 Valider l'adresse"}
                       </button>
                       <button onClick={()=>setNewStoreSubMode('new')}
@@ -2143,7 +2165,10 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
       onTicketValidated?.(openArchive.id, openArchive.store);
     } else {
       const storeId = entries[0]?.storeId || "autre";
-      const storeInfo = STORES.find(s => s.id === storeId) || { id:"autre", name: entries[0]?.store_name || "Autre", logo:"🏪" };
+      const storeObj = STORES.find(s => s.id === storeId);
+      const storeInfo = storeId === "autre"
+        ? { id:"autre", name: entries[0]?.store_name || "Autre", logo:"🏪" }
+        : storeObj || { id:"autre", name: entries[0]?.store_name || "Autre", logo:"🏪" };
       const total = Math.round(entries.reduce((s,e) => s + (e.price||0) * (e.qty||1), 0) * 100) / 100;
       const newArc = {
         date:    entries[0]?.date || new Date().toISOString(),
