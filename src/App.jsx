@@ -794,7 +794,7 @@ function AddItemSheet({ onClose, onAdd }) {
 }
 
 // ── IMPORT TICKET SHEET ───────────────────────────────────────────────────────
-function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera = false }) {
+function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera = false, onManualEntry }) {
   const [jsonText, setJsonText] = useState("");
   const [status,   setStatus]   = useState(directCamera ? "camera" : "idle");
   const [error,    setError]    = useState("");
@@ -928,8 +928,8 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                 <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.blue, marginBottom:10 }}>Comment ça marche :</div>
                 {[
                   {n:"1",t:"📷 Scanne un ticket photo"},
-                  {n:"2",t:"L'IA lit le ticket et extrait produits, prix et magasin"},
-                  {n:"3",t:"Vérifie et importe dans Mes prix !"},
+                  {n:"2",t:"🤖 L'IA lit le ticket et extrait produits, prix et magasin"},
+                  {n:"3",t:"✅ Vérifié et prix importés !"},
                 ].map(s=>(
                   <div key={s.n} style={{ display:"flex", gap:10, alignItems:"flex-start", marginBottom:8 }}>
                     <div style={{ width:24, height:24, borderRadius:99, background:C.orange, color:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>{s.n}</div>
@@ -937,15 +937,6 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   </div>
                 ))}
               </div>
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Colle le JSON ici</div>
-              <textarea value={jsonText} onChange={e=>setJsonText(e.target.value)}
-                placeholder={'{\n  "store": "Intermarché",\n  "date": "2026-04-11",\n  "products": [\n    { "brand": "Look", "name": "Cola Zéro", "format": "1L", "price": 0.49 }\n  ]\n}'}
-                style={{ width:"100%", height:160, padding:"12px", borderRadius:12, border:`2px solid ${jsonText?C.orange:C.grayLight}`, fontFamily:"monospace", fontSize:12, color:C.text, outline:"none", resize:"none", boxSizing:"border-box", marginBottom:12, lineHeight:1.5 }}
-              />
-              {error && <div style={{ background:"#FEE", borderRadius:10, padding:"10px 14px", marginBottom:12, fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.red, fontWeight:700 }}>⚠️ {error}</div>}
-              <button onClick={()=>parseAndPreview(jsonText)} disabled={!jsonText.trim()} style={{ width:"100%", padding:"15px", border:"none", borderRadius:12, background:jsonText.trim()?C.orange:C.grayLight, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:jsonText.trim()?C.white:C.gray, cursor:jsonText.trim()?"pointer":"default", marginBottom:10 }}>
-                Analyser →
-              </button>
 <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={async (e) => {
                 const file = e.target.files[0];
                 if(!file) return;
@@ -963,9 +954,6 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                 } catch(e) { setError("Erreur scan : " + e.message); }
                 setScanning(false);
               }} style={{ display:"none" }} />
-              <button onClick={()=>fileInputRef.current?.click()} disabled={scanning||galleryScanning} style={{ width:"100%", padding:"15px", marginTop:10, border:"none", borderRadius:12, background:scanning?"#999":"#00B341", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:"white", cursor:scanning?"default":"pointer" }}>
-                {scanning ? "⏳ Analyse en cours..." : "📷 Scanner un ticket"}
-              </button>
 
               {/* Galerie */}
               <input ref={galleryInputRef} type="file" accept="image/*" onChange={async (e) => {
@@ -989,6 +977,10 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
               <button onClick={()=>galleryInputRef.current?.click()} disabled={scanning||galleryScanning}
                 style={{ width:"100%", padding:"15px", marginTop:10, border:"none", borderRadius:12, background:galleryScanning?"#999":"#4A90D9", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:"white", cursor:galleryScanning?"default":"pointer" }}>
                 {galleryScanning ? "⏳ Analyse en cours..." : "🖼️ Importer une photo"}
+              </button>
+              <button onClick={()=>{ onClose(); onManualEntry?.(); }} disabled={scanning||galleryScanning}
+                style={{ width:"100%", padding:"15px", marginTop:10, border:"none", borderRadius:12, background:C.orange, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
+                ✏️ Saisie manuelle
               </button>
 
             </>
@@ -1018,7 +1010,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                 <span style={{ fontSize:48 }}>📷</span>
                 {scanning ? "⏳ Analyse en cours..." : "Ouvrir la caméra"}
               </button>
-              <button onClick={()=>setStatus("idle")} style={{ width:"100%", padding:"14px", marginTop:12, border:`2px solid ${C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.textLight, cursor:"pointer" }}>
+              <button onClick={()=>setStatus("idle")} style={{ width:"100%", padding:"14px", marginTop:12, border:"none", borderRadius:12, background:"#4A90D9", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.white, cursor:"pointer" }}>
                 Autres options
               </button>
             </>
@@ -2871,10 +2863,7 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
         </>
       )}
       </>)}
-      <button onClick={()=>setShowEntry(true)} style={{ position:"fixed", bottom:72, right:16, background:"linear-gradient(135deg,#CC0000,#FF1A1A)", border:"none", borderRadius:99, padding:"13px 18px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", gap:6, boxShadow:"0 6px 20px rgba(180,0,0,0.45)", zIndex:40 }}>
-        ✏️ Saisie manuelle
-      </button>
-      {showImport && <ImportTicketSheet onClose={()=>setShowImport(false)} onImport={onImport} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))}/>}
+      {showImport && <ImportTicketSheet onClose={()=>setShowImport(false)} onImport={onImport} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))} onManualEntry={()=>setShowEntry(true)}/>}
       {showEntry  && <PriceEntrySheet  onClose={()=>setShowEntry(false)} onSave={onSavePrice}/>}
     </div>
   );
