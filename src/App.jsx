@@ -388,7 +388,8 @@ function ProfilSheet({ circles, userId, userEmail, profileMap, pseudo, archives,
   };
 
   const ringR = 56;
-  const ringMembers = accepted.slice(0, 6);
+  const ringMembers = accepted.slice(0, 4);
+  const extraMembers = accepted.length > 4 ? accepted.slice(4) : [];
 
   const thisMonthStr = `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`;
   const scanned = archives.filter(a => a.ticket_scanned && a.realized_saving != null);
@@ -402,12 +403,12 @@ function ProfilSheet({ circles, userId, userEmail, profileMap, pseudo, archives,
       <div onClick={e=>e.stopPropagation()} style={{ background:C.white, borderRadius:"24px 24px 0 0", width:"100%", maxWidth:430, margin:"0 auto", maxHeight:"90vh", display:"flex", flexDirection:"column", animation:"slideUp 0.3s ease" }}>
 
         {/* Header */}
-        <div style={{ padding:"20px 20px 0", display:"flex", alignItems:"flex-start", justifyContent:"space-between", flexShrink:0 }}>
+        <div style={{ background:C.red, padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0, borderRadius:"24px 24px 0 0" }}>
           <div>
-            <div style={{ fontFamily:F, fontWeight:900, fontSize:24, color:C.text }}>Profil</div>
-            <div style={{ fontFamily:F, fontSize:14, color:C.textLight, fontWeight:600, marginTop:2 }}>@{pseudo || 'Moi'}</div>
+            <div style={{ fontFamily:F, fontSize:11, fontWeight:700, color:"rgba(255,255,255,0.6)" }}>PrixMalin</div>
+            <div style={{ fontFamily:F, fontSize:20, fontWeight:900, color:"#fff" }}>Mon profil</div>
           </div>
-          <button onClick={onClose} style={{ background:C.bg, border:"none", borderRadius:99, width:32, height:32, fontSize:15, cursor:"pointer", color:C.gray, marginTop:4 }}>✕</button>
+          <button onClick={onClose} style={{ background:"rgba(255,255,255,0.2)", borderRadius:99, width:36, height:36, border:"none", fontSize:16, color:"#fff", cursor:"pointer" }}>✕</button>
         </div>
 
         {/* Avatar ring + savings */}
@@ -418,20 +419,34 @@ function ProfilSheet({ circles, userId, userEmail, profileMap, pseudo, archives,
             </svg>
             <div style={{ position:"absolute", inset:0, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}>
               <div style={{ fontFamily:F, fontWeight:900, fontSize:28, color:C.text, lineHeight:1 }}>{cagnotteTotal >= 0 ? "+" : ""}{cagnotteTotal.toFixed(2)} €</div>
-              <div style={{ fontFamily:F, fontSize:11, color:C.green, fontWeight:700, marginTop:3 }}>{thisMonthSaving >= 0 ? "+" : ""}{thisMonthSaving.toFixed(2)} € ce mois-ci</div>
+              <div style={{ fontFamily:F, fontSize:11, color:thisMonthSaving === 0 ? C.gray : C.green, fontWeight:700, marginTop:3 }}>{thisMonthSaving >= 0 ? "+" : ""}{thisMonthSaving.toFixed(2)} € ce mois-ci</div>
             </div>
             {ringMembers.length === 0 ? (
               <div style={{ position:"absolute", left:84+ringR-14, top:84-14, width:28, height:28, borderRadius:"50%", background:C.grayLight, display:"flex", alignItems:"center", justifyContent:"center", fontSize:16, color:C.gray, border:"2px solid white" }}>+</div>
-            ) : ringMembers.map((c, i) => {
-              const angle = (2 * Math.PI * i / ringMembers.length) - Math.PI / 2;
-              const x = 84 + ringR * Math.cos(angle) - 14;
-              const y = 84 + ringR * Math.sin(angle) - 14;
-              return (
-                <div key={c.id} style={{ position:"absolute", left:x, top:y, width:28, height:28, borderRadius:"50%", background:avatarColors[i%avatarColors.length], display:"flex", alignItems:"center", justifyContent:"center", fontFamily:F, fontWeight:900, fontSize:12, color:"#fff", border:"2px solid white", boxShadow:"0 2px 6px rgba(0,0,0,0.15)" }}>
-                  {initial(otherDisplay(c))}
-                </div>
-              );
-            })}
+            ) : <>
+              {ringMembers.map((c, i) => {
+                const angle = (2 * Math.PI * i / ringMembers.length) - Math.PI / 2;
+                const x = 84 + ringR * Math.cos(angle) - 14;
+                const y = 84 + ringR * Math.sin(angle) - 14;
+                return (
+                  <div key={c.id} style={{ position:"absolute", left:x, top:y, width:28, height:28, borderRadius:"50%", background:avatarColors[i%avatarColors.length], display:"flex", alignItems:"center", justifyContent:"flex-start", fontFamily:F, fontWeight:900, fontSize:8, color:"#fff", border:"2px solid white", boxShadow:"0 2px 6px rgba(0,0,0,0.15)", paddingLeft:3, overflow:"visible" }}>
+                    <span style={{ color:"#fff" }}>{otherDisplay(c).substring(0, 5)}</span>
+                    <span style={{ color:"rgba(0,0,0,0.2)" }}>{otherDisplay(c).substring(5)}</span>
+                  </div>
+                );
+              })}
+              {extraMembers.map((c, j) => {
+                const baseAngle = (2 * Math.PI * (ringMembers.length - 1) / ringMembers.length) - Math.PI / 2;
+                const baseX = 84 + ringR * Math.cos(baseAngle) - 14;
+                const baseY = 84 + ringR * Math.sin(baseAngle) - 14;
+                return (
+                  <div key={c.id} style={{ position:"absolute", left:baseX+(j+1)*4, top:baseY+(j+1)*4, width:28, height:28, borderRadius:"50%", background:"#999", display:"flex", alignItems:"center", justifyContent:"flex-start", fontFamily:F, fontWeight:900, fontSize:8, color:"#fff", border:"2px solid white", opacity:0.4, zIndex:extraMembers.length - j, paddingLeft:3, overflow:"visible" }}>
+                    <span style={{ color:"#fff" }}>{otherDisplay(c).substring(0, 5)}</span>
+                    <span style={{ color:"rgba(0,0,0,0.2)" }}>{otherDisplay(c).substring(5)}</span>
+                  </div>
+                );
+              })}
+            </>}
           </div>
         </div>
 
