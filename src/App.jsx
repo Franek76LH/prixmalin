@@ -2580,14 +2580,14 @@ function CompareTab({ items, priceDB, onValidate }) {
 function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceDB, onImport, onSavePrice, produitsRef = [] }) {
   const [pendingDeleteArc, setPendingDeleteArc] = useState(null);
   const [added, setAdded] = useState(new Set());
-  const [sort, setSort] = useState("date");
+  const [sort, setSort] = useState("produit");
   const [expandedProduct, setExpandedProduct] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterCategory, setFilterCategory] = useState("all");
   const [filterPeriod, setFilterPeriod] = useState("all");
   const [showImport, setShowImport] = useState(false);
   const [showEntry, setShowEntry] = useState(false);
-  const [subTab, setSubTab] = useState("mois");
+  const [subTab, setSubTab] = useState("produit");
   const [selectedMonth, setSelectedMonth] = useState(null);
 
   const categories = useMemo(() => {
@@ -2718,8 +2718,8 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
   return (
     <div style={{ padding:"16px 16px 110px" }}>
       <div style={{ display:"flex", gap:8, marginBottom:16 }}>
-        {[{id:"mois",label:"Par mois"},{id:"produit",label:"Par produit"}].map(t=>(
-          <button key={t.id} onClick={()=>setSubTab(t.id)} style={{ flex:1, padding:"10px", border:"none", borderRadius:10, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, cursor:"pointer", background:subTab===t.id?C.blue:C.grayLight, color:subTab===t.id?C.white:C.textLight }}>
+        {[{id:"produit",label:"Par produit"},{id:"mois",label:"Par mois"}].map(t=>(
+          <button key={t.id} onClick={()=>{ setSubTab(t.id); if(t.id==="produit") setSort("produit"); }} style={{ flex:1, padding:"10px", border:"none", borderRadius:10, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, cursor:"pointer", background:subTab===t.id?C.blue:C.grayLight, color:subTab===t.id?C.white:C.textLight }}>
             {t.label}
           </button>
         ))}
