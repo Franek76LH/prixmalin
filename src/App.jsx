@@ -85,10 +85,10 @@ async function geocodeAddress(address) {
   } catch { return null; }
 }
 
-async function insertStoreInDB(enseigne, address, lat, lng) {
+async function insertStoreInDB(enseigne, address, lat, lng, name = null) {
   try {
     const { data } = await supabase.from('stores')
-      .insert({ enseigne, address, latitude: lat, longitude: lng })
+      .insert({ enseigne, address, latitude: lat, longitude: lng, name })
       .select('id').single();
     return data?.id ?? null;
   } catch { return null; }
@@ -1196,7 +1196,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                         setManualGeocoding(true); setError("");
                         const coords=await geocodeAddress(fullAddress);
                         if(coords){
-                          const id=await insertStoreInDB(selectedStore, fullAddress, coords.lat, coords.lng);
+                          const id=await insertStoreInDB(selectedStore, fullAddress, coords.lat, coords.lng, storeNameEdit.trim() || null);
                           setResolvedStoreId(id);
                         } else {
                           setError("Adresse introuvable — vérifie et réessaie");
