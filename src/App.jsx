@@ -829,6 +829,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   const [manualAddress, setManualAddress] = useState('');
   const [manualRue, setManualRue] = useState('');
   const [manualCP, setManualCP] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const [manualVille, setManualVille] = useState('');
   const [manualGeocoding, setManualGeocoding] = useState(false);
   const fileInputRef    = useRef(null);
@@ -1046,9 +1047,31 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
 
               {/* Store name */}
               <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Nom du magasin *</div>
-              <input value={storeNameEdit} onChange={e=>setStoreNameEdit(e.target.value)}
-                placeholder="Ex : Intermarché, Lidl..."
-                style={{ width:"100%", padding:"13px 14px", borderRadius:12, border:`2px solid ${storeNameEdit.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:15, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:14 }} />
+              {(() => {
+                const suggestions = storeNameEdit.trim().length >= 2
+                  ? STORES.filter(s => s.id !== 'autre' && s.name.toLowerCase().includes(storeNameEdit.trim().toLowerCase()))
+                  : [];
+                return (
+                  <div style={{ position:"relative" }}>
+                    <input value={storeNameEdit} onChange={e=>setStoreNameEdit(e.target.value)}
+                      onFocus={()=>setShowSuggestions(true)}
+                      onBlur={()=>setTimeout(()=>setShowSuggestions(false), 150)}
+                      placeholder="Ex : Intermarché, Lidl..."
+                      style={{ width:"100%", padding:"13px 14px", borderRadius:12, border:`2px solid ${storeNameEdit.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:15, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:14 }} />
+                    {showSuggestions && suggestions.length > 0 && (
+                      <div style={{ position:"absolute", zIndex:50, background:C.white, borderRadius:12, border:`1px solid ${C.grayLight}`, boxShadow:"0 4px 16px rgba(0,0,0,0.1)", width:"100%", marginTop:-10 }}>
+                        {suggestions.map(s => (
+                          <div key={s.id} onMouseDown={()=>{ setStoreNameEdit(s.name); setShowSuggestions(false); fetchKnownStores(s.id); }}
+                            style={{ padding:"12px 14px", display:"flex", gap:10, alignItems:"center", cursor:"pointer" }}>
+                            <span style={{ fontSize:18 }}>{s.logo}</span>
+                            <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{s.name}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* GPS linking section */}
               <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Localisation du magasin</div>
