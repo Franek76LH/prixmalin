@@ -86,9 +86,39 @@ async function geocodeAddress(address) {
 }
 
 async function insertStoreInDB(enseigne, address, lat, lng, name = null) {
+  const BRANDS = [
+    { match: ["super u", "superu"],                 canonical: "Super U"     },
+    { match: ["hyper u", "hyperu"],                 canonical: "Hyper U"     },
+    { match: ["u express", "uexpress"],             canonical: "U Express"   },
+    { match: ["leclerc", "e.leclerc", "e leclerc"], canonical: "Leclerc"     },
+    { match: ["intermarché", "intermarche"],        canonical: "Intermarché" },
+    { match: ["carrefour"],                         canonical: "Carrefour"   },
+    { match: ["lidl"],                              canonical: "Lidl"        },
+    { match: ["netto"],                             canonical: "Netto"       },
+    { match: ["franprix"],                          canonical: "Franprix"    },
+    { match: ["aldi"],                              canonical: "Aldi"        },
+    { match: ["utile"],                             canonical: "Utile"       },
+    { match: ["vival"],                             canonical: "Vival"       },
+    { match: ["spar"],                              canonical: "Spar"        },
+    { match: ["monoprix"],                          canonical: "Monoprix"    },
+    { match: ["picard"],                            canonical: "Picard"      },
+    { match: ["action"],                            canonical: "Action"      },
+  ];
+  const normalizeStoreName = (n) => {
+    if (!n) return n;
+    const lower = n.trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+    for (const brand of BRANDS) {
+      for (const m of brand.match) {
+        if (lower === m || lower.startsWith(m + " ") || lower.startsWith(m + "-"))
+          return brand.canonical;
+      }
+    }
+    return n.trim().charAt(0).toUpperCase() + n.trim().slice(1).toLowerCase();
+  };
+
   try {
     const { data } = await supabase.from('stores')
-      .insert({ enseigne, address, latitude: lat, longitude: lng, name })
+      .insert({ enseigne, address, latitude: lat, longitude: lng, name: normalizeStoreName(name) })
       .select('id').single();
     return data?.id ?? null;
   } catch { return null; }
@@ -1155,7 +1185,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                         navigator.geolocation.getCurrentPosition(
                           async pos=>{
                             const {latitude:lat,longitude:lng}=pos.coords;
-                            const id=await insertStoreInDB(selectedStore, storeNameEdit.trim()||"", lat, lng);
+                            const id=await insertStoreInDB(selectedStore, "", lat, lng, storeNameEdit.trim()||null);
                             setResolvedStoreId(id);
                             setGpsLoading(false);
                           },
