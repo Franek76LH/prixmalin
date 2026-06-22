@@ -111,6 +111,23 @@ function guessCategory(name) {
 }
 
 const PURE_STORES = new Set(['auchan','carrefour','casino','intermarche','leclerc','e.leclerc','monoprix','lidl','u','vival','spar','netto','franprix','superu','super u','simply','simply market','biocbon','bio c bon']);
+
+const SHARE_CATEGORIES = [
+  "Fruits et légumes",
+  "Viandes & charcuterie",
+  "Poissons & fruits de mer",
+  "Produits laitiers œufs & fromages",
+  "Épicerie salée",
+  "Épicerie sucrée & petit déjeuner",
+  "Boissons non alcoolisées",
+  "Boissons alcoolisées",
+  "Surgelés",
+  "Plats préparés & traiteur",
+  "Entretien & nettoyage",
+  "Hygiène & beauté",
+  "Animalerie",
+  "Ustensiles & équipement",
+];
 function filterMDD(brands) {
   return brands.filter(m => {
     const n = m.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();
@@ -890,6 +907,8 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   };
 
   const [shareChecked, setShareChecked] = useState(new Set());
+  const [editingId,    setEditingId]    = useState(null);
+  const [editDraft,    setEditDraft]    = useState({});
 
   const loadExample = () => { setJsonText(EXAMPLE); parseAndPreview(EXAMPLE); };
   const toggleProduct = id => setEditableProducts(prev=>prev.map(p=>p.id===id?{...p,keep:!p.keep}:p));
@@ -1299,20 +1318,59 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                     checked ? next.delete(p.id) : next.add(p.id);
                     return next;
                   });
+                  const isEditing = editingId === p.id;
+                  const openEdit = () => {
+                    if (isEditing) { setEditingId(null); return; }
+                    setEditingId(p.id);
+                    setEditDraft({ name: p.name, price: p.price, category: p.category || guessCategory(p.name) });
+                  };
+                  const saveEdit = () => {
+                    setEditableProducts(prev => prev.map(ep => ep.id === p.id
+                      ? { ...ep, name: editDraft.name, price: parseFloat(editDraft.price) || ep.price, category: editDraft.category }
+                      : ep));
+                    setEditingId(null);
+                  };
                   return (
-                    <div key={p.id} onClick={toggle} style={{ display:"flex", alignItems:"center", gap:12, background:checked?"#F0FFF5":C.white, borderRadius:12, padding:"12px 14px", border:`1.5px solid ${checked?C.green:C.grayLight}`, cursor:"pointer" }}>
-                      <div style={{ width:24, height:24, borderRadius:6, flexShrink:0, border:`2px solid ${checked?C.green:C.gray}`, background:checked?C.green:C.white, display:"flex", alignItems:"center", justifyContent:"center", color:C.white, fontSize:13 }}>
-                        {checked ? "✓" : ""}
-                      </div>
-                      <div style={{ flex:1, minWidth:0 }}>
-                        <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                          {p.brand ? `${p.brand} · ` : ""}{p.name}
+                    <div key={p.id} style={{ borderRadius:12, border:`1.5px solid ${isEditing?"#4A90D9":checked?C.green:C.grayLight}`, overflow:"hidden", background:isEditing?"#F0F8FF":checked?"#F0FFF5":C.white }}>
+                      <div onClick={openEdit} style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 14px", cursor:"pointer" }}>
+                        <div onClick={e=>{ e.stopPropagation(); toggle(); }} style={{ width:24, height:24, borderRadius:6, flexShrink:0, border:`2px solid ${checked?C.green:C.gray}`, background:checked?C.green:C.white, display:"flex", alignItems:"center", justifyContent:"center", color:C.white, fontSize:13 }}>
+                          {checked ? "✓" : ""}
                         </div>
-                        <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>{p.format}</div>
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                            {p.brand ? `${p.brand} · ` : ""}{p.name}
+                          </div>
+                          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>{p.format}</div>
+                        </div>
+                        <div style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0 }}>
+                          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.orange }}>{p.price.toFixed(2)} €</div>
+                          <span style={{ fontSize:11, color:C.gray }}>✏️</span>
+                        </div>
                       </div>
-                      <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.orange, flexShrink:0 }}>
-                        {p.price.toFixed(2)} €
-                      </div>
+                      {isEditing && (
+                        <div onClick={e=>e.stopPropagation()} style={{ padding:"12px 14px", borderTop:"1px solid #D0E8FF", background:"#F4F9FF" }}>
+                          <div style={{ marginBottom:8 }}>
+                            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>Nom du produit</div>
+                            <input value={editDraft.name} onChange={e=>setEditDraft(d=>({...d,name:e.target.value}))}
+                              style={{ width:"100%", padding:"8px 12px", borderRadius:8, border:"1.5px solid #4A90D9", fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }} />
+                          </div>
+                          <div style={{ marginBottom:8 }}>
+                            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>Prix (€)</div>
+                            <input type="number" step="0.01" min="0" value={editDraft.price} onChange={e=>setEditDraft(d=>({...d,price:e.target.value}))}
+                              style={{ width:"100%", padding:"8px 12px", borderRadius:8, border:`1.5px solid ${C.orange}`, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:900, color:C.orange, outline:"none", boxSizing:"border-box" }} />
+                          </div>
+                          <div style={{ marginBottom:10 }}>
+                            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>Catégorie</div>
+                            <select value={editDraft.category} onChange={e=>setEditDraft(d=>({...d,category:e.target.value}))}
+                              style={{ width:"100%", padding:"8px 12px", borderRadius:8, border:`1.5px solid ${C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.text, background:"#fff", outline:"none", boxSizing:"border-box" }}>
+                              {SHARE_CATEGORIES.map(cat=><option key={cat} value={cat}>{cat}</option>)}
+                            </select>
+                          </div>
+                          <button onClick={saveEdit} style={{ width:"100%", padding:"10px", border:"none", borderRadius:8, background:"#4A90D9", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer" }}>
+                            ✓ OK
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
