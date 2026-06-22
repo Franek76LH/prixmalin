@@ -880,7 +880,8 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   const [manualVille, setManualVille] = useState('');
   const [manualGeocoding,   setManualGeocoding]   = useState(false);
   const [enseigneQuery,     setEnseigneQuery]     = useState('');
-  const [showEnseigneDrop,  setShowEnseigneDrop]  = useState(false);
+  const [showEnseigneDrop,   setShowEnseigneDrop]   = useState(false);
+  const [showEnseigneSearch, setShowEnseigneSearch] = useState(false);
   const [showManualAddress, setShowManualAddress] = useState(false);
   const [savedGpsCoords,    setSavedGpsCoords]    = useState(null);
   const fileInputRef    = useRef(null);
@@ -1184,38 +1185,55 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                       ? ENSEIGNES_LIST.filter(e => norm(e.name).includes(norm(enseigneQuery)))
                       : ENSEIGNES_LIST;
                     const selectedEns = ENSEIGNES_LIST.find(e => e.id === selectedStore);
+                    const showSearch = showEnseigneSearch || !selectedEns;
                     return (
                       <div style={{ marginBottom:16, position:"relative" }}>
                         <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Enseigne</div>
-                        <div style={{ position:"relative" }}>
-                          <span style={{ position:"absolute", left:12, top:"50%", transform:"translateY(-50%)", fontSize:16, pointerEvents:"none" }}>🔍</span>
-                          <input
-                            value={enseigneQuery}
-                            onChange={e=>{ setEnseigneQuery(e.target.value); setShowEnseigneDrop(true); }}
-                            onFocus={e=>{ setShowEnseigneDrop(true); e.target.style.borderColor=enseigneQuery.trim()?C.orange:C.grayLight; }}
-                            onBlur={e=>{ setTimeout(()=>setShowEnseigneDrop(false), 150); e.target.style.borderColor=enseigneQuery.trim()?C.orange:C.grayLight; }}
-                            placeholder="Rechercher une enseigne..."
-                            style={{ width:"100%", padding:"11px 14px 11px 38px", borderRadius:10, border:`2px solid ${enseigneQuery.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:14, color:C.text, outline:"none", boxSizing:"border-box" }}
-                          />
-                          <style>{`input::placeholder { color: #6B7280; font-style: italic; }`}</style>
-                        </div>
-                        {selectedEns && !showEnseigneDrop && (
-                          <div style={{ marginTop:6, display:"inline-flex", alignItems:"center", gap:6, background:C.blueLight, borderRadius:99, padding:"4px 12px" }}>
-                            <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:800, color:C.blue }}>{selectedEns.name}</span>
-                            <button onMouseDown={()=>{ setSelectedStore("autre"); setEnseigneQuery(""); fetchKnownStores("autre"); }}
-                              style={{ background:"none", border:"none", cursor:"pointer", fontSize:13, color:C.gray, padding:0, lineHeight:1 }}>✕</button>
+                        {selectedEns && !showSearch ? (
+                          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                            <div style={{ display:"inline-flex", alignItems:"center", gap:6, background:C.blueLight, borderRadius:99, padding:"6px 14px" }}>
+                              <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:800, color:C.blue }}>{selectedEns.name}</span>
+                              <button onMouseDown={()=>{ setSelectedStore("autre"); setEnseigneQuery(""); setShowEnseigneSearch(true); fetchKnownStores("autre"); }}
+                                style={{ background:"none", border:"none", cursor:"pointer", fontSize:13, color:C.gray, padding:0, lineHeight:1 }}>✕</button>
+                            </div>
+                            <button onMouseDown={()=>setShowEnseigneSearch(true)}
+                              style={{ background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.blue, fontWeight:700, cursor:"pointer", padding:0, textDecoration:"underline" }}>
+                              Changer
+                            </button>
                           </div>
-                        )}
-                        {showEnseigneDrop && (
-                          <div style={{ position:"absolute", zIndex:50, background:C.white, borderRadius:12, border:`1px solid ${C.grayLight}`, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", width:"100%", maxHeight:220, overflowY:"auto", marginTop:2 }}>
-                            {filtered.map(e=>(
-                              <div key={e.id} onMouseDown={async()=>{ setSelectedStore(e.id); setStoreNameEdit(e.name); setEnseigneQuery(e.name); setShowEnseigneDrop(false); await fetchKnownStores(e.id); }}
-                                style={{ padding:"11px 14px", display:"flex", alignItems:"center", cursor:"pointer", borderBottom:`1px solid ${C.grayLight}`, background:selectedStore===e.id?"#F0F8FF":C.white }}>
-                                <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:selectedStore===e.id?900:700, fontSize:14, color:selectedStore===e.id?C.blue:C.text, flex:1 }}>{e.name}</span>
-                                {selectedStore===e.id && <span style={{ color:C.blue, fontSize:13 }}>✓</span>}
+                        ) : (
+                          <>
+                            <div style={{ position:"relative" }}>
+                              <span style={{ position:"absolute", left:12, top:"50%", transform:"translateY(-50%)", fontSize:16, pointerEvents:"none" }}>🔍</span>
+                              <input
+                                value={enseigneQuery}
+                                onChange={e=>{ setEnseigneQuery(e.target.value); setShowEnseigneDrop(true); }}
+                                onFocus={e=>{ setShowEnseigneDrop(true); e.target.style.borderColor=enseigneQuery.trim()?C.orange:C.grayLight; }}
+                                onBlur={e=>{ setTimeout(()=>setShowEnseigneDrop(false), 150); e.target.style.borderColor=enseigneQuery.trim()?C.orange:C.grayLight; }}
+                                placeholder="Rechercher une enseigne..."
+                                style={{ width:"100%", padding:"11px 14px 11px 38px", borderRadius:10, border:`2px solid ${enseigneQuery.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:14, color:C.text, outline:"none", boxSizing:"border-box" }}
+                              />
+                              <style>{`input::placeholder { color: #6B7280; font-style: italic; }`}</style>
+                            </div>
+                            {selectedEns && !showEnseigneDrop && (
+                              <div style={{ marginTop:6, display:"inline-flex", alignItems:"center", gap:6, background:C.blueLight, borderRadius:99, padding:"4px 12px" }}>
+                                <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:800, color:C.blue }}>{selectedEns.name}</span>
+                                <button onMouseDown={()=>{ setSelectedStore("autre"); setEnseigneQuery(""); fetchKnownStores("autre"); }}
+                                  style={{ background:"none", border:"none", cursor:"pointer", fontSize:13, color:C.gray, padding:0, lineHeight:1 }}>✕</button>
                               </div>
-                            ))}
-                          </div>
+                            )}
+                            {showEnseigneDrop && (
+                              <div style={{ position:"absolute", zIndex:50, background:C.white, borderRadius:12, border:`1px solid ${C.grayLight}`, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", width:"100%", maxHeight:220, overflowY:"auto", marginTop:2 }}>
+                                {filtered.map(e=>(
+                                  <div key={e.id} onMouseDown={async()=>{ setSelectedStore(e.id); setStoreNameEdit(e.name); setEnseigneQuery(e.name); setShowEnseigneDrop(false); setShowEnseigneSearch(false); await fetchKnownStores(e.id); }}
+                                    style={{ padding:"11px 14px", display:"flex", alignItems:"center", cursor:"pointer", borderBottom:`1px solid ${C.grayLight}`, background:selectedStore===e.id?"#F0F8FF":C.white }}>
+                                    <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:selectedStore===e.id?900:700, fontSize:14, color:selectedStore===e.id?C.blue:C.text, flex:1 }}>{e.name}</span>
+                                    {selectedStore===e.id && <span style={{ color:C.blue, fontSize:13 }}>✓</span>}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
                     );
@@ -1223,48 +1241,59 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
 
                   {/* Adresse */}
                   <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Adresse (optionnel)</div>
-                  <div style={{ display:"flex", gap:8, marginBottom:10 }}>
-                    <button onClick={()=>{
-                      setGpsLoading(true); setError("");
-                      navigator.geolocation.getCurrentPosition(
-                        async pos => {
-                          const { latitude:lat, longitude:lng } = pos.coords;
-                          setSavedGpsCoords({ lat, lng });
-                          try {
-                            const r = await fetch(`https://api-adresse.data.gouv.fr/reverse/?lon=${lng}&lat=${lat}`);
-                            const d = await r.json();
-                            const f = d.features?.[0]?.properties;
-                            if (f) {
-                              setManualRue((f.housenumber ? f.housenumber + " " : "") + (f.street || f.name || ""));
-                              setManualCP(f.postcode || "");
-                              setManualVille(f.city || f.municipality || "");
-                            }
-                          } catch {}
-                          setShowManualAddress(true);
-                          setGpsLoading(false);
-                        },
-                        () => { setError("Géolocalisation refusée ou indisponible"); setGpsLoading(false); }
-                      );
-                    }} disabled={gpsLoading}
-                      style={{ flex:1, padding:"12px 8px", border:`2px solid ${gpsLoading?"#0066CC":C.grayLight}`, borderRadius:12, background:gpsLoading?"#EEF5FF":C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:"#0066CC", cursor:gpsLoading?"default":"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
-                      📍 GPS
-                    </button>
-                    <button onClick={()=>{
-                      setShowManualAddress(true); setSavedGpsCoords(null);
-                      if (!manualRue && storeLocation) {
-                        const parts = storeLocation.split(',').map(s => s.trim());
-                        setManualRue(parts[0] || '');
-                        const lastPart = parts[parts.length - 1] || '';
-                        const cpMatch = lastPart.match(/(\d{5})/);
-                        setManualCP(cpMatch ? cpMatch[1] : '');
-                        const villeClean = lastPart.replace(/\d{5}/,'').trim();
-                        setManualVille(villeClean.toLowerCase() === 'france' ? '' : villeClean);
-                      }
-                    }}
-                      style={{ flex:1, padding:"12px 8px", border:`2px solid ${showManualAddress&&!savedGpsCoords?C.orange:C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:"#555", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
-                      ✏️ Manuel
-                    </button>
-                  </div>
+                  {storeLocation.trim() && !showManualAddress ? (
+                    <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14, background:C.grayLight, borderRadius:10, padding:"10px 14px" }}>
+                      <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.text, fontWeight:700, flex:1 }}>{storeLocation.trim()}</span>
+                      <button onClick={()=>{
+                        setShowManualAddress(true); setSavedGpsCoords(null);
+                        if (!manualRue) {
+                          const parts = storeLocation.split(',').map(s => s.trim());
+                          setManualRue(parts[0] || '');
+                          let cp = '', ville = '';
+                          for (const part of parts.slice(1)) {
+                            const m = part.match(/(\d{5})/);
+                            if (m) { cp = m[1]; ville = part.replace(/\d{5}/,'').trim(); break; }
+                          }
+                          setManualCP(cp);
+                          setManualVille(ville.toLowerCase() === 'france' ? '' : ville);
+                        }
+                      }} style={{ background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.blue, fontWeight:800, cursor:"pointer", padding:0, flexShrink:0 }}>
+                        ✏️ Modifier
+                      </button>
+                    </div>
+                  ) : !showManualAddress ? (
+                    <div style={{ display:"flex", gap:8, marginBottom:10 }}>
+                      <button onClick={()=>{
+                        setGpsLoading(true); setError("");
+                        navigator.geolocation.getCurrentPosition(
+                          async pos => {
+                            const { latitude:lat, longitude:lng } = pos.coords;
+                            setSavedGpsCoords({ lat, lng });
+                            try {
+                              const r = await fetch(`https://api-adresse.data.gouv.fr/reverse/?lon=${lng}&lat=${lat}`);
+                              const d = await r.json();
+                              const f = d.features?.[0]?.properties;
+                              if (f) {
+                                setManualRue((f.housenumber ? f.housenumber + " " : "") + (f.street || f.name || ""));
+                                setManualCP(f.postcode || "");
+                                setManualVille(f.city || f.municipality || "");
+                              }
+                            } catch {}
+                            setShowManualAddress(true);
+                            setGpsLoading(false);
+                          },
+                          () => { setError("Géolocalisation refusée ou indisponible"); setGpsLoading(false); }
+                        );
+                      }} disabled={gpsLoading}
+                        style={{ flex:1, padding:"12px 8px", border:`2px solid ${gpsLoading?"#0066CC":C.grayLight}`, borderRadius:12, background:gpsLoading?"#EEF5FF":C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:"#0066CC", cursor:gpsLoading?"default":"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
+                        📍 GPS
+                      </button>
+                      <button onClick={()=>{ setShowManualAddress(true); setSavedGpsCoords(null); }}
+                        style={{ flex:1, padding:"12px 8px", border:`2px solid ${C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:"#555", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
+                        ✏️ Manuel
+                      </button>
+                    </div>
+                  ) : null}
                   {gpsLoading && (
                     <div style={{ textAlign:"center", padding:"4px 0 10px", fontFamily:"'Nunito',sans-serif", fontSize:13, color:"#0066CC" }}>⏳ Localisation en cours...</div>
                   )}
@@ -1304,6 +1333,14 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                           setManualGeocoding(false);
                           return;
                         }
+                      }
+                      setManualGeocoding(false);
+                    } else if (!showManualAddress && storeLocation.trim()) {
+                      setManualGeocoding(true); setError("");
+                      const coords = await geocodeAddress(storeLocation.trim());
+                      if (coords) {
+                        const id = await insertStoreInDB(selectedStore, storeLocation.trim(), coords.lat, coords.lng, storeNameEdit.trim()||null);
+                        setResolvedStoreId(id);
                       }
                       setManualGeocoding(false);
                     }
