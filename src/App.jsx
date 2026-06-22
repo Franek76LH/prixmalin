@@ -878,7 +878,11 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   const [manualCP, setManualCP] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [manualVille, setManualVille] = useState('');
-  const [manualGeocoding, setManualGeocoding] = useState(false);
+  const [manualGeocoding,   setManualGeocoding]   = useState(false);
+  const [enseigneQuery,     setEnseigneQuery]     = useState('');
+  const [showEnseigneDrop,  setShowEnseigneDrop]  = useState(false);
+  const [showManualAddress, setShowManualAddress] = useState(false);
+  const [savedGpsCoords,    setSavedGpsCoords]    = useState(null);
   const fileInputRef    = useRef(null);
   const galleryInputRef = useRef(null);
   const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
@@ -1086,7 +1090,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
 
           {status==="store" && result && (
             <>
-              {/* Product count banner */}
+              {/* Banner produits */}
               <div style={{ background:C.blueLight, borderRadius:12, padding:"12px 16px", marginBottom:16 }}>
                 <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:C.blue, marginBottom:4 }}>
                   ✅ {editableProducts.length} produit{editableProducts.length>1?"s":""} détecté{editableProducts.length>1?"s":""}
@@ -1094,196 +1098,229 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                 {result.date && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>📅 {new Date(result.date).toLocaleDateString("fr-FR",{day:"numeric",month:"long",year:"numeric"})}</div>}
               </div>
 
-              {/* Store name */}
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Nom du magasin *</div>
-              {(() => {
-                const suggestions = storeNameEdit.trim().length >= 2
-                  ? STORES.filter(s => s.id !== 'autre' && s.name.toLowerCase().includes(storeNameEdit.trim().toLowerCase()))
-                  : [];
-                return (
-                  <div style={{ position:"relative" }}>
-                    <input value={storeNameEdit} onChange={e=>setStoreNameEdit(e.target.value)}
-                      onFocus={()=>setShowSuggestions(true)}
-                      onBlur={()=>setTimeout(()=>setShowSuggestions(false), 150)}
-                      placeholder="Ex : Intermarché, Lidl..."
-                      style={{ width:"100%", padding:"13px 14px", borderRadius:12, border:`2px solid ${storeNameEdit.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:15, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:14 }} />
-                    {showSuggestions && suggestions.length > 0 && (
-                      <div style={{ position:"absolute", zIndex:50, background:C.white, borderRadius:12, border:`1px solid ${C.grayLight}`, boxShadow:"0 4px 16px rgba(0,0,0,0.1)", width:"100%", marginTop:-10 }}>
-                        {suggestions.map(s => (
-                          <div key={s.id} onMouseDown={()=>{ setStoreNameEdit(s.name); setShowSuggestions(false); fetchKnownStores(s.id); }}
-                            style={{ padding:"12px 14px", display:"flex", gap:10, alignItems:"center", cursor:"pointer" }}>
-                            <span style={{ fontSize:18 }}>{s.logo}</span>
-                            <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{s.name}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-
-              {/* GPS linking section */}
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Localisation du magasin</div>
-
               {knownStoresLoading ? (
-                <div style={{ textAlign:"center", padding:"16px 0", fontFamily:"'Nunito',sans-serif", fontSize:14, color:C.textLight }}>⏳ Recherche des magasins connus...</div>
+                <div style={{ textAlign:"center", padding:"24px 0", fontFamily:"'Nunito',sans-serif", fontSize:14, color:C.textLight }}>⏳ Recherche du magasin...</div>
+
               ) : resolvedStoreId ? (
-                <div style={{ background:"#F0FFF5", borderRadius:12, padding:"12px 14px", marginBottom:12, border:`1.5px solid ${C.green}`, display:"flex", alignItems:"center", gap:10 }}>
-                  <span style={{ fontSize:18 }}>✅</span>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:C.green }}>Magasin lié avec succès</div>
-                    <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight }}>
+                /* ── Cas 1 : magasin reconnu ── */
+                <>
+                  <div style={{ background:"#F0FFF5", borderRadius:14, padding:"16px", marginBottom:20, border:`1.5px solid ${C.green}` }}>
+                    <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.green, marginBottom:4 }}>
+                      ✅ {storeNameEdit || "Magasin reconnu"}
+                    </div>
+                    <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>
                       {knownStores.find(s=>s.id===resolvedStoreId)?.address || "Position GPS enregistrée"}
                     </div>
+                    <button onClick={()=>{ setResolvedStoreId(null); setShowManualAddress(false); setSavedGpsCoords(null); setError(""); }}
+                      style={{ marginTop:8, background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.blue, fontWeight:800, cursor:"pointer", padding:0, textDecoration:"underline" }}>
+                      Changer de magasin
+                    </button>
                   </div>
-                  <button onClick={()=>{ setResolvedStoreId(null); setNewStoreSubMode(null); setManualAddress(''); setError(""); }}
-                    style={{ background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.blue, fontWeight:800, cursor:"pointer", padding:"4px 8px", borderRadius:8, flexShrink:0 }}>
-                    Changer
+                  <button onClick={()=>goToShare()} style={{ width:"100%", padding:"16px", border:"none", borderRadius:12, background:C.orange, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.white, cursor:"pointer", marginBottom:10, boxShadow:"0 6px 20px rgba(204,0,0,0.35)" }}>
+                    Continuer →
                   </button>
-                </div>
+                  <button onClick={()=>setStatus("idle")} style={{ width:"100%", padding:"13px", border:`2px solid ${C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.textLight, cursor:"pointer" }}>
+                    ← Retour
+                  </button>
+                </>
+
               ) : (
+                /* ── Cas 2 : formulaire unifié ── */
                 <>
-                  {/* List of known stores */}
-                  {newStoreSubMode===null && knownStores.length>0 && (
-                    <>
-                      <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:10 }}>
-                        {knownStores.map(s=>{
-                          const isLast = localStorage.getItem(`prixmalin_lastStore_${selectedStore}`)===s.id;
-                          return (
-                            <div key={s.id} onClick={()=>setResolvedStoreId(s.id)}
-                              style={{ borderRadius:12, border:`2px solid ${C.grayLight}`, background:C.white, padding:"12px 14px", cursor:"pointer", display:"flex", alignItems:"center", gap:10 }}>
-                              <div style={{ width:20, height:20, borderRadius:99, border:`2px solid ${C.gray}`, background:C.white, flexShrink:0 }} />
-                              <div style={{ flex:1 }}>
-                                <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:C.text }}>{s.address}</div>
-                                {isLast && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.green, fontWeight:700 }}>Dernier magasin utilisé</div>}
+                  {/* Nom du magasin */}
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Nom du magasin</div>
+                  {(()=>{
+                    const suggestions = storeNameEdit.trim().length >= 2
+                      ? STORES.filter(s => s.id !== 'autre' && s.name.toLowerCase().includes(storeNameEdit.trim().toLowerCase()))
+                      : [];
+                    return (
+                      <div style={{ position:"relative" }}>
+                        <input value={storeNameEdit} onChange={e=>setStoreNameEdit(e.target.value)}
+                          onFocus={()=>setShowSuggestions(true)}
+                          onBlur={()=>setTimeout(()=>setShowSuggestions(false), 150)}
+                          placeholder="Ex : Intermarché Sanary, Lidl..."
+                          style={{ width:"100%", padding:"13px 14px", borderRadius:12, border:`2px solid ${storeNameEdit.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:15, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:14 }} />
+                        {showSuggestions && suggestions.length > 0 && (
+                          <div style={{ position:"absolute", zIndex:50, background:C.white, borderRadius:12, border:`1px solid ${C.grayLight}`, boxShadow:"0 4px 16px rgba(0,0,0,0.1)", width:"100%", marginTop:-10 }}>
+                            {suggestions.map(s => (
+                              <div key={s.id} onMouseDown={()=>{ setStoreNameEdit(s.name); setShowSuggestions(false); fetchKnownStores(s.id); }}
+                                style={{ padding:"12px 14px", display:"flex", gap:10, alignItems:"center", cursor:"pointer" }}>
+                                <span style={{ fontSize:18 }}>{s.logo}</span>
+                                <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{s.name}</span>
                               </div>
-                            </div>
-                          );
-                        })}
+                            ))}
+                          </div>
+                        )}
                       </div>
-                      <button onClick={()=>setNewStoreSubMode('new')}
-                        style={{ width:"100%", padding:"12px", marginBottom:4, border:`2px dashed ${C.gray}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:C.textLight, cursor:"pointer" }}>
-                        ➕ Nouveau magasin / Autre adresse
-                      </button>
-                      <button onClick={()=>goToShare()}
-                        style={{ width:"100%", marginBottom:8, background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.gray, cursor:"pointer", padding:"8px 0", textDecoration:"underline" }}>
-                        Passer — ne pas lier à un magasin
-                      </button>
-                    </>
-                  )}
+                    );
+                  })()}
 
-                  {/* New store: choose method */}
-                  {(newStoreSubMode==='new' || (newStoreSubMode===null && knownStores.length===0)) && (
-                    <>
-                      {knownStores.length===0 && (
-                        <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight, marginBottom:12, fontWeight:600 }}>
-                          Aucun magasin connu pour cette enseigne.
+                  {/* Enseigne */}
+                  {(()=>{
+                    const ENSEIGNES_LIST = [
+                      { id:"lidl",        name:"Lidl"          },
+                      { id:"leclerc",     name:"E.Leclerc"     },
+                      { id:"intermarche", name:"Intermarché"   },
+                      { id:"netto",       name:"Netto"         },
+                      { id:"carrefour",   name:"Carrefour"     },
+                      { id:"franprix",    name:"Franprix"      },
+                      { id:"aldi",        name:"Aldi"          },
+                      { id:"superu",      name:"Super U"       },
+                      { id:"hyperu",      name:"Hyper U"       },
+                      { id:"uexpress",    name:"U Express"     },
+                      { id:"utile",       name:"Utile"         },
+                      { id:"vival",       name:"Vival"         },
+                      { id:"spar",        name:"Spar"          },
+                      { id:"monoprix",    name:"Monoprix"      },
+                      { id:"picard",      name:"Picard"        },
+                      { id:"action",      name:"Action"        },
+                      { id:"casino",      name:"Casino"        },
+                      { id:"simply",      name:"Simply Market" },
+                      { id:"biocbon",     name:"Bio c'Bon"     },
+                      { id:"autre",       name:"Autre"         },
+                    ];
+                    const norm = s => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"");
+                    const filtered = enseigneQuery.trim()
+                      ? ENSEIGNES_LIST.filter(e => norm(e.name).includes(norm(enseigneQuery)))
+                      : ENSEIGNES_LIST;
+                    const selectedEns = ENSEIGNES_LIST.find(e => e.id === selectedStore);
+                    return (
+                      <div style={{ marginBottom:16, position:"relative" }}>
+                        <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Enseigne</div>
+                        <div style={{ position:"relative" }}>
+                          <span style={{ position:"absolute", left:12, top:"50%", transform:"translateY(-50%)", fontSize:16, pointerEvents:"none" }}>🔍</span>
+                          <input
+                            value={enseigneQuery}
+                            onChange={e=>{ setEnseigneQuery(e.target.value); setShowEnseigneDrop(true); }}
+                            onFocus={e=>{ setShowEnseigneDrop(true); e.target.style.borderColor=enseigneQuery.trim()?C.orange:C.grayLight; }}
+                            onBlur={e=>{ setTimeout(()=>setShowEnseigneDrop(false), 150); e.target.style.borderColor=enseigneQuery.trim()?C.orange:C.grayLight; }}
+                            placeholder="Rechercher une enseigne..."
+                            style={{ width:"100%", padding:"11px 14px 11px 38px", borderRadius:10, border:`2px solid ${enseigneQuery.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:14, color:C.text, outline:"none", boxSizing:"border-box" }}
+                          />
+                          <style>{`input::placeholder { color: #6B7280; font-style: italic; }`}</style>
                         </div>
-                      )}
-                      <button onClick={()=>{
-                        setNewStoreSubMode('gps'); setGpsLoading(true); setError("");
-                        navigator.geolocation.getCurrentPosition(
-                          async pos=>{
-                            const {latitude:lat,longitude:lng}=pos.coords;
-                            const id=await insertStoreInDB(selectedStore, "", lat, lng, storeNameEdit.trim()||null);
-                            setResolvedStoreId(id);
-                            setGpsLoading(false);
-                          },
-                          ()=>{ setError("Géolocalisation refusée ou indisponible"); setGpsLoading(false); setNewStoreSubMode('new'); }
-                        );
-                      }} style={{ width:"100%", padding:"14px", marginBottom:10, border:"none", borderRadius:12, background:"#0066CC", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:"white", cursor:"pointer" }}>
-                        📍 Utiliser ma position actuelle
-                      </button>
-                      <button onClick={()=>{
-                        setNewStoreSubMode('manual');
-                        if (storeLocation) {
-                          const parts = storeLocation.split(',').map(s => s.trim());
-                          setManualRue(parts[0] || '');
-                          const lastPart = parts[parts.length - 1] || '';
-                          const cpMatch = lastPart.match(/(\d{5})/);
-                          setManualCP(cpMatch ? cpMatch[1] : '');
-                          const villeClean = lastPart.replace(/\d{5}/,'').trim();
-                          setManualVille(villeClean.toLowerCase() === 'france' ? '' : villeClean);
-                        }
-                      }} style={{ width:"100%", padding:"13px", marginBottom:10, border:`2px solid ${"#0066CC"}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:"#0066CC", cursor:"pointer" }}>
-                        ✍️ Saisir l'adresse manuellement
-                      </button>
-                      {knownStores.length>0 && (
-                        <button onClick={()=>setNewStoreSubMode(null)}
-                          style={{ width:"100%", padding:"11px", marginBottom:8, border:`2px solid ${C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:C.textLight, cursor:"pointer" }}>
-                          ← Retour à la liste
-                        </button>
-                      )}
-                      <button onClick={()=>goToShare()}
-                        style={{ width:"100%", marginBottom:8, background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.gray, cursor:"pointer", padding:"8px 0", textDecoration:"underline" }}>
-                        Passer — ne pas lier à un magasin
-                      </button>
-                    </>
-                  )}
+                        {selectedEns && !showEnseigneDrop && (
+                          <div style={{ marginTop:6, display:"inline-flex", alignItems:"center", gap:6, background:C.blueLight, borderRadius:99, padding:"4px 12px" }}>
+                            <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:800, color:C.blue }}>{selectedEns.name}</span>
+                            <button onMouseDown={()=>{ setSelectedStore("autre"); setEnseigneQuery(""); fetchKnownStores("autre"); }}
+                              style={{ background:"none", border:"none", cursor:"pointer", fontSize:13, color:C.gray, padding:0, lineHeight:1 }}>✕</button>
+                          </div>
+                        )}
+                        {showEnseigneDrop && (
+                          <div style={{ position:"absolute", zIndex:50, background:C.white, borderRadius:12, border:`1px solid ${C.grayLight}`, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", width:"100%", maxHeight:220, overflowY:"auto", marginTop:2 }}>
+                            {filtered.map(e=>(
+                              <div key={e.id} onMouseDown={async()=>{ setSelectedStore(e.id); setStoreNameEdit(e.name); setEnseigneQuery(e.name); setShowEnseigneDrop(false); await fetchKnownStores(e.id); }}
+                                style={{ padding:"11px 14px", display:"flex", alignItems:"center", cursor:"pointer", borderBottom:`1px solid ${C.grayLight}`, background:selectedStore===e.id?"#F0F8FF":C.white }}>
+                                <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:selectedStore===e.id?900:700, fontSize:14, color:selectedStore===e.id?C.blue:C.text, flex:1 }}>{e.name}</span>
+                                {selectedStore===e.id && <span style={{ color:C.blue, fontSize:13 }}>✓</span>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
-                  {/* GPS loading */}
-                  {newStoreSubMode==='gps' && gpsLoading && (
-                    <div style={{ textAlign:"center", padding:"20px 0", fontFamily:"'Nunito',sans-serif", fontSize:14, color:C.textLight }}>⏳ Localisation en cours...</div>
+                  {/* Adresse */}
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Adresse (optionnel)</div>
+                  <div style={{ display:"flex", gap:8, marginBottom:10 }}>
+                    <button onClick={()=>{
+                      setGpsLoading(true); setError("");
+                      navigator.geolocation.getCurrentPosition(
+                        async pos => {
+                          const { latitude:lat, longitude:lng } = pos.coords;
+                          setSavedGpsCoords({ lat, lng });
+                          try {
+                            const r = await fetch(`https://api-adresse.data.gouv.fr/reverse/?lon=${lng}&lat=${lat}`);
+                            const d = await r.json();
+                            const f = d.features?.[0]?.properties;
+                            if (f) {
+                              setManualRue((f.housenumber ? f.housenumber + " " : "") + (f.street || f.name || ""));
+                              setManualCP(f.postcode || "");
+                              setManualVille(f.city || f.municipality || "");
+                            }
+                          } catch {}
+                          setShowManualAddress(true);
+                          setGpsLoading(false);
+                        },
+                        () => { setError("Géolocalisation refusée ou indisponible"); setGpsLoading(false); }
+                      );
+                    }} disabled={gpsLoading}
+                      style={{ flex:1, padding:"12px 8px", border:`2px solid ${gpsLoading?"#0066CC":C.grayLight}`, borderRadius:12, background:gpsLoading?"#EEF5FF":C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:"#0066CC", cursor:gpsLoading?"default":"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
+                      📍 GPS
+                    </button>
+                    <button onClick={()=>{
+                      setShowManualAddress(true); setSavedGpsCoords(null);
+                      if (!manualRue && storeLocation) {
+                        const parts = storeLocation.split(',').map(s => s.trim());
+                        setManualRue(parts[0] || '');
+                        const lastPart = parts[parts.length - 1] || '';
+                        const cpMatch = lastPart.match(/(\d{5})/);
+                        setManualCP(cpMatch ? cpMatch[1] : '');
+                        const villeClean = lastPart.replace(/\d{5}/,'').trim();
+                        setManualVille(villeClean.toLowerCase() === 'france' ? '' : villeClean);
+                      }
+                    }}
+                      style={{ flex:1, padding:"12px 8px", border:`2px solid ${showManualAddress&&!savedGpsCoords?C.orange:C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:"#555", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
+                      ✏️ Manuel
+                    </button>
+                  </div>
+                  {gpsLoading && (
+                    <div style={{ textAlign:"center", padding:"4px 0 10px", fontFamily:"'Nunito',sans-serif", fontSize:13, color:"#0066CC" }}>⏳ Localisation en cours...</div>
                   )}
-
-                  {/* Manual address input */}
-                  {newStoreSubMode==='manual' && (
+                  {showManualAddress && (
                     <>
                       <input value={manualRue} onChange={e=>setManualRue(e.target.value)}
                         placeholder="Rue et numéro"
-                        style={{ width:"100%", padding:"13px 14px", borderRadius:12, border:`2px solid ${manualRue.trim()?C.blue:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:15, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:8 }} />
-                      <div style={{ display:"flex", gap:8, marginBottom:10 }}>
+                        style={{ width:"100%", padding:"11px 14px", borderRadius:10, border:`2px solid ${manualRue.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:14, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:8 }} />
+                      <div style={{ display:"flex", gap:8, marginBottom:16 }}>
                         <input value={manualCP} onChange={e=>setManualCP(e.target.value)}
                           placeholder="Code postal"
-                          style={{ width:"40%", padding:"13px 14px", borderRadius:12, border:`2px solid ${manualCP.trim()?C.blue:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:15, color:C.text, outline:"none", boxSizing:"border-box" }} />
+                          style={{ width:"40%", padding:"11px 14px", borderRadius:10, border:`2px solid ${manualCP.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:14, color:C.text, outline:"none", boxSizing:"border-box" }} />
                         <input value={manualVille} onChange={e=>setManualVille(e.target.value)}
                           placeholder="Ville"
-                          style={{ flex:1, padding:"13px 14px", borderRadius:12, border:`2px solid ${manualVille.trim()?C.blue:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:15, color:C.text, outline:"none", boxSizing:"border-box" }} />
+                          style={{ flex:1, padding:"11px 14px", borderRadius:10, border:`2px solid ${manualVille.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:14, color:C.text, outline:"none", boxSizing:"border-box" }} />
                       </div>
-                      <button disabled={!manualRue.trim()||!manualVille.trim()||manualGeocoding} onClick={async()=>{
-                        const fullAddress = `${manualRue.trim()}, ${manualCP.trim()} ${manualVille.trim()}`.trim();
-                        setManualGeocoding(true); setError("");
-                        const coords=await geocodeAddress(fullAddress);
-                        if(coords){
-                          const id=await insertStoreInDB(selectedStore, fullAddress, coords.lat, coords.lng, storeNameEdit.trim() || null);
-                          setResolvedStoreId(id);
-                        } else {
-                          setError("Adresse introuvable — vérifie et réessaie");
-                        }
-                        setManualGeocoding(false);
-                      }} style={{ width:"100%", padding:"14px", marginBottom:10, border:"none", borderRadius:12, background:!manualRue.trim()||!manualVille.trim()||manualGeocoding?C.grayLight:"#0066CC", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:!manualRue.trim()||!manualVille.trim()||manualGeocoding?C.gray:"white", cursor:!manualRue.trim()||!manualVille.trim()||manualGeocoding?"default":"pointer" }}>
-                        {manualGeocoding?"⏳ Géocodage...":"📍 Valider l'adresse"}
-                      </button>
-                      <button onClick={()=>setNewStoreSubMode('new')}
-                        style={{ width:"100%", padding:"11px", marginBottom:8, border:`2px solid ${C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:C.textLight, cursor:"pointer" }}>
-                        ← Retour
-                      </button>
                     </>
                   )}
 
                   {error && <div style={{ background:"#FEE", borderRadius:10, padding:"10px 14px", marginBottom:12, fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.red, fontWeight:700 }}>⚠️ {error}</div>}
+
+                  <button disabled={!storeNameEdit.trim() || manualGeocoding} onClick={async()=>{
+                    if (showManualAddress && (manualRue.trim() || manualVille.trim())) {
+                      setManualGeocoding(true); setError("");
+                      if (savedGpsCoords) {
+                        const fullAddress = [manualRue.trim(), manualCP.trim(), manualVille.trim()].filter(Boolean).join(', ');
+                        const id = await insertStoreInDB(selectedStore, fullAddress, savedGpsCoords.lat, savedGpsCoords.lng, storeNameEdit.trim()||null);
+                        setResolvedStoreId(id);
+                      } else {
+                        const fullAddress = `${manualRue.trim()}, ${manualCP.trim()} ${manualVille.trim()}`.trim();
+                        const coords = await geocodeAddress(fullAddress);
+                        if (coords) {
+                          const id = await insertStoreInDB(selectedStore, fullAddress, coords.lat, coords.lng, storeNameEdit.trim()||null);
+                          setResolvedStoreId(id);
+                        } else {
+                          setError("Adresse introuvable — vérifie et réessaie");
+                          setManualGeocoding(false);
+                          return;
+                        }
+                      }
+                      setManualGeocoding(false);
+                    }
+                    goToShare();
+                  }}
+                    style={{ width:"100%", padding:"16px", border:"none", borderRadius:12, background:storeNameEdit.trim()&&!manualGeocoding?C.orange:C.grayLight, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:storeNameEdit.trim()&&!manualGeocoding?C.white:C.gray, cursor:storeNameEdit.trim()&&!manualGeocoding?"pointer":"default", marginBottom:12, boxShadow:storeNameEdit.trim()&&!manualGeocoding?"0 6px 20px rgba(204,0,0,0.35)":"none" }}>
+                    {manualGeocoding ? "⏳ Validation..." : "Valider →"}
+                  </button>
+                  <button onClick={()=>goToShare()}
+                    style={{ width:"100%", marginBottom:8, background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.gray, cursor:"pointer", padding:"8px 0", textDecoration:"underline" }}>
+                    Passer — ne pas lier à un magasin
+                  </button>
+                  <button onClick={()=>setStatus("idle")} style={{ width:"100%", padding:"13px", border:`2px solid ${C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.textLight, cursor:"pointer" }}>
+                    ← Retour
+                  </button>
                 </>
               )}
-
-              {/* Enseigne chips — re-fetch on change */}
-              <div style={{ marginBottom:16, marginTop:8 }}>
-                <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Enseigne</div>
-                <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-                  {STORES.map(s=>(
-                    <button key={s.id} onClick={async()=>{ setSelectedStore(s.id); setStoreNameEdit(s.name); await fetchKnownStores(s.id); }}
-                      style={{ padding:"6px 12px", background:selectedStore===s.id?C.blue:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, color:selectedStore===s.id?C.white:C.text, cursor:"pointer" }}>
-                      {s.logo} {s.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <button onClick={()=>goToShare()} disabled={!storeNameEdit.trim()} style={{ width:"100%", padding:"16px", border:"none", borderRadius:12, background:storeNameEdit.trim()?C.orange:C.grayLight, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:storeNameEdit.trim()?C.white:C.gray, cursor:storeNameEdit.trim()?"pointer":"default", marginBottom:10, boxShadow:storeNameEdit.trim()?"0 6px 20px rgba(204,0,0,0.35)":"none" }}>
-                Continuer →
-              </button>
-              <button onClick={()=>setStatus("idle")} style={{ width:"100%", padding:"13px", border:`2px solid ${C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.textLight, cursor:"pointer" }}>
-                ← Retour
-              </button>
             </>
           )}
 
