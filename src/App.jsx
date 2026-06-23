@@ -1503,16 +1503,101 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
   const [brand,   setBrand]   = useState(existingPrice?.brand||"");
   const [product, setProduct] = useState(existingPrice?.product||"");
   const [format,  setFormat]  = useState(existingPrice?.format||"");
-  const [storeId, setStoreId] = useState(existingPrice?.storeId||"");
-  const [storeName, setStoreName] = useState(existingPrice?.store_name || "");
-  const [storeAddress, setStoreAddress] = useState(existingPrice?.store_address || "");
   const [price,   setPrice]   = useState(existingPrice?.price?.toString()||"");
-  const canSubmit = product&&format&&storeId&&price&&!isNaN(parseFloat(price));
+
+  // Sélecteur de magasin (même logique que le flux post-scan #35)
+  const [selectedStore,      setSelectedStore]      = useState(existingPrice?.storeId||"");
+  const [storeNameEdit,      setStoreNameEdit]      = useState(existingPrice?.store_name||"");
+  const [knownStores,        setKnownStores]        = useState([]);
+  const [knownStoresLoading, setKnownStoresLoading] = useState(false);
+  const [resolvedStoreId,    setResolvedStoreId]    = useState(existingPrice?.store_id||null);
+  const [enseigneQuery,      setEnseigneQuery]      = useState('');
+  const [showEnseigneDrop,   setShowEnseigneDrop]   = useState(false);
+  const [showEnseigneSearch, setShowEnseigneSearch] = useState(false);
+  const [showSuggestions,    setShowSuggestions]    = useState(false);
+  const [gpsLoading,         setGpsLoading]         = useState(false);
+  const [showManualAddress,  setShowManualAddress]  = useState(false);
+  const [manualRue,          setManualRue]          = useState('');
+  const [manualCP,           setManualCP]           = useState('');
+  const [manualVille,        setManualVille]        = useState('');
+  const [savedGpsCoords,     setSavedGpsCoords]     = useState(null);
+  const [manualGeocoding,    setManualGeocoding]    = useState(false);
+  const [error,              setError]              = useState('');
+
+  const [productSuggestions, setProductSuggestions] = useState([]);
+  const [showProductDrop,    setShowProductDrop]    = useState(false);
+  const allProductNames = useRef([]);
+
+  useEffect(() => {
+    supabase.from('price_db').select('product').then(({ data }) => {
+      if (data) allProductNames.current = [...new Set(data.map(p => p.product).filter(Boolean))];
+    });
+  }, []);
+
+  const canSubmit = product.trim() && format.trim() && price && !isNaN(parseFloat(price)) && (resolvedStoreId || selectedStore);
+
+  const ENSEIGNES_LIST = [
+    { id:"lidl",        name:"Lidl"          },
+    { id:"leclerc",     name:"E.Leclerc"     },
+    { id:"intermarche", name:"Intermarché"   },
+    { id:"netto",       name:"Netto"         },
+    { id:"carrefour",   name:"Carrefour"     },
+    { id:"franprix",    name:"Franprix"      },
+    { id:"aldi",        name:"Aldi"          },
+    { id:"superu",      name:"Super U"       },
+    { id:"hyperu",      name:"Hyper U"       },
+    { id:"uexpress",    name:"U Express"     },
+    { id:"utile",       name:"Utile"         },
+    { id:"vival",       name:"Vival"         },
+    { id:"spar",        name:"Spar"          },
+    { id:"monoprix",    name:"Monoprix"      },
+    { id:"picard",      name:"Picard"        },
+    { id:"action",      name:"Action"        },
+    { id:"casino",      name:"Casino"        },
+    { id:"simply",      name:"Simply Market" },
+    { id:"biocbon",     name:"Bio c'Bon"     },
+    { id:"autre",       name:"Autre"         },
+  ];
+
+  const fetchKnownStores = async (enseigne) => {
+    if (!enseigne || enseigne === 'autre') { setKnownStores([]); return; }
+    setKnownStoresLoading(true);
+    setResolvedStoreId(null);
+    const { data } = await supabase.from('stores').select('*').eq('enseigne', enseigne);
+    const stores = data || [];
+    setKnownStores(stores);
+    const lastId = localStorage.getItem(`prixmalin_lastStore_${enseigne}`);
+    if (lastId && stores.some(s => s.id === lastId)) setResolvedStoreId(lastId);
+    setKnownStoresLoading(false);
+  };
 
   const submit = () => {
-    if(!canSubmit) return;
-    onSave({ brand:brand.trim(), product:product.trim(), format:format.trim(), storeId, store_name: storeName.trim(), store_address: storeAddress.trim(), price:parseFloat(price), date:new Date().toISOString() });
+    if (!canSubmit || manualGeocoding) return;
+    if (resolvedStoreId && selectedStore && selectedStore !== 'autre') {
+      localStorage.setItem(`prixmalin_lastStore_${selectedStore}`, resolvedStoreId);
+    }
+    const storeRecord = knownStores.find(s => s.id === resolvedStoreId);
+    onSave({
+      brand:         brand.trim(),
+      product:       product.trim(),
+      format:        format.trim(),
+      storeId:       selectedStore || 'autre',
+      store_name:    storeNameEdit.trim(),
+      store_address: storeRecord?.address || '',
+      store_id:      resolvedStoreId,
+      price:         parseFloat(price),
+      date:          new Date().toISOString(),
+    });
     onClose();
+  };
+
+  const norm = s => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"");
+
+  const updateProductSuggestions = (query) => {
+    if (query.trim().length < 2) { setProductSuggestions([]); return; }
+    const q = normName(query);
+    const matches = allProductNames.current.filter(n => normName(n).includes(q)).slice(0, 6);
+    setProductSuggestions(matches);
   };
 
   return (
@@ -1523,49 +1608,43 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
           <button onClick={onClose} style={{ background:"rgba(255,255,255,0.2)", border:"none", borderRadius:99, width:28, height:28, color:C.white, fontSize:14, cursor:"pointer" }}>✕</button>
         </div>
         <div style={{ padding:"20px 20px 44px" }}>
-          {[
-            {label:"Marque (optionnel)", val:brand, set:setBrand, ph:"Ex : Look, Coca-Cola, Président...", required:false},
-            {label:"Produit *",          val:product,set:setProduct,ph:"Ex : Cola Zéro, Lait, Pâtes...",    required:true},
-            {label:"Format *",           val:format, set:setFormat, ph:"Ex : 1L, 1,5L, 500g, 1kg, x6...",  required:true},
-          ].map(f=>(
-            <div key={f.label} style={{ marginBottom:14 }}>
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>{f.label}</div>
-              <input value={f.val} onChange={e=>f.set(e.target.value)} placeholder={f.ph}
-                style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${f.val?(f.required?C.orange:C.blue):C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }} />
-            </div>
-          ))}
-<div style={{ marginBottom:14 }}>
-  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>
-    Nom précis du magasin
-  </div>
-  <input
-    value={storeName}
-    onChange={e=>setStoreName(e.target.value)}
-    placeholder="Ex : Carrefour Marseille B."
-    style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${storeName?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }}
-  />
-</div>
-<div style={{ marginBottom:14 }}>
-  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>
-    Adresse / quartier (optionnel)
-  </div>
-  <input
-    value={storeAddress}
-    onChange={e=>setStoreAddress(e.target.value)}
-    placeholder="Ex : Rue de la Paix, Centre-ville..."
-    style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${storeAddress?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }}
-  />
-</div>
-          <div style={{ marginBottom:14 }}>
-            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Magasin *</div>
-            <div style={{ display:"flex", gap:7, flexWrap:"wrap" }}>
-              {STORES.map(s=>(
-                <button key={s.id} onClick={()=>setStoreId(s.id)} style={{ padding:"7px 12px", background:storeId===s.id?C.blue:C.grayLight, border:"none", borderRadius:10, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, color:storeId===s.id?C.white:C.text, cursor:"pointer" }}>
-                  {s.logo} {s.name}
-                </button>
-              ))}
-            </div>
+
+          {/* Produit * — avec autocomplétion price_db */}
+          <div style={{ marginBottom:14, position:"relative" }}>
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Produit *</div>
+            <input value={product}
+              onChange={e=>{ setProduct(e.target.value); updateProductSuggestions(e.target.value); }}
+              onFocus={()=>{ updateProductSuggestions(product); setShowProductDrop(true); }}
+              onBlur={()=>setTimeout(()=>setShowProductDrop(false), 150)}
+              placeholder="Ex : Cola Zéro, Lait, Pâtes..."
+              style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${product?C.orange:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }} />
+            {showProductDrop && productSuggestions.length > 0 && (
+              <div style={{ position:"absolute", zIndex:50, background:C.white, borderRadius:12, border:`1px solid ${C.grayLight}`, boxShadow:"0 4px 16px rgba(0,0,0,0.1)", width:"100%", marginTop:2 }}>
+                {productSuggestions.map((name, i) => (
+                  <div key={i} onMouseDown={()=>{ setProduct(name); setProductSuggestions([]); setShowProductDrop(false); }}
+                    style={{ padding:"11px 14px", fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:14, color:C.text, cursor:"pointer", borderBottom:i<productSuggestions.length-1?`1px solid ${C.grayLight}`:"none" }}>
+                    {name}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
+
+          {/* Marque (optionnel) */}
+          <div style={{ marginBottom:14 }}>
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Marque (optionnel)</div>
+            <input value={brand} onChange={e=>setBrand(e.target.value)} placeholder="Ex : Look, Coca-Cola, Président..."
+              style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${brand?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }} />
+          </div>
+
+          {/* Format * */}
+          <div style={{ marginBottom:14 }}>
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Format *</div>
+            <input value={format} onChange={e=>setFormat(e.target.value)} placeholder="Ex : 1L, 1,5L, 500g, 1kg, x6..."
+              style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${format?C.orange:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }} />
+          </div>
+
+          {/* Prix */}
           <div style={{ marginBottom:22 }}>
             <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Prix *</div>
             <div style={{ position:"relative" }}>
@@ -1574,7 +1653,215 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
               <span style={{ position:"absolute", right:16, top:"50%", transform:"translateY(-50%)", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:24, color:C.orange }}>€</span>
             </div>
           </div>
-          <button onClick={submit} disabled={!canSubmit} style={{ width:"100%", padding:"16px", border:"none", borderRadius:12, background:canSubmit?C.orange:C.grayLight, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:canSubmit?C.white:C.gray, cursor:canSubmit?"pointer":"default" }}>
+
+          {/* ─── Sélecteur de magasin (même logique que le flux post-scan #35) ─── */}
+          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:10 }}>Magasin *</div>
+
+          {resolvedStoreId ? (
+            /* Magasin résolu */
+            <div style={{ background:"#F0FFF5", borderRadius:14, padding:"14px 16px", marginBottom:16, border:`1.5px solid ${C.green}` }}>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.green, marginBottom:4 }}>
+                ✅ {storeNameEdit || knownStores.find(s=>s.id===resolvedStoreId)?.name || "Magasin reconnu"}
+              </div>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>
+                {knownStores.find(s=>s.id===resolvedStoreId)?.address || "Position GPS enregistrée"}
+              </div>
+              <button onClick={()=>{ setResolvedStoreId(null); setShowManualAddress(false); setSavedGpsCoords(null); setError(""); }}
+                style={{ marginTop:8, background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.blue, fontWeight:800, cursor:"pointer", padding:0, textDecoration:"underline" }}>
+                Changer de magasin
+              </button>
+            </div>
+
+          ) : (
+            <>
+              {/* Nom du magasin avec autocomplétion sur STORES */}
+              {(()=>{
+                const suggestions = storeNameEdit.trim().length >= 2
+                  ? STORES.filter(s => s.id !== 'autre' && s.name.toLowerCase().includes(storeNameEdit.trim().toLowerCase()))
+                  : [];
+                return (
+                  <div style={{ position:"relative", marginBottom:12 }}>
+                    <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:700, color:C.gray, marginBottom:4 }}>Nom du magasin</div>
+                    <input value={storeNameEdit} onChange={e=>setStoreNameEdit(e.target.value)}
+                      onFocus={()=>setShowSuggestions(true)}
+                      onBlur={()=>setTimeout(()=>setShowSuggestions(false), 150)}
+                      placeholder="Ex : Intermarché Sanary, Lidl…"
+                      style={{ width:"100%", padding:"12px 14px", borderRadius:10, border:`2px solid ${storeNameEdit.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, outline:"none", boxSizing:"border-box" }} />
+                    {showSuggestions && suggestions.length > 0 && (
+                      <div style={{ position:"absolute", zIndex:50, background:C.white, borderRadius:12, border:`1px solid ${C.grayLight}`, boxShadow:"0 4px 16px rgba(0,0,0,0.1)", width:"100%", marginTop:2 }}>
+                        {suggestions.map(s => (
+                          <div key={s.id} onMouseDown={()=>{ setStoreNameEdit(s.name); setSelectedStore(s.id); setEnseigneQuery(s.name); setShowEnseigneSearch(false); setShowSuggestions(false); fetchKnownStores(s.id); }}
+                            style={{ padding:"12px 14px", display:"flex", gap:10, alignItems:"center", cursor:"pointer" }}>
+                            <span style={{ fontSize:18 }}>{s.logo}</span>
+                            <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{s.name}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Enseigne avec autocomplétion */}
+              {(()=>{
+                const filtered = enseigneQuery.trim()
+                  ? ENSEIGNES_LIST.filter(e => norm(e.name).includes(norm(enseigneQuery)))
+                  : ENSEIGNES_LIST;
+                const selectedEns = ENSEIGNES_LIST.find(e => e.id === selectedStore);
+                const showSearch = showEnseigneSearch || !selectedEns;
+                return (
+                  <div style={{ marginBottom:12, position:"relative" }}>
+                    <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:700, color:C.gray, marginBottom:4 }}>Enseigne</div>
+                    {selectedEns && !showSearch ? (
+                      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                        <div style={{ display:"inline-flex", alignItems:"center", gap:6, background:C.blueLight, borderRadius:99, padding:"6px 14px" }}>
+                          <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:800, color:C.blue }}>{selectedEns.name}</span>
+                          <button onMouseDown={()=>{ setSelectedStore(""); setEnseigneQuery(""); setShowEnseigneSearch(true); setKnownStores([]); setResolvedStoreId(null); }}
+                            style={{ background:"none", border:"none", cursor:"pointer", fontSize:13, color:C.gray, padding:0, lineHeight:1 }}>✕</button>
+                        </div>
+                        <button onMouseDown={()=>setShowEnseigneSearch(true)}
+                          style={{ background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.blue, fontWeight:700, cursor:"pointer", padding:0, textDecoration:"underline" }}>
+                          Changer
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{ position:"relative" }}>
+                          <span style={{ position:"absolute", left:12, top:"50%", transform:"translateY(-50%)", fontSize:16, pointerEvents:"none" }}>🔍</span>
+                          <input
+                            value={enseigneQuery}
+                            onChange={e=>{ setEnseigneQuery(e.target.value); setShowEnseigneDrop(true); }}
+                            onFocus={()=>setShowEnseigneDrop(true)}
+                            onBlur={()=>setTimeout(()=>setShowEnseigneDrop(false), 150)}
+                            placeholder="Rechercher une enseigne…"
+                            style={{ width:"100%", padding:"11px 14px 11px 38px", borderRadius:10, border:`2px solid ${enseigneQuery.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:14, color:C.text, outline:"none", boxSizing:"border-box" }}
+                          />
+                        </div>
+                        {showEnseigneDrop && (
+                          <div style={{ position:"absolute", zIndex:50, background:C.white, borderRadius:12, border:`1px solid ${C.grayLight}`, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", width:"100%", maxHeight:200, overflowY:"auto", marginTop:2 }}>
+                            {filtered.map(e=>(
+                              <div key={e.id} onMouseDown={async()=>{ setSelectedStore(e.id); setEnseigneQuery(e.name); setShowEnseigneDrop(false); setShowEnseigneSearch(false); if (!storeNameEdit.trim()) setStoreNameEdit(e.name); await fetchKnownStores(e.id); }}
+                                style={{ padding:"10px 14px", display:"flex", alignItems:"center", cursor:"pointer", borderBottom:`1px solid ${C.grayLight}`, background:selectedStore===e.id?"#F0F8FF":C.white }}>
+                                <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:selectedStore===e.id?900:700, fontSize:14, color:selectedStore===e.id?C.blue:C.text, flex:1 }}>{e.name}</span>
+                                {selectedStore===e.id && <span style={{ color:C.blue, fontSize:13 }}>✓</span>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Magasins connus de cette enseigne */}
+              {knownStoresLoading && (
+                <div style={{ textAlign:"center", padding:"12px 0", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>⏳ Recherche du magasin…</div>
+              )}
+              {!knownStoresLoading && knownStores.length > 0 && (
+                <div style={{ marginBottom:12 }}>
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:700, color:C.gray, marginBottom:6 }}>Sélectionne ton magasin</div>
+                  <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                    {knownStores.map(s => (
+                      <button key={s.id} onClick={()=>{ setResolvedStoreId(s.id); if (s.name) setStoreNameEdit(s.name); }}
+                        style={{ padding:"10px 14px", borderRadius:10, border:`2px solid ${resolvedStoreId===s.id?C.green:C.grayLight}`, background:resolvedStoreId===s.id?"#F0FFF5":C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:resolvedStoreId===s.id?C.green:C.text, cursor:"pointer", textAlign:"left" }}>
+                        {s.name || storeNameEdit}
+                        {s.address && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:600, color:C.textLight, marginTop:2 }}>{s.address}</div>}
+                      </button>
+                    ))}
+                  </div>
+                  {!showManualAddress && (
+                    <button onClick={()=>{ setShowManualAddress(true); setSavedGpsCoords(null); }}
+                      style={{ marginTop:8, background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.blue, fontWeight:700, cursor:"pointer", padding:0, textDecoration:"underline" }}>
+                      + Ce magasin n'est pas dans la liste
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Formulaire adresse nouveau magasin */}
+              {!resolvedStoreId && selectedStore && selectedStore !== 'autre' && (knownStores.length === 0 || showManualAddress) && !knownStoresLoading && (
+                <div style={{ marginBottom:10 }}>
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:700, color:C.gray, marginBottom:6 }}>
+                    {knownStores.length === 0 ? "Magasin inconnu — ajoute son adresse" : "Adresse du nouveau magasin"}
+                  </div>
+                  {!showManualAddress ? (
+                    <div style={{ display:"flex", gap:8 }}>
+                      <button onClick={()=>{
+                        setGpsLoading(true); setError("");
+                        navigator.geolocation.getCurrentPosition(
+                          async pos => {
+                            const { latitude:lat, longitude:lng } = pos.coords;
+                            setSavedGpsCoords({ lat, lng });
+                            try {
+                              const r = await fetch(`https://api-adresse.data.gouv.fr/reverse/?lon=${lng}&lat=${lat}`);
+                              const d = await r.json();
+                              const f = d.features?.[0]?.properties;
+                              if (f) {
+                                setManualRue((f.housenumber ? f.housenumber + " " : "") + (f.street || f.name || ""));
+                                setManualCP(f.postcode || "");
+                                setManualVille(f.city || f.municipality || "");
+                              }
+                            } catch {}
+                            setShowManualAddress(true);
+                            setGpsLoading(false);
+                          },
+                          () => { setError("Géolocalisation refusée"); setGpsLoading(false); }
+                        );
+                      }} disabled={gpsLoading}
+                        style={{ flex:1, padding:"11px 8px", border:`2px solid ${C.grayLight}`, borderRadius:10, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:"#0066CC", cursor:gpsLoading?"default":"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:5 }}>
+                        📍 GPS
+                      </button>
+                      <button onClick={()=>{ setShowManualAddress(true); setSavedGpsCoords(null); }}
+                        style={{ flex:1, padding:"11px 8px", border:`2px solid ${C.grayLight}`, borderRadius:10, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:"#555", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:5 }}>
+                        ✏️ Saisir
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <input value={manualRue} onChange={e=>setManualRue(e.target.value)} placeholder="Rue et numéro"
+                        style={{ width:"100%", padding:"10px 14px", borderRadius:10, border:`2px solid ${manualRue.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:13, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:6 }} />
+                      <div style={{ display:"flex", gap:8, marginBottom:8 }}>
+                        <input value={manualCP} onChange={e=>setManualCP(e.target.value)} placeholder="Code postal"
+                          style={{ width:"40%", padding:"10px 14px", borderRadius:10, border:`2px solid ${manualCP.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:13, color:C.text, outline:"none", boxSizing:"border-box" }} />
+                        <input value={manualVille} onChange={e=>setManualVille(e.target.value)} placeholder="Ville"
+                          style={{ flex:1, padding:"10px 14px", borderRadius:10, border:`2px solid ${manualVille.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:13, color:C.text, outline:"none", boxSizing:"border-box" }} />
+                      </div>
+                      {(manualRue.trim() || manualVille.trim()) && (
+                        <button disabled={manualGeocoding} onClick={async()=>{
+                          setManualGeocoding(true); setError("");
+                          try {
+                            let lat, lng;
+                            if (savedGpsCoords) { lat = savedGpsCoords.lat; lng = savedGpsCoords.lng; }
+                            else {
+                              const fullAddr = [manualRue.trim(), manualCP.trim(), manualVille.trim()].filter(Boolean).join(', ');
+                              const coords = await geocodeAddress(fullAddr);
+                              if (!coords) { setError("Adresse introuvable — vérifie et réessaie"); setManualGeocoding(false); return; }
+                              lat = coords.lat; lng = coords.lng;
+                            }
+                            const fullAddr = [manualRue.trim(), manualCP.trim(), manualVille.trim()].filter(Boolean).join(', ');
+                            const id = await insertStoreInDB(selectedStore, fullAddr, lat, lng, storeNameEdit.trim()||null);
+                            if (id) { setResolvedStoreId(id); setKnownStores(prev=>[...prev, { id, address: fullAddr, name: storeNameEdit }]); }
+                            else setError("Impossible d'enregistrer le magasin");
+                          } catch { setError("Erreur lors de l'enregistrement"); }
+                          setManualGeocoding(false);
+                        }}
+                          style={{ width:"100%", padding:"11px", border:"none", borderRadius:10, background:manualGeocoding?C.grayLight:"#4A90D9", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, color:manualGeocoding?C.gray:"#fff", cursor:manualGeocoding?"default":"pointer", marginBottom:6 }}>
+                          {manualGeocoding ? "⏳ Enregistrement…" : "📍 Valider et lier ce magasin"}
+                        </button>
+                      )}
+                    </>
+                  )}
+                  {gpsLoading && <div style={{ textAlign:"center", padding:"4px 0 6px", fontFamily:"'Nunito',sans-serif", fontSize:12, color:"#0066CC" }}>⏳ Localisation…</div>}
+                </div>
+              )}
+
+              {error && <div style={{ background:"#FEE", borderRadius:10, padding:"10px 14px", marginBottom:10, fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.red, fontWeight:700 }}>⚠️ {error}</div>}
+            </>
+          )}
+
+          <button onClick={submit} disabled={!canSubmit || manualGeocoding}
+            style={{ width:"100%", padding:"16px", border:"none", borderRadius:12, background:canSubmit&&!manualGeocoding?C.orange:C.grayLight, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:canSubmit&&!manualGeocoding?C.white:C.gray, cursor:canSubmit&&!manualGeocoding?"pointer":"default", marginTop:8 }}>
             💾 Enregistrer ce prix
           </button>
         </div>
