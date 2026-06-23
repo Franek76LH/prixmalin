@@ -3396,6 +3396,8 @@ export default function App() {
   const [showRating,  setShowRating]  = useState(null);
   const [favorites, setFavorites] = useState([]);
   const [loaded, setLoaded]       = useState(false);
+  const [loadError, setLoadError] = useState(null);
+  const [loadRetry, setLoadRetry] = useState(0);
   const [produitsRef, setProduitsRef] = useState([]);
   const [circles,    setCircles]    = useState([]);
   const [autoOpenCamera, setAutoOpenCamera] = useState(false);
@@ -3455,6 +3457,7 @@ export default function App() {
   useEffect(()=>{
     if (!session) return;
     setLoaded(false);
+    setLoadError(null);
     (async ()=>{
       try {
         const [list, prices, arcs, favs, refs, circs, prof] = await Promise.all([
@@ -3510,10 +3513,13 @@ export default function App() {
         } else {
           setCguAcceptedAt(cguAt);
         }
-      } catch(e){ console.log("Supabase load:", e); }
-      setLoaded(true);
+        setLoaded(true);
+      } catch(e){
+        console.error("Supabase load:", e);
+        setLoadError("Impossible de charger tes données. Vérifie ta connexion.");
+      }
     })();
-  },[session]);
+  },[session, loadRetry]);
 
   const saveItems = async (v) => {
     setItems(v);
@@ -3829,8 +3835,17 @@ export default function App() {
         <div style={{ paddingTop: tab === "home" ? 0 : 4 }}>
           {!loaded && (
             <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", height:200, gap:16 }}>
-              <div style={{ width:40, height:40, border:"4px solid #EFEFEF", borderTopColor:"#CC0000", borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:14, color:"#999" }}>Chargement...</div>
+              {loadError ? (
+                <>
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:14, color:"#CC0000", textAlign:"center", padding:"0 24px" }}>{loadError}</div>
+                  <button onClick={() => setLoadRetry(r => r + 1)} style={{ padding:"10px 24px", background:"#CC0000", color:"#fff", border:"none", borderRadius:8, fontFamily:"'Nunito',sans-serif", fontSize:14, cursor:"pointer" }}>Réessayer</button>
+                </>
+              ) : (
+                <>
+                  <div style={{ width:40, height:40, border:"4px solid #EFEFEF", borderTopColor:"#CC0000", borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:14, color:"#999" }}>Chargement...</div>
+                </>
+              )}
             </div>
           )}
           {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircle(true)} onFlash={handleFlash} archives={archives} pseudo={pseudo}/>}
