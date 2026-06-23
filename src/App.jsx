@@ -1968,7 +1968,7 @@ function EditItemSheet({ item, onClose, onSave }) {
 }
 
 // ── LIST TAB ──────────────────────────────────────────────────────────────────
-function ListTab({ items, setItems, setTab, favorites, saveFavorites }) {
+function ListTab({ items, setItems, setTab, favorites, saveFavorites, searchRadius, setSearchRadius }) {
   const [showAdd,      setShowAdd]      = useState(false);
   const [showFavModal, setShowFavModal] = useState(false);
   const [editItem,     setEditItem]     = useState(null);
@@ -2047,6 +2047,19 @@ function ListTab({ items, setItems, setTab, favorites, saveFavorites }) {
             {checked.map(item=><ItemRow key={item.id} item={item} done={true}/>)}
           </div>
         </>
+      )}
+      {items.length>=1 && (
+        <div style={{ display:"flex", gap:6, marginBottom:10, overflowX:"auto" }}>
+          {[2,5,10,20,50,100].map(r=>(
+            <button key={r} onClick={()=>setSearchRadius(r)} style={{
+              padding:"6px 14px", borderRadius:20, border:"none", cursor:"pointer",
+              fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:13,
+              background: searchRadius===r ? "#CC0000" : "#f0f0f0",
+              color: searchRadius===r ? "#fff" : "#333",
+              whiteSpace:"nowrap", flexShrink:0
+            }}>{r} km</button>
+          ))}
+        </div>
       )}
       {items.length>=1 && (
         <button onClick={()=>setTab("compare")} style={{ width:"100%", padding:"15px", marginBottom:10, background:"linear-gradient(135deg,#CC0000,#FF1A1A)", border:"none", borderRadius:14, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 6px 20px rgba(180,0,0,0.45)" }}>
@@ -2598,8 +2611,33 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
 }
 
 // ── COMPARE TAB ───────────────────────────────────────────────────────────────
-function CompareTab({ items, priceDB, onValidate }) {
+function distanceKm(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const dLat = (lat2-lat1)*Math.PI/180;
+  const dLng = (lng2-lng1)*Math.PI/180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+  return R * 2 * Math.asin(Math.sqrt(a));
+}
+
+function CompareTab({ items, priceDB, onValidate, searchRadius }) {
   const F = "'Nunito',sans-serif";
+
+  const [userPos, setUserPos] = useState(null);
+  const [gpsError, setGpsError] = useState(false);
+  const [storesGeo, setStoresGeo] = useState([]);
+
+  useEffect(()=>{
+    // Charger les magasins avec coordonnées GPS
+    supabase.from('stores').select('id, name, enseigne, latitude, longitude')
+      .then(({data})=> setStoresGeo(data || []));
+
+    // Demander la position GPS de l'utilisateur
+    if(!navigator.geolocation){ setGpsError(true); return; }
+    navigator.geolocation.getCurrentPosition(
+      pos => setUserPos({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      ()  => setGpsError(true)
+    );
+  }, []);
 
   if(items.length===0) return (
     <div style={{ padding:"40px 20px 100px", textAlign:"center" }}>
@@ -2622,15 +2660,31 @@ function CompareTab({ items, priceDB, onValidate }) {
 
   const storeTotals = useMemo(()=>{
     const totals={};
-    STORES.forEach(s=>{ totals[s.id]={total:0,found:0,missing:[]}; });
+
+    // Filtrer les magasins selon le rayon si GPS disponible
+    const storesInRange = userPos
+      ? storesGeo.filter(s => {
+          if(!s.latitude || !s.longitude) return true;
+          return distanceKm(userPos.lat, userPos.lng, s.latitude, s.longitude) <= searchRadius;
+        })
+      : storesGeo;
+
+    // Fallback : si storesGeo pas encore chargé, utiliser toutes les enseignes
+    const activeStores = storesGeo.length === 0
+      ? STORES
+      : STORES.filter(s =>
+          storesInRange.some(sg => sg.enseigne === s.id || sg.enseigne === s.id.replace('superu','systemu'))
+        );
+
+    activeStores.forEach(s=>{ totals[s.id]={total:0,found:0,missing:[]}; });
     analysis.forEach(({item,byStore})=>{
-      STORES.forEach(s=>{
+      activeStores.forEach(s=>{
         if(byStore[s.id]){ totals[s.id].total+=byStore[s.id].price*item.qty; totals[s.id].found+=1; }
         else              { totals[s.id].missing.push(item.product); }
       });
     });
     return totals;
-  },[analysis]);
+  },[analysis, userPos, searchRadius, storesGeo]);
 
   const ranked          = STORES.map(s=>({...s,...storeTotals[s.id]})).filter(s=>s.found>0).sort((a,b)=>b.found!==a.found?b.found-a.found:a.total-b.total);
   const best            = ranked[0];
@@ -3339,6 +3393,7 @@ export default function App() {
   const [tab, setTab]           = useState("home");
   const [items, setItems]       = useState([]);
   const [priceDB, setPriceDB]     = useState([]);
+  const [searchRadius, setSearchRadius] = useState(10);
   const [archives, setArchives]   = useState([]);
   const [storeRatings, setStoreRatings] = useState({});
   const [showSuccess, setShowSuccess] = useState(null);
@@ -3783,9 +3838,9 @@ export default function App() {
             </div>
           )}
           {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircle(true)} onFlash={handleFlash} archives={archives} pseudo={pseudo}/>}
-          {loaded && tab==="list"      && <ListTab      items={items} setItems={saveItems} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites}/>}
+          {loaded && tab==="list"      && <ListTab      items={items} setItems={saveItems} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} searchRadius={searchRadius} setSearchRadius={setSearchRadius}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} setItems={saveItems} setTab={setTab} catalog={catalog} priceDB={priceDB}/>}
-          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate}/>}
+          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius}/>}
           {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;
             const {data,error}=await supabase.from('archives').insert({...rest,user_id:session?.user?.id}).select('id').single();
