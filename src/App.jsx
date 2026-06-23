@@ -974,11 +974,8 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   };
 
   const goToShare = (products) => {
-    console.log("[goToShare] products arg:", products);
-    console.log("[goToShare] editableProducts state:", editableProducts);
     const list = products || editableProducts;
     const ids = new Set(list.filter(p => p.keep && p.name && p.price > 0).map(p => p.id));
-    console.log("[goToShare] list après filtre — ids:", [...ids]);
     setShareChecked(ids);
     setStatus("share");
   };
