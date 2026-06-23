@@ -886,7 +886,6 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   const [savedGpsCoords,    setSavedGpsCoords]    = useState(null);
   const fileInputRef    = useRef(null);
   const galleryInputRef = useRef(null);
-  const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
 
   useEffect(() => {
     if (!(scanning || galleryScanning)) return;
@@ -1013,7 +1012,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                 setScanning(true); setError("");
                 try {
                   const base64 = await imageFileToJpegBase64(file);
-                  const parsed = await scanTicketWithClaude(base64, apiKey, refProducts);
+                  const parsed = await scanTicketWithClaude(base64, refProducts);
                   const enseigne = storeIdFromName(parsed.store);
                   setResult(parsed); setSelectedStore(enseigne);
                   setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true})));
@@ -1032,7 +1031,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                 setGalleryScanning(true); setError("");
                 try {
                   const base64 = await imageFileToJpegBase64(file);
-                  const parsed = await scanTicketWithClaude(base64, apiKey, refProducts);
+                  const parsed = await scanTicketWithClaude(base64, refProducts);
                   const enseigne = storeIdFromName(parsed.store);
                   setResult(parsed); setSelectedStore(enseigne);
                   setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true, share:true})));
@@ -1064,7 +1063,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                 setScanning(true); setError("");
                 try {
                   const base64 = await imageFileToJpegBase64(file);
-                  const parsed = await scanTicketWithClaude(base64, apiKey, refProducts);
+                  const parsed = await scanTicketWithClaude(base64, refProducts);
                   const enseigne = storeIdFromName(parsed.store);
                   setResult(parsed); setSelectedStore(enseigne);
                   setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true})));
