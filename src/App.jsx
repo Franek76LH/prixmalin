@@ -71,6 +71,40 @@ function fmtUnitPrice(price, format) {
   const up = calcUnitPrice(price, format);
   return up ? `${up.value.toFixed(2).replace('.',',')} €/${up.unit}` : null;
 }
+function parseFormat(format) {
+  if (!format) return { quantite: null, unite: null, conditionnement: 1 };
+  const s = format.trim();
+
+  // NxMunit — "4x100g", "6x1l"
+  let m = s.match(/^(\d+)[xX](\d+(?:[.,]\d+)?)\s*(g|kg|cl|ml|l)$/i);
+  if (m) return {
+    conditionnement: parseInt(m[1]),
+    quantite:        parseFloat(m[2].replace(',', '.')),
+    unite:           m[3].toLowerCase(),
+  };
+
+  // Nunit — "220g", "1,5L", "0.314 kg"
+  m = s.match(/^(\d+(?:[.,]\d+)?)\s*(g|kg|cl|ml|l)$/i);
+  if (m) return {
+    quantite:        parseFloat(m[1].replace(',', '.')),
+    unite:           m[2].toLowerCase(),
+    conditionnement: 1,
+  };
+
+  // "7 pièces"
+  m = s.match(/^(\d+)\s*pièces?$/i);
+  if (m) return { quantite: 1, unite: 'pièce', conditionnement: parseInt(m[1]) };
+
+  // "x40"
+  m = s.match(/^[xX](\d+)$/);
+  if (m) return { quantite: 1, unite: 'pièce', conditionnement: parseInt(m[1]) };
+
+  // "12x"
+  m = s.match(/^(\d+)[xX]$/);
+  if (m) return { quantite: 1, unite: 'pièce', conditionnement: parseInt(m[1]) };
+
+  return { quantite: null, unite: null, conditionnement: 1 };
+}
 const MOIS=['jan.','fév.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'];
 function formatMonth(yyyymm){ if(!yyyymm) return ''; const [y,m]=yyyymm.split('-'); return `${MOIS[parseInt(m)-1]} ${y}`; }
 
@@ -3459,6 +3493,7 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash
   const avatarBg  = ["#E5181B","#F5C200","#00B341","#4A90D9","#8E44AD"];
   const scannedArchives = archives.filter(a => a.ticket_scanned && a.realized_saving != null);
   const cagnotteTotal   = scannedArchives.reduce((a, arc) => a + (arc.realized_saving || 0), 0);
+  const potentialTotal  = archives.reduce((a, arc) => a + (arc.potential_saving || 0), 0);
 
   const NavBtn = ({ label, icon, target, style = {} }) => (
     <button onClick={() => setTab(target)} style={{
@@ -3519,8 +3554,20 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash
         </div>
       </div>
 
+      <div style={{margin:'10px 40px', padding:'8px 16px', background:'rgba(0,140,60,0.58)', borderRadius:12, display:'flex', justifyContent:'space-around', alignItems:'center', position:'relative', zIndex:10}}>
+        <div style={{display:'flex', alignItems:'center', gap:6}}>
+          <span style={{fontSize:'14px', color:'rgba(255,255,255,0.85)'}}>💰 Estimées</span>
+          <span style={{fontSize:'18px', fontWeight:'bold', color:'white'}}>{potentialTotal >= 0 ? "+" : ""}{potentialTotal.toFixed(2)} €</span>
+        </div>
+        <div style={{width:1, height:20, background:'rgba(255,255,255,0.3)'}}/>
+        <div style={{display:'flex', alignItems:'center', gap:6}}>
+          <span style={{fontSize:'14px', color:'rgba(255,255,255,0.85)'}}>✅ Confirmées</span>
+          <span style={{fontSize:'18px', fontWeight:'bold', color:'white'}}>{cagnotteTotal >= 0 ? "+" : ""}{cagnotteTotal.toFixed(2)} €</span>
+        </div>
+      </div>
+
       {/* ── Navigation circulaire ── */}
-      <div style={{ flex:1, display:"flex", alignItems:"flex-start", justifyContent:"center", position:"relative", zIndex:10, paddingTop:24 }}>
+      <div style={{ flex:1, display:"flex", alignItems:"flex-start", justifyContent:"center", position:"relative", zIndex:10, paddingTop:8 }}>
         <div style={{ position:"relative", width:300, height:290 }}>
 
           {/* Catalogue — bas centre */}
@@ -3553,17 +3600,6 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash
 
         </div>
       </div>
-
-      {scannedArchives.length > 0 && (
-        <div style={{ padding:"0 20px 12px", position:"relative", zIndex:10 }}>
-          <div style={{ background:"rgba(0,140,60,0.58)", borderRadius:14, padding:"8px 14px", display:"flex", alignItems:"baseline", gap:6 }}>
-            <div style={{ fontFamily:F, fontSize:10, fontWeight:800, color:"rgba(255,255,255,0.85)", textTransform:"uppercase", letterSpacing:"0.06em" }}>Cagnotte PrixMalin :</div>
-            <div style={{ fontFamily:F, fontWeight:900, fontSize:20, color:C.white, lineHeight:1 }}>
-              {cagnotteTotal >= 0 ? "+" : ""}{cagnotteTotal.toFixed(2)} €
-            </div>
-          </div>
-        </div>
-      )}
 
     </div>
   );
@@ -3823,6 +3859,7 @@ export default function App() {
       date:          p.date || new Date().toISOString(),
       category:      p.category || guessCategory(p.product),
       user_id:       session?.user?.id,
+      ...parseFormat(p.format),
     }));
 
     const { error } = await supabase
