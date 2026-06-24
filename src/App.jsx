@@ -3942,6 +3942,7 @@ export default function App() {
     const { data, error } = await supabase.from('circles').insert({
       requester_id: session.user.id,
       recipient_id: found.id,
+      requester_email: session.user.email,
     }).select().single();
 
     if (error) return { error: error.message };
