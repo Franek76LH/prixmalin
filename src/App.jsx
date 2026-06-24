@@ -105,6 +105,18 @@ function parseFormat(format) {
 
   return { quantite: null, unite: null, conditionnement: 1 };
 }
+function calcPrixUnitaire(price, quantite, unite, conditionnement) {
+  if (!price || !quantite || !unite) return null;
+  const q = quantite * conditionnement;
+  let pu = null;
+  if (unite === 'g')           pu = price / (q / 1000);
+  else if (unite === 'kg')     pu = price / q;
+  else if (unite === 'cl')     pu = price / (q / 100);
+  else if (unite === 'ml')     pu = price / (q / 1000);
+  else if (unite === 'l')      pu = price / q;
+  else if (unite === 'pièce')  pu = price / conditionnement;
+  return pu !== null ? Math.round(pu * 100) / 100 : null;
+}
 const MOIS=['jan.','fév.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'];
 function formatMonth(yyyymm){ if(!yyyymm) return ''; const [y,m]=yyyymm.split('-'); return `${MOIS[parseInt(m)-1]} ${y}`; }
 
@@ -3860,6 +3872,7 @@ export default function App() {
       category:      p.category || guessCategory(p.product),
       user_id:       session?.user?.id,
       ...parseFormat(p.format),
+      prix_unitaire: (() => { const { quantite, unite, conditionnement } = parseFormat(p.format); return calcPrixUnitaire(parseFloat(p.price), quantite, unite, conditionnement); })(),
     }));
 
     const { error } = await supabase
