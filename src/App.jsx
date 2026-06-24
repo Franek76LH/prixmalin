@@ -1515,6 +1515,7 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
   const [showEnseigneDrop,   setShowEnseigneDrop]   = useState(false);
   const [showEnseigneSearch, setShowEnseigneSearch] = useState(false);
   const [showSuggestions,    setShowSuggestions]    = useState(false);
+  const [showAddressSection, setShowAddressSection] = useState(false);
   const [gpsLoading,         setGpsLoading]         = useState(false);
   const [showManualAddress,  setShowManualAddress]  = useState(false);
   const [manualRue,          setManualRue]          = useState('');
@@ -1527,10 +1528,17 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
   const [productSuggestions, setProductSuggestions] = useState([]);
   const [showProductDrop,    setShowProductDrop]    = useState(false);
   const allProductNames = useRef([]);
+  const allStores = useRef([]);
 
   useEffect(() => {
     supabase.from('price_db').select('product').then(({ data }) => {
       if (data) allProductNames.current = [...new Set(data.map(p => p.product).filter(Boolean))];
+    });
+  }, []);
+
+  useEffect(() => {
+    supabase.from('stores').select('id, name, enseigne, address').then(({ data }) => {
+      if (data) allStores.current = data;
     });
   }, []);
 
@@ -1674,85 +1682,62 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
 
           ) : (
             <>
-              {/* Nom du magasin avec autocomplétion sur STORES */}
+              {/* Nom du magasin : autocomplétion ENSEIGNES_LIST + table stores */}
               {(()=>{
+                const q = normName(storeNameEdit.trim());
                 const suggestions = storeNameEdit.trim().length >= 2
-                  ? STORES.filter(s => s.id !== 'autre' && s.name.toLowerCase().includes(storeNameEdit.trim().toLowerCase()))
+                  ? [
+                      ...ENSEIGNES_LIST
+                        .filter(e => e.id !== 'autre' && normName(e.name).includes(q))
+                        .map(e => ({ type:'enseigne', id:e.id, name:e.name, logo:STORES.find(s=>s.id===e.id)?.logo||'🏪', address:null, enseigne:e.id })),
+                      ...allStores.current
+                        .filter(s => normName(s.name||'').includes(q))
+                        .map(s => ({ type:'store', id:s.id, name:s.name, logo:STORES.find(st=>st.id===s.enseigne)?.logo||'🏪', address:s.address, enseigne:s.enseigne })),
+                    ].slice(0, 8)
                   : [];
                 return (
                   <div style={{ position:"relative", marginBottom:12 }}>
                     <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:700, color:C.gray, marginBottom:4 }}>Nom du magasin</div>
-                    <input value={storeNameEdit} onChange={e=>setStoreNameEdit(e.target.value)}
+                    <input value={storeNameEdit} onChange={e=>{ setStoreNameEdit(e.target.value); setShowSuggestions(true); }}
                       onFocus={()=>setShowSuggestions(true)}
                       onBlur={()=>setTimeout(()=>setShowSuggestions(false), 150)}
                       placeholder="Ex : Intermarché Sanary, Lidl…"
                       style={{ width:"100%", padding:"12px 14px", borderRadius:10, border:`2px solid ${storeNameEdit.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, outline:"none", boxSizing:"border-box" }} />
                     {showSuggestions && suggestions.length > 0 && (
-                      <div style={{ position:"absolute", zIndex:50, background:C.white, borderRadius:12, border:`1px solid ${C.grayLight}`, boxShadow:"0 4px 16px rgba(0,0,0,0.1)", width:"100%", marginTop:2 }}>
-                        {suggestions.map(s => (
-                          <div key={s.id} onMouseDown={()=>{ setStoreNameEdit(s.name); setSelectedStore(s.id); setEnseigneQuery(s.name); setShowEnseigneSearch(false); setShowSuggestions(false); fetchKnownStores(s.id); }}
-                            style={{ padding:"12px 14px", display:"flex", gap:10, alignItems:"center", cursor:"pointer" }}>
-                            <span style={{ fontSize:18 }}>{s.logo}</span>
-                            <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{s.name}</span>
-                          </div>
-                        ))}
+                      <div style={{ position:"absolute", zIndex:50, background:C.white, borderRadius:12, border:`1px solid ${C.grayLight}`, boxShadow:"0 4px 16px rgba(0,0,0,0.1)", width:"100%", marginTop:2, overflow:"hidden" }}>
+                        <div style={{ maxHeight:200, overflowY:"auto" }}>
+                          {suggestions.map((s, i) => (
+                            <div key={i} onMouseDown={()=>{
+                              setStoreNameEdit(s.name);
+                              setShowSuggestions(false);
+                              if (s.type === 'store') {
+                                setResolvedStoreId(s.id);
+                                setSelectedStore(s.enseigne);
+                                setEnseigneQuery(ENSEIGNES_LIST.find(e=>e.id===s.enseigne)?.name || s.enseigne);
+                                setShowEnseigneSearch(false);
+                                setKnownStores(prev => prev.some(k=>k.id===s.id) ? prev : [...prev, s]);
+                              } else {
+                                setSelectedStore(s.id);
+                                setEnseigneQuery(s.name);
+                                setShowEnseigneSearch(false);
+                                fetchKnownStores(s.id);
+                              }
+                            }}
+                              style={{ padding:"12px 14px", display:"flex", gap:10, alignItems:"center", cursor:"pointer", borderBottom:`1px solid ${C.grayLight}` }}>
+                              <span style={{ fontSize:18 }}>{s.logo}</span>
+                              <div>
+                                <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{s.name}</div>
+                                {s.address && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight }}>{s.address}</div>}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>
                 );
               })()}
 
-              {/* Enseigne avec autocomplétion */}
-              {(()=>{
-                const filtered = enseigneQuery.trim()
-                  ? ENSEIGNES_LIST.filter(e => norm(e.name).includes(norm(enseigneQuery)))
-                  : ENSEIGNES_LIST;
-                const selectedEns = ENSEIGNES_LIST.find(e => e.id === selectedStore);
-                const showSearch = showEnseigneSearch || !selectedEns;
-                return (
-                  <div style={{ marginBottom:12, position:"relative" }}>
-                    <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:700, color:C.gray, marginBottom:4 }}>Enseigne</div>
-                    {selectedEns && !showSearch ? (
-                      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                        <div style={{ display:"inline-flex", alignItems:"center", gap:6, background:C.blueLight, borderRadius:99, padding:"6px 14px" }}>
-                          <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:800, color:C.blue }}>{selectedEns.name}</span>
-                          <button onMouseDown={()=>{ setSelectedStore(""); setEnseigneQuery(""); setShowEnseigneSearch(true); setKnownStores([]); setResolvedStoreId(null); }}
-                            style={{ background:"none", border:"none", cursor:"pointer", fontSize:13, color:C.gray, padding:0, lineHeight:1 }}>✕</button>
-                        </div>
-                        <button onMouseDown={()=>setShowEnseigneSearch(true)}
-                          style={{ background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.blue, fontWeight:700, cursor:"pointer", padding:0, textDecoration:"underline" }}>
-                          Changer
-                        </button>
-                      </div>
-                    ) : (
-                      <>
-                        <div style={{ position:"relative" }}>
-                          <span style={{ position:"absolute", left:12, top:"50%", transform:"translateY(-50%)", fontSize:16, pointerEvents:"none" }}>🔍</span>
-                          <input
-                            value={enseigneQuery}
-                            onChange={e=>{ setEnseigneQuery(e.target.value); setShowEnseigneDrop(true); }}
-                            onFocus={()=>setShowEnseigneDrop(true)}
-                            onBlur={()=>setTimeout(()=>setShowEnseigneDrop(false), 150)}
-                            placeholder="Rechercher une enseigne…"
-                            style={{ width:"100%", padding:"11px 14px 11px 38px", borderRadius:10, border:`2px solid ${enseigneQuery.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:14, color:C.text, outline:"none", boxSizing:"border-box" }}
-                          />
-                        </div>
-                        {showEnseigneDrop && (
-                          <div style={{ position:"absolute", zIndex:50, background:C.white, borderRadius:12, border:`1px solid ${C.grayLight}`, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", width:"100%", maxHeight:200, overflowY:"auto", marginTop:2 }}>
-                            {filtered.map(e=>(
-                              <div key={e.id} onMouseDown={async()=>{ setSelectedStore(e.id); setEnseigneQuery(e.name); setShowEnseigneDrop(false); setShowEnseigneSearch(false); if (!storeNameEdit.trim()) setStoreNameEdit(e.name); await fetchKnownStores(e.id); }}
-                                style={{ padding:"10px 14px", display:"flex", alignItems:"center", cursor:"pointer", borderBottom:`1px solid ${C.grayLight}`, background:selectedStore===e.id?"#F0F8FF":C.white }}>
-                                <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:selectedStore===e.id?900:700, fontSize:14, color:selectedStore===e.id?C.blue:C.text, flex:1 }}>{e.name}</span>
-                                {selectedStore===e.id && <span style={{ color:C.blue, fontSize:13 }}>✓</span>}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </div>
-                );
-              })()}
 
               {/* Magasins connus de cette enseigne */}
               {knownStoresLoading && (
@@ -1770,17 +1755,17 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
                       </button>
                     ))}
                   </div>
-                  {!showManualAddress && (
-                    <button onClick={()=>{ setShowManualAddress(true); setSavedGpsCoords(null); }}
-                      style={{ marginTop:8, background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.blue, fontWeight:700, cursor:"pointer", padding:0, textDecoration:"underline" }}>
-                      + Ce magasin n'est pas dans la liste
+                  {!showAddressSection && (
+                    <button onClick={()=>{ setShowAddressSection(true); setShowManualAddress(false); setSavedGpsCoords(null); }}
+                      style={{ marginTop:8, background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.blue, fontWeight:800, cursor:"pointer", padding:0, textDecoration:"underline" }}>
+                      ➕ Ajouter une nouvelle adresse
                     </button>
                   )}
                 </div>
               )}
 
               {/* Formulaire adresse nouveau magasin */}
-              {!resolvedStoreId && selectedStore && selectedStore !== 'autre' && (knownStores.length === 0 || showManualAddress) && !knownStoresLoading && (
+              {!resolvedStoreId && (showAddressSection || (selectedStore && (knownStores.length === 0 || showManualAddress) && !knownStoresLoading)) && (
                 <div style={{ marginBottom:10 }}>
                   <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:700, color:C.gray, marginBottom:6 }}>
                     {knownStores.length === 0 ? "Magasin inconnu — ajoute son adresse" : "Adresse du nouveau magasin"}
@@ -1841,7 +1826,7 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
                             }
                             const fullAddr = [manualRue.trim(), manualCP.trim(), manualVille.trim()].filter(Boolean).join(', ');
                             const id = await insertStoreInDB(selectedStore, fullAddr, lat, lng, storeNameEdit.trim()||null);
-                            if (id) { setResolvedStoreId(id); setKnownStores(prev=>[...prev, { id, address: fullAddr, name: storeNameEdit }]); }
+                            if (id) { setResolvedStoreId(id); setKnownStores(prev=>[...prev, { id, address: fullAddr, name: storeNameEdit }]); setShowAddressSection(false); }
                             else setError("Impossible d'enregistrer le magasin");
                           } catch { setError("Erreur lors de l'enregistrement"); }
                           setManualGeocoding(false);
