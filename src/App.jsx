@@ -438,7 +438,7 @@ function AuthScreen() {
 }
 
 // ── PROFIL SHEET ─────────────────────────────────────────────────────────────
-function ProfilSheet({ circles, userId, userEmail, profileMap, pseudo, archives, onClose, onInvite, onUpdateStatus, onLogout }) {
+function ProfilSheet({ circles, userId, userEmail, profileMap, pseudo, archives, onClose, onInvite, onUpdateStatus, onLogout, onGoToPrices }) {
   const F = "'Nunito',sans-serif";
   const [invitePseudo,  setInvitePseudo]  = useState('');
   const [inviteError,   setInviteError]   = useState('');
@@ -652,6 +652,14 @@ function ProfilSheet({ circles, userId, userEmail, profileMap, pseudo, archives,
               </button>
             </div>
             {inviteError && <div style={{ fontFamily:F, fontSize:12, color:"#CC0000", fontWeight:700, marginTop:8 }}>⚠️ {inviteError}</div>}
+          </div>
+
+          {/* Mes Prix */}
+          <div style={{ marginBottom:12 }}>
+            <button onClick={()=>{ onGoToPrices?.(); }}
+              style={{ width:"100%", padding:"14px", border:`1.5px solid ${C.blue}`, borderRadius:14, background:"#fff", fontFamily:F, fontWeight:800, fontSize:14, color:C.blue, cursor:"pointer" }}>
+              🗂️ Mes Prix / Base de données
+            </button>
           </div>
 
           {/* Contact / Feedback */}
@@ -3010,7 +3018,7 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
         ✏️ Saisie manuelle
       </button>
 
-      {showImport    && <ImportTicketSheet onClose={()=>{setShowImport(false);onAutoOpenConsumed?.();}} onImport={importPrices} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))} directCamera={autoOpenCamera}/>}
+      {showImport    && <ImportTicketSheet onClose={()=>{setShowImport(false);onAutoOpenConsumed?.();}} onImport={importPrices} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))} directCamera={autoOpenCamera} onManualEntry={()=>{ setShowImport(false); setShowEntry(true); }}/>}
       {showEntry     && <PriceEntrySheet  onClose={()=>{setShowEntry(false);setEditPrice(null);}} onSave={savePrice} existingPrice={editPrice}/>}
       {toast && <Toast msg={toast.msg} ok={toast.ok}/>}
     </div>
@@ -4279,7 +4287,7 @@ export default function App() {
         </div>
         <TabBar tab={tab} setTab={setTab}/>
         {appToast && <Toast msg={appToast.msg} ok={appToast.ok}/>}
-        {showCircle && <ProfilSheet circles={circles} userId={session.user.id} userEmail={session.user.email} profileMap={profileMap} pseudo={pseudo} archives={archives} onClose={()=>setShowCircle(false)} onInvite={inviteByPseudo} onUpdateStatus={updateCircleStatus} onLogout={handleLogout}/>}
+        {showCircle && <ProfilSheet circles={circles} userId={session.user.id} userEmail={session.user.email} profileMap={profileMap} pseudo={pseudo} archives={archives} onClose={()=>setShowCircle(false)} onInvite={inviteByPseudo} onUpdateStatus={updateCircleStatus} onLogout={handleLogout} onGoToPrices={()=>{ setShowCircle(false); setTab("prices"); }}/>}
         {loaded && pseudo === null && <PseudoModal onSave={savePseudo}/>}
         {showRating && (
           <StoreRatingScreen
