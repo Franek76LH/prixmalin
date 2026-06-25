@@ -1549,6 +1549,9 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
   const [brand,   setBrand]   = useState(existingPrice?.brand||"");
   const [product, setProduct] = useState(existingPrice?.product||"");
   const [format,  setFormat]  = useState(existingPrice?.format||"");
+  const [quantite,       setQuantite]       = useState(existingPrice?.quantite || "");
+  const [unite,          setUnite]          = useState(existingPrice?.unite || "");
+  const [conditionnement,setConditionnement]= useState(existingPrice?.conditionnement || 1);
   const [price,   setPrice]   = useState(existingPrice?.price?.toString()||"");
 
   // Sélecteur de magasin (même logique que le flux post-scan #35)
@@ -1588,7 +1591,7 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
     });
   }, []);
 
-  const canSubmit = product.trim() && format.trim() && price && !isNaN(parseFloat(price)) && (resolvedStoreId || selectedStore);
+  const canSubmit = product.trim() && (!quantite || !!unite) && price && !isNaN(parseFloat(price)) && (resolvedStoreId || selectedStore);
 
   const ENSEIGNES_LIST = [
     { id:"lidl",        name:"Lidl"          },
@@ -1634,7 +1637,17 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
     onSave({
       brand:         brand.trim(),
       product:       product.trim(),
-      format:        format.trim(),
+      format:        (() => {
+        if (!quantite) return "";
+        const cond = Number(conditionnement) || 1;
+        if (unite === 'pièce' && cond > 1) return `x${cond}`;
+        if (unite === 'pièce' && cond === 1) return "1 pièce";
+        if (cond > 1) return `${cond}x${quantite}${unite}`;
+        return `${quantite}${unite}`;
+      })(),
+      quantite:      quantite ? Number(quantite) : null,
+      unite:         unite || '',
+      conditionnement: Number(conditionnement) || 1,
       storeId:       selectedStore || 'autre',
       store_name:    storeNameEdit.trim(),
       store_address: storeRecord?.address || '',
@@ -1691,11 +1704,29 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
               style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${brand?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }} />
           </div>
 
-          {/* Format * */}
+          {/* Quantité / Unité / Conditionnement */}
           <div style={{ marginBottom:14 }}>
-            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Format *</div>
-            <input value={format} onChange={e=>setFormat(e.target.value)} placeholder="Ex : 1L, 1,5L, 500g, 1kg, x6..."
-              style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${format?C.orange:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }} />
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Quantité</div>
+            <input type="number" min="0" value={quantite} onChange={e=>setQuantite(e.target.value)} placeholder="Ex: 500"
+              style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${quantite?C.orange:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }} />
+          </div>
+          <div style={{ marginBottom:14 }}>
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Unité{quantite ? " *" : ""}</div>
+            <select value={unite} onChange={e=>setUnite(e.target.value)}
+              style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${unite?C.orange:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }}>
+              <option value=""></option>
+              <option value="g">g</option>
+              <option value="kg">kg</option>
+              <option value="cl">cl</option>
+              <option value="ml">ml</option>
+              <option value="L">L</option>
+              <option value="pièce">pièce</option>
+            </select>
+          </div>
+          <div style={{ marginBottom:14 }}>
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Conditionnement</div>
+            <input type="number" min="1" value={conditionnement} onChange={e=>setConditionnement(e.target.value)} placeholder="Ex: 4 pour 4x100g"
+              style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${Number(conditionnement)>1?C.orange:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }} />
           </div>
 
           {/* Prix */}
