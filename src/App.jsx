@@ -800,7 +800,8 @@ function AddItemSheet({ onClose, onAdd }) {
   const [brand,   setBrand]   = useState("");
   const [qty,     setQty]     = useState(1);
   const [brandFixed, setBrandFixed] = useState(false);
-  const [added,   setAdded]   = useState([]);
+  const [added,       setAdded]       = useState([]);
+  const [suggestions, setSuggestions] = useState([]);
 
   const canSubmit = product.trim() && format.trim();
 
@@ -813,6 +814,16 @@ function AddItemSheet({ onClose, onAdd }) {
   };
 
   const pickSuggestion = s => { setProduct(s.name); setFormat(s.format); };
+
+  const searchProducts = async val => {
+    if (val.length < 2) { setSuggestions([]); return; }
+    const { data } = await supabase.from('price_db')
+      .select('product')
+      .ilike('product', `%${val}%`)
+      .limit(6);
+    const names = [...new Set((data||[]).map(r=>r.product))].slice(0, 6);
+    setSuggestions(names);
+  };
 
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"flex-end", zIndex:200, animation:"fadeIn 0.2s ease" }} onClick={onClose}>
@@ -855,7 +866,28 @@ function AddItemSheet({ onClose, onAdd }) {
 
           {/* Produit */}
           <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Produit *</div>
-          <input value={product} onChange={e=>setProduct(e.target.value)} placeholder="Ex : Cola Zéro, Lait, Pâtes..." style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${product?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:15, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:14 }} />
+          <div style={{ position:"relative" }}>
+            <input
+              value={product}
+              onChange={e=>{ setProduct(e.target.value); searchProducts(e.target.value); }}
+              onBlur={()=>setTimeout(()=>setSuggestions([]), 150)}
+              placeholder="Ex : Cola Zéro, Lait, Pâtes..."
+              style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${product?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:15, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:14 }}
+            />
+            {suggestions.length > 0 && (
+              <div style={{ position:"absolute", top:"calc(100% - 14px)", left:0, right:0, background:C.white, border:`1px solid ${C.grayLight}`, borderRadius:10, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", zIndex:300, overflow:"hidden" }}>
+                {suggestions.map((s, i) => (
+                  <button
+                    key={i}
+                    onClick={()=>{ setProduct(s); setSuggestions([]); }}
+                    style={{ display:"block", width:"100%", padding:"11px 16px", background:"transparent", border:"none", borderBottom:i<suggestions.length-1?`1px solid ${C.grayLight}`:"none", fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:14, color:C.text, cursor:"pointer", textAlign:"left" }}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Format */}
           <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Format / Volume *</div>
