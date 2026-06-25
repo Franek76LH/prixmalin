@@ -6,6 +6,7 @@ export const STORES = [
   { id:"intermarche",name:"Intermarché", logo:"🟢" },
   { id:"monoprix",   name:"Monoprix",    logo:"🟣" },
   { id:"vival",      name:"Vival",       logo:"🟤" },
+  { id:"utile",      name:"Utile",       logo:"🏪" },
   { id:"spar",       name:"Spar",        logo:"🌲" },
   { id:"netto",      name:"Netto",       logo:"🔶" },
   { id:"franprix",   name:"Franprix",    logo:"🟥" },

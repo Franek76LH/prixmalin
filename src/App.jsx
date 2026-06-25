@@ -214,9 +214,9 @@ function filterMDD(brands) {
 // Clé de matching pour la liste : produit+format+(marque si précisée)
 function itemMatchesPrice(item, price) {
   const sameProduct = normName(price.product) === normName(item.product);
-  const sameFormat  = normFormat(price.format) === normFormat(item.format);
+  const formatOk    = !item.format || !price.format || normFormat(price.format) === normFormat(item.format);
   const brandOk     = !item.brand || normName(item.brand) === normName(price.brand||"");
-  return sameProduct && sameFormat && brandOk;
+  return sameProduct && formatOk && brandOk;
 }
 
 // ── PSEUDO MODAL ─────────────────────────────────────────────────────────────
@@ -2313,7 +2313,7 @@ function EditItemSheet({ item, onClose, onSave }) {
 }
 
 // ── LIST TAB ──────────────────────────────────────────────────────────────────
-function ListTab({ items, setItems, setTab, favorites, saveFavorites, searchRadius, setSearchRadius }) {
+function ListTab({ items, setItems, setTab, favorites, saveFavorites, searchRadius, setSearchRadius, userPos, setUserPos }) {
   const [showAdd,      setShowAdd]      = useState(false);
   const [showFavModal, setShowFavModal] = useState(false);
   const [editItem,     setEditItem]     = useState(null);
@@ -2407,7 +2407,16 @@ function ListTab({ items, setItems, setTab, favorites, saveFavorites, searchRadi
         </div>
       )}
       {items.length>=1 && (
-        <button onClick={()=>setTab("compare")} style={{ width:"100%", padding:"15px", marginBottom:10, background:"linear-gradient(135deg,#CC0000,#FF1A1A)", border:"none", borderRadius:14, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 6px 20px rgba(180,0,0,0.45)" }}>
+        <button onClick={()=>{
+          if(!userPos && navigator.geolocation){
+            navigator.geolocation.getCurrentPosition(
+              pos=>{ setUserPos({lat:pos.coords.latitude,lng:pos.coords.longitude}); setTab("compare"); },
+              ()=>setTab("compare")
+            );
+          } else {
+            setTab("compare");
+          }
+        }} style={{ width:"100%", padding:"15px", marginBottom:10, background:"linear-gradient(135deg,#CC0000,#FF1A1A)", border:"none", borderRadius:14, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 6px 20px rgba(180,0,0,0.45)" }}>
           🏪 Comparer les prix
         </button>
       )}
@@ -2964,24 +2973,15 @@ function distanceKm(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.asin(Math.sqrt(a));
 }
 
-function CompareTab({ items, priceDB, onValidate, searchRadius }) {
+function CompareTab({ items, priceDB, onValidate, searchRadius, userPos }) {
   const F = "'Nunito',sans-serif";
 
-  const [userPos, setUserPos] = useState(null);
   const [gpsError, setGpsError] = useState(false);
   const [storesGeo, setStoresGeo] = useState([]);
 
   useEffect(()=>{
-    // Charger les magasins avec coordonnées GPS
     supabase.from('stores').select('id, name, enseigne, latitude, longitude')
       .then(({data})=> setStoresGeo(data || []));
-
-    // Demander la position GPS de l'utilisateur
-    if(!navigator.geolocation){ setGpsError(true); return; }
-    navigator.geolocation.getCurrentPosition(
-      pos => setUserPos({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-      ()  => setGpsError(true)
-    );
   }, []);
 
   if(items.length===0) return (
@@ -3741,6 +3741,7 @@ export default function App() {
   const [items, setItems]       = useState([]);
   const [priceDB, setPriceDB]     = useState([]);
   const [searchRadius, setSearchRadius] = useState(10);
+  const [userPos, setUserPos] = useState(null);
   const [archives, setArchives]   = useState([]);
   const [storeRatings, setStoreRatings] = useState({});
   const [showSuccess, setShowSuccess] = useState(null);
@@ -4203,9 +4204,9 @@ export default function App() {
             </div>
           )}
           {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircle(true)} onFlash={handleFlash} archives={archives} pseudo={pseudo}/>}
-          {loaded && tab==="list"      && <ListTab      items={items} setItems={saveItems} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} searchRadius={searchRadius} setSearchRadius={setSearchRadius}/>}
+          {loaded && tab==="list"      && <ListTab      items={items} setItems={saveItems} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} setItems={saveItems} setTab={setTab} catalog={catalog} priceDB={priceDB}/>}
-          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius}/>}
+          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius} userPos={userPos}/>}
           {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;
             const {data,error}=await supabase.from('archives').insert({...rest,user_id:session?.user?.id}).select('id').single();
