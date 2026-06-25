@@ -48,6 +48,27 @@ function normFormat(s) {
     .replace(/,/g,".").replace(/\s+/g,"");
 }
 
+/*
+ * #50 — SUJET MARQUE : réflexion en attente (à traiter après #47)
+ *
+ * La marque (brand) est présente dans ~30 endroits du code :
+ * priceKey, itemMatchesPrice, OCR, Supabase, comparateur, etc.
+ * Supprimer le champ séparé est une refonte complète, pas une retouche.
+ *
+ * Vision retenue :
+ * - Marques nationales fortes (Coca-Cola, Nutella, Pepsi...) →
+ *   la marque fait partie du NOM du produit. Ex : "Coca-Cola 1,5L".
+ *   Pas besoin d'un champ brand séparé.
+ * - Produits génériques (lait, riz, pâtes...) →
+ *   pas de marque. Ex : "Lait demi-écrémé 1L".
+ *   Le champ brand est inutile dans ce cas aussi.
+ *
+ * Conclusion : le champ brand séparé ne sert dans aucun des deux cas.
+ * Mais le supprimer sans casser le matching et l'unicité Supabase
+ * demande de clarifier d'abord l'identité produit via #47.
+ *
+ * Ne pas toucher à brand avant que #47 soit terminé.
+ */
 // Clé unique d'un article de prix : marque+produit+format+magasin
 function priceKey(p){ return `${normName(p.brand)}_${normName(p.product)}_${normFormat(p.format)}_${p.storeId}`; }
 
