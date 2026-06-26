@@ -438,27 +438,13 @@ function AuthScreen() {
 }
 
 // ── PROFIL SHEET ─────────────────────────────────────────────────────────────
-function ProfilSheet({ circles, userId, userEmail, profileMap, pseudo, archives, onClose, onInvite, onUpdateStatus, onLogout, onGoToPrices }) {
+function CircleSheet({ circles, userId, userEmail, profileMap, pseudo, archives, onClose, onInvite, onUpdateStatus }) {
   const F = "'Nunito',sans-serif";
   const [invitePseudo,  setInvitePseudo]  = useState('');
   const [inviteError,   setInviteError]   = useState('');
   const [inviteLoading, setInviteLoading] = useState(false);
-  const [sharedCount,   setSharedCount]   = useState(null);
-  const [showFeedback,      setShowFeedback]      = useState(false);
-  const [feedbackCategorie, setFeedbackCategorie] = useState('bug');
-  const [feedbackMessage,   setFeedbackMessage]   = useState('');
-  const [feedbackLoading,   setFeedbackLoading]   = useState(false);
-  const [feedbackError,     setFeedbackError]     = useState('');
-  const [feedbackSuccess,   setFeedbackSuccess]   = useState(false);
   const inviteRef = useRef(null);
   const avatarColors = ["#E5181B","#F5C200","#00B341","#4A90D9","#8E44AD","#FF6B35"];
-
-  useEffect(() => {
-    supabase.from('community_prices')
-      .select('id', { count:'exact', head:true })
-      .eq('user_id', userId)
-      .then(({ count }) => setSharedCount(count ?? 0));
-  }, [userId]);
 
   const isMe = c => c.recipient_id === userId || c.recipient_email?.toLowerCase() === userEmail?.toLowerCase();
   const received = circles.filter(c => isMe(c) && c.status === 'pending');
@@ -476,29 +462,6 @@ function ProfilSheet({ circles, userId, userEmail, profileMap, pseudo, archives,
     const { error } = await onInvite(invitePseudo);
     if (error) setInviteError(error); else setInvitePseudo('');
     setInviteLoading(false);
-  };
-
-  const handleFeedback = async () => {
-    if (!feedbackMessage.trim()) return;
-    setFeedbackLoading(true); setFeedbackError('');
-    const { error } = await supabase.from('feedback').insert({
-      user_id: userId,
-      pseudo,
-      categorie: feedbackCategorie,
-      message: feedbackMessage.trim(),
-    });
-    if (error) {
-      setFeedbackError("Erreur lors de l'envoi, réessaie.");
-    } else {
-      setFeedbackSuccess(true);
-      setTimeout(() => {
-        setShowFeedback(false);
-        setFeedbackSuccess(false);
-        setFeedbackMessage('');
-        setFeedbackCategorie('bug');
-      }, 2000);
-    }
-    setFeedbackLoading(false);
   };
 
   const ringR = 56;
@@ -520,7 +483,7 @@ function ProfilSheet({ circles, userId, userEmail, profileMap, pseudo, archives,
         <div style={{ background:C.red, padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0, borderRadius:"24px 24px 0 0" }}>
           <div>
             <div style={{ fontFamily:F, fontSize:11, fontWeight:700, color:"rgba(255,255,255,0.6)" }}>PrixMalin</div>
-            <div style={{ fontFamily:F, fontSize:20, fontWeight:900, color:"#fff" }}>Mon profil</div>
+            <div style={{ fontFamily:F, fontSize:20, fontWeight:900, color:"#fff" }}>Mon Cercle</div>
           </div>
           <button onClick={onClose} style={{ background:"rgba(255,255,255,0.2)", borderRadius:99, width:36, height:36, border:"none", fontSize:16, color:"#fff", cursor:"pointer" }}>✕</button>
         </div>
@@ -623,20 +586,6 @@ function ProfilSheet({ circles, userId, userEmail, profileMap, pseudo, archives,
             ))}
           </div>
 
-          {/* Stats */}
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:20 }}>
-            {[
-              { label:"Prix partagés", value: sharedCount === null ? "…" : String(sharedCount) },
-              { label:"Tickets",        value: String(archives.length) },
-              { label:"Rang",           value: "#1" },
-            ].map(s => (
-              <div key={s.label} style={{ background:C.bg, borderRadius:14, padding:"14px 8px", textAlign:"center" }}>
-                <div style={{ fontFamily:F, fontWeight:900, fontSize:22, color:C.text }}>{s.value}</div>
-                <div style={{ fontFamily:F, fontSize:11, color:C.textLight, fontWeight:600, marginTop:3 }}>{s.label}</div>
-              </div>
-            ))}
-          </div>
-
           {/* Invite form */}
           <div style={{ marginBottom:20 }}>
             <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Inviter par pseudo</div>
@@ -653,61 +602,108 @@ function ProfilSheet({ circles, userId, userEmail, profileMap, pseudo, archives,
             </div>
             {inviteError && <div style={{ fontFamily:F, fontSize:12, color:"#CC0000", fontWeight:700, marginTop:8 }}>⚠️ {inviteError}</div>}
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-          {/* Mes Prix */}
-          <div style={{ marginBottom:12 }}>
-            <button onClick={()=>{ onGoToPrices?.(); }}
-              style={{ width:"100%", padding:"14px", border:`1.5px solid ${C.blue}`, borderRadius:14, background:"#fff", fontFamily:F, fontWeight:800, fontSize:14, color:C.blue, cursor:"pointer" }}>
-              🗂️ Mes Prix / Base de données
-            </button>
+function StatsSheet({ userId, archives, onClose }) {
+  const F = "'Nunito',sans-serif";
+  const [sharedCount, setSharedCount] = useState(null);
+  useEffect(() => {
+    supabase.from('community_prices')
+      .select('id', { count:'exact', head:true })
+      .eq('user_id', userId)
+      .then(({ count }) => setSharedCount(count ?? 0));
+  }, [userId]);
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", zIndex:300, animation:"fadeIn 0.2s ease" }} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{ background:C.white, borderRadius:"24px 24px 0 0", width:"100%", maxWidth:430, margin:"0 auto", maxHeight:"90vh", display:"flex", flexDirection:"column", animation:"slideUp 0.3s ease" }}>
+        <div style={{ background:C.red, padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0, borderRadius:"24px 24px 0 0" }}>
+          <div>
+            <div style={{ fontFamily:F, fontSize:11, fontWeight:700, color:"rgba(255,255,255,0.6)" }}>PrixMalin</div>
+            <div style={{ fontFamily:F, fontSize:20, fontWeight:900, color:"#fff" }}>Mes Statistiques</div>
           </div>
-
-          {/* Contact / Feedback */}
-          <div style={{ marginBottom:20 }}>
-            {!showFeedback ? (
-              <button onClick={()=>setShowFeedback(true)}
-                style={{ width:"100%", padding:"14px", border:`1.5px solid ${C.blue}`, borderRadius:14, background:"#fff", fontFamily:F, fontWeight:800, fontSize:14, color:C.blue, cursor:"pointer" }}>
-                Contact / Signaler un problème
-              </button>
-            ) : (
-              <div style={{ background:C.bg, borderRadius:16, padding:"14px 16px" }}>
-                <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:12 }}>Contact / Signaler un problème</div>
-                {feedbackSuccess ? (
-                  <div style={{ fontFamily:F, fontSize:14, fontWeight:700, color:C.green, textAlign:"center", padding:"12px 0" }}>Merci, ton message a été envoyé !</div>
-                ) : (<>
-                  <select value={feedbackCategorie} onChange={e=>setFeedbackCategorie(e.target.value)}
-                    style={{ width:"100%", padding:"10px 12px", borderRadius:10, border:`1.5px solid ${C.grayLight}`, fontFamily:F, fontSize:14, color:C.text, background:"#fff", marginBottom:10, outline:"none", boxSizing:"border-box" }}>
-                    <option value="bug">Bug</option>
-                    <option value="suggestion">Suggestion</option>
-                    <option value="question">Question</option>
-                    <option value="autre">Autre</option>
-                  </select>
-                  <textarea value={feedbackMessage} onChange={e=>setFeedbackMessage(e.target.value)}
-                    placeholder="Décris ton problème ou ta suggestion…"
-                    rows={4}
-                    style={{ width:"100%", padding:"10px 12px", borderRadius:10, border:`1.5px solid ${feedbackMessage?C.blue:C.grayLight}`, fontFamily:F, fontSize:14, color:C.text, outline:"none", resize:"none", boxSizing:"border-box", marginBottom:10 }}
-                  />
-                  {feedbackError && <div style={{ fontFamily:F, fontSize:12, color:"#CC0000", fontWeight:700, marginBottom:8 }}>⚠️ {feedbackError}</div>}
-                  <div style={{ display:"flex", gap:8 }}>
-                    <button onClick={()=>{ setShowFeedback(false); setFeedbackMessage(''); setFeedbackError(''); setFeedbackCategorie('bug'); }}
-                      style={{ flex:1, padding:"12px", border:`1px solid ${C.grayLight}`, borderRadius:10, background:"#fff", fontFamily:F, fontWeight:800, fontSize:14, color:C.gray, cursor:"pointer" }}>
-                      Annuler
-                    </button>
-                    <button onClick={handleFeedback} disabled={feedbackLoading||!feedbackMessage.trim()}
-                      style={{ flex:2, padding:"12px", border:"none", borderRadius:10, background:feedbackLoading||!feedbackMessage.trim()?C.grayLight:C.blue, fontFamily:F, fontWeight:900, fontSize:14, color:feedbackLoading||!feedbackMessage.trim()?C.gray:"#fff", cursor:feedbackLoading||!feedbackMessage.trim()?"default":"pointer" }}>
-                      {feedbackLoading ? "…" : "Envoyer"}
-                    </button>
-                  </div>
-                </>)}
+          <button onClick={onClose} style={{ background:"rgba(255,255,255,0.2)", borderRadius:99, width:36, height:36, border:"none", fontSize:16, color:"#fff", cursor:"pointer" }}>✕</button>
+        </div>
+        <div style={{ overflowY:"auto", flex:1, padding:"20px 20px 40px" }}>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10 }}>
+            {[
+              { label:"Prix partagés", value: sharedCount === null ? "…" : String(sharedCount) },
+              { label:"Tickets",       value: String(archives.length) },
+              { label:"Rang",          value: "#1" },
+            ].map(s => (
+              <div key={s.label} style={{ background:C.bg, borderRadius:14, padding:"14px 8px", textAlign:"center" }}>
+                <div style={{ fontFamily:F, fontWeight:900, fontSize:22, color:C.text }}>{s.value}</div>
+                <div style={{ fontFamily:F, fontSize:11, color:C.textLight, fontWeight:600, marginTop:3 }}>{s.label}</div>
               </div>
-            )}
+            ))}
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-          {/* Se déconnecter */}
-          <button onClick={()=>{ onClose(); onLogout(); }}
-            style={{ width:"100%", padding:"14px", border:`1.5px solid ${C.grayLight}`, borderRadius:14, background:"#fff", fontFamily:F, fontWeight:800, fontSize:14, color:C.textLight, cursor:"pointer" }}>
-            Se déconnecter
-          </button>
+function FaqSheet({ userId, pseudo, onClose }) {
+  const F = "'Nunito',sans-serif";
+  const [showFeedback,      setShowFeedback]      = useState(false);
+  const [feedbackCategorie, setFeedbackCategorie] = useState('bug');
+  const [feedbackMessage,   setFeedbackMessage]   = useState('');
+  const [feedbackLoading,   setFeedbackLoading]   = useState(false);
+  const [feedbackError,     setFeedbackError]     = useState('');
+  const [feedbackSuccess,   setFeedbackSuccess]   = useState(false);
+  const handleFeedback = async () => {
+    if (!feedbackMessage.trim()) return;
+    setFeedbackLoading(true); setFeedbackError('');
+    const { error } = await supabase.from('feedback').insert({ user_id:userId, pseudo, categorie:feedbackCategorie, message:feedbackMessage.trim() });
+    if (error) {
+      setFeedbackError("Erreur lors de l'envoi, réessaie.");
+    } else {
+      setFeedbackSuccess(true);
+      setTimeout(() => { setShowFeedback(false); setFeedbackSuccess(false); setFeedbackMessage(''); setFeedbackCategorie('bug'); }, 2000);
+    }
+    setFeedbackLoading(false);
+  };
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", zIndex:300, animation:"fadeIn 0.2s ease" }} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{ background:C.white, borderRadius:"24px 24px 0 0", width:"100%", maxWidth:430, margin:"0 auto", maxHeight:"90vh", display:"flex", flexDirection:"column", animation:"slideUp 0.3s ease" }}>
+        <div style={{ background:C.red, padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0, borderRadius:"24px 24px 0 0" }}>
+          <div>
+            <div style={{ fontFamily:F, fontSize:11, fontWeight:700, color:"rgba(255,255,255,0.6)" }}>PrixMalin</div>
+            <div style={{ fontFamily:F, fontSize:20, fontWeight:900, color:"#fff" }}>Foire aux Questions</div>
+          </div>
+          <button onClick={onClose} style={{ background:"rgba(255,255,255,0.2)", borderRadius:99, width:36, height:36, border:"none", fontSize:16, color:"#fff", cursor:"pointer" }}>✕</button>
+        </div>
+        <div style={{ overflowY:"auto", flex:1, padding:"20px 20px 40px" }}>
+          {!showFeedback ? (
+            <button onClick={()=>setShowFeedback(true)} style={{ width:"100%", padding:"14px", border:`1.5px solid ${C.blue}`, borderRadius:14, background:"#fff", fontFamily:F, fontWeight:800, fontSize:14, color:C.blue, cursor:"pointer" }}>
+              Contact / Signaler un problème
+            </button>
+          ) : (
+            <div style={{ background:C.bg, borderRadius:16, padding:"14px 16px" }}>
+              <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:12 }}>Contact / Signaler un problème</div>
+              {feedbackSuccess ? (
+                <div style={{ fontFamily:F, fontSize:14, fontWeight:700, color:C.green, textAlign:"center", padding:"12px 0" }}>Merci, ton message a été envoyé !</div>
+              ) : (<>
+                <select value={feedbackCategorie} onChange={e=>setFeedbackCategorie(e.target.value)} style={{ width:"100%", padding:"10px 12px", borderRadius:10, border:`1.5px solid ${C.grayLight}`, fontFamily:F, fontSize:14, color:C.text, background:"#fff", marginBottom:10, outline:"none", boxSizing:"border-box" }}>
+                  <option value="bug">Bug</option>
+                  <option value="suggestion">Suggestion</option>
+                  <option value="question">Question</option>
+                  <option value="autre">Autre</option>
+                </select>
+                <textarea value={feedbackMessage} onChange={e=>setFeedbackMessage(e.target.value)} placeholder="Décris ton problème ou ta suggestion…" rows={4} style={{ width:"100%", padding:"10px 12px", borderRadius:10, border:`1.5px solid ${feedbackMessage?C.blue:C.grayLight}`, fontFamily:F, fontSize:14, color:C.text, outline:"none", resize:"none", boxSizing:"border-box", marginBottom:10 }}/>
+                {feedbackError && <div style={{ fontFamily:F, fontSize:12, color:"#CC0000", fontWeight:700, marginBottom:8 }}>⚠️ {feedbackError}</div>}
+                <div style={{ display:"flex", gap:8 }}>
+                  <button onClick={()=>{ setShowFeedback(false); setFeedbackMessage(''); setFeedbackError(''); setFeedbackCategorie('bug'); }} style={{ flex:1, padding:"12px", border:`1px solid ${C.grayLight}`, borderRadius:10, background:"#fff", fontFamily:F, fontWeight:800, fontSize:14, color:C.gray, cursor:"pointer" }}>Annuler</button>
+                  <button onClick={handleFeedback} disabled={feedbackLoading||!feedbackMessage.trim()} style={{ flex:2, padding:"12px", border:"none", borderRadius:10, background:feedbackLoading||!feedbackMessage.trim()?C.grayLight:C.blue, fontFamily:F, fontWeight:900, fontSize:14, color:feedbackLoading||!feedbackMessage.trim()?C.gray:"#fff", cursor:feedbackLoading||!feedbackMessage.trim()?"default":"pointer" }}>
+                    {feedbackLoading ? "…" : "Envoyer"}
+                  </button>
+                </div>
+              </>)}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -3850,7 +3846,9 @@ export default function App() {
   const [circles,    setCircles]    = useState([]);
   const [autoOpenCamera, setAutoOpenCamera] = useState(false);
   const handleFlash = () => { setAutoOpenCamera(true); setTab("prices"); };
-  const [showCircle, setShowCircle] = useState(false);
+  const [showCircleSheet, setShowCircleSheet] = useState(false);
+  const [showStatsSheet,  setShowStatsSheet]  = useState(false);
+  const [showFaqSheet,    setShowFaqSheet]    = useState(false);
   const [pseudo,        setPseudo]        = useState(null);
   const [cguAcceptedAt, setCguAcceptedAt] = useState(undefined);
   const [profileMap, setProfileMap] = useState({});
@@ -4281,7 +4279,7 @@ export default function App() {
         {tab !== "home" && (
           <Header tab={tab} itemCount={items.length} userEmail={session.user.email} displayName={pseudo} onLogout={handleLogout}
             pendingCount={circles.filter(c=>(c.recipient_id===session.user.id||c.recipient_email?.toLowerCase()===session.user.email?.toLowerCase())&&c.status==='pending').length}
-            onCircle={()=>setShowCircle(true)}/>
+            onCircle={()=>setShowCircleSheet(true)}/>
         )}
         <div style={{ paddingTop: tab === "home" ? 0 : 4 }}>
           {!loaded && (
@@ -4299,7 +4297,7 @@ export default function App() {
               )}
             </div>
           )}
-          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircle(true)} onFlash={handleFlash} archives={archives} pseudo={pseudo} onStats={()=>setShowCircle(true)} onMesPrix={()=>setTab("prices")} onFaq={()=>setShowCircle(true)} onSignOut={handleLogout}/>}
+          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setTab("prices")} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout}/>}
           {loaded && tab==="list"      && <ListTab      items={items} setItems={saveItems} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} setItems={saveItems} setTab={setTab} catalog={catalog} priceDB={priceDB}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius} userPos={userPos}/>}
@@ -4322,7 +4320,9 @@ export default function App() {
         </div>
         <TabBar tab={tab} setTab={setTab}/>
         {appToast && <Toast msg={appToast.msg} ok={appToast.ok}/>}
-        {showCircle && <ProfilSheet circles={circles} userId={session.user.id} userEmail={session.user.email} profileMap={profileMap} pseudo={pseudo} archives={archives} onClose={()=>setShowCircle(false)} onInvite={inviteByPseudo} onUpdateStatus={updateCircleStatus} onLogout={handleLogout} onGoToPrices={()=>{ setShowCircle(false); setTab("prices"); }}/>}
+        {showCircleSheet && <CircleSheet circles={circles} userId={session.user.id} userEmail={session.user.email} profileMap={profileMap} pseudo={pseudo} archives={archives} onClose={()=>setShowCircleSheet(false)} onInvite={inviteByPseudo} onUpdateStatus={updateCircleStatus}/>}
+        {showStatsSheet  && <StatsSheet  userId={session.user.id} archives={archives} onClose={()=>setShowStatsSheet(false)}/>}
+        {showFaqSheet    && <FaqSheet    userId={session.user.id} pseudo={pseudo} onClose={()=>setShowFaqSheet(false)}/>}
         {loaded && pseudo === null && <PseudoModal onSave={savePseudo}/>}
         {showRating && (
           <StoreRatingScreen
