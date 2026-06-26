@@ -4299,7 +4299,7 @@ export default function App() {
               )}
             </div>
           )}
-          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircle(true)} onFlash={handleFlash} archives={archives} pseudo={pseudo} onStats={()=>setTab("economies")} onMesPrix={()=>setTab("prices")} onFaq={()=>{}} onSignOut={handleLogout}/>}
+          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircle(true)} onFlash={handleFlash} archives={archives} pseudo={pseudo} onStats={()=>setShowCircle(true)} onMesPrix={()=>setTab("prices")} onFaq={()=>setShowCircle(true)} onSignOut={handleLogout}/>}
           {loaded && tab==="list"      && <ListTab      items={items} setItems={saveItems} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} setItems={saveItems} setTab={setTab} catalog={catalog} priceDB={priceDB}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius} userPos={userPos}/>}
