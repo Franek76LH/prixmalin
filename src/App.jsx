@@ -640,6 +640,9 @@ function StatsSheet({ userId, archives, onClose }) {
               </div>
             ))}
           </div>
+          <div style={{ fontFamily:F, fontSize:12, color:C.textLight, textAlign:"center", marginTop:16, lineHeight:1.6, padding:"0 8px" }}>
+            Le rang reflète ta contribution dans ton cercle. Plus tu partages de prix, plus tu grimpes !
+          </div>
         </div>
       </div>
     </div>
@@ -704,6 +707,26 @@ function FaqSheet({ userId, pseudo, onClose }) {
               </>)}
             </div>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MesPrixSheet({ priceDB, setPriceDB, archives, updateArchive, onTicketValidated, onCreateArchive, userId, produitsRef, onClose }) {
+  const F = "'Nunito',sans-serif";
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", zIndex:300, animation:"fadeIn 0.2s ease" }} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{ background:C.white, borderRadius:"24px 24px 0 0", width:"100%", maxWidth:430, margin:"0 auto", maxHeight:"90vh", display:"flex", flexDirection:"column", animation:"slideUp 0.3s ease" }}>
+        <div style={{ background:C.red, padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0, borderRadius:"24px 24px 0 0" }}>
+          <div>
+            <div style={{ fontFamily:F, fontSize:11, fontWeight:700, color:"rgba(255,255,255,0.6)" }}>PrixMalin</div>
+            <div style={{ fontFamily:F, fontSize:20, fontWeight:900, color:"#fff" }}>Mes Prix</div>
+          </div>
+          <button onClick={onClose} style={{ background:"rgba(255,255,255,0.2)", borderRadius:99, width:36, height:36, border:"none", fontSize:16, color:"#fff", cursor:"pointer" }}>✕</button>
+        </div>
+        <div style={{ overflowY:"auto", flex:1 }}>
+          <PricesTab priceDB={priceDB} setPriceDB={setPriceDB} archives={archives} updateArchive={updateArchive} onTicketValidated={onTicketValidated} onCreateArchive={onCreateArchive} userId={userId} produitsRef={produitsRef} hideActions={true}/>
         </div>
       </div>
     </div>
@@ -2721,7 +2744,7 @@ function EconomiesTab({ priceDB, archives, items, setTab }) {
 }
 
 // ── PRICES TAB ────────────────────────────────────────────────────────────────
-function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValidated, onCreateArchive, userId, produitsRef = [], autoOpenCamera = false, onAutoOpenConsumed }) {
+function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValidated, onCreateArchive, userId, produitsRef = [], autoOpenCamera = false, onAutoOpenConsumed, hideActions = false }) {
   const [showImport,    setShowImport]    = useState(false);
 
   useEffect(() => {
@@ -2885,9 +2908,11 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
         </div>
       </div>
 
-      <button onClick={()=>setShowImport(true)} style={{ width:"100%", padding:"18px", marginBottom:12, background:"linear-gradient(135deg,#CC0000,#FF1A1A)", border:"none", borderRadius:14, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:10, boxShadow:"0 6px 24px rgba(204,0,0,0.45)" }}>
-        <span style={{ fontSize:22 }}>🧾</span> Importer un ticket de caisse
-      </button>
+      {!hideActions && (
+        <button onClick={()=>setShowImport(true)} style={{ width:"100%", padding:"18px", marginBottom:12, background:"linear-gradient(135deg,#CC0000,#FF1A1A)", border:"none", borderRadius:14, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:10, boxShadow:"0 6px 24px rgba(204,0,0,0.45)" }}>
+          <span style={{ fontSize:22 }}>🧾</span> Importer un ticket de caisse
+        </button>
+      )}
 
       {priceDB.length>0 && (
         <div style={{ position:"relative", marginBottom:10 }}>
@@ -3010,9 +3035,11 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
         );
       })}
 
-      <button onClick={()=>{setEditPrice(null);setShowEntry(true);}} style={{ position:"fixed", bottom:72, right:16, background:"linear-gradient(135deg,#CC0000,#FF1A1A)", border:"none", borderRadius:99, padding:"13px 18px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", gap:6, boxShadow:"0 6px 20px rgba(180,0,0,0.45)", zIndex:40 }}>
-        ✏️ Saisie manuelle
-      </button>
+      {!hideActions && (
+        <button onClick={()=>{setEditPrice(null);setShowEntry(true);}} style={{ position:"fixed", bottom:72, right:16, background:"linear-gradient(135deg,#CC0000,#FF1A1A)", border:"none", borderRadius:99, padding:"13px 18px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", gap:6, boxShadow:"0 6px 20px rgba(180,0,0,0.45)", zIndex:40 }}>
+          ✏️ Saisie manuelle
+        </button>
+      )}
 
       {showImport    && <ImportTicketSheet onClose={()=>{setShowImport(false);onAutoOpenConsumed?.();}} onImport={importPrices} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))} directCamera={autoOpenCamera} onManualEntry={()=>{ setShowImport(false); setShowEntry(true); }}/>}
       {showEntry     && <PriceEntrySheet  onClose={()=>{setShowEntry(false);setEditPrice(null);}} onSave={savePrice} existingPrice={editPrice}/>}
@@ -3846,9 +3873,10 @@ export default function App() {
   const [circles,    setCircles]    = useState([]);
   const [autoOpenCamera, setAutoOpenCamera] = useState(false);
   const handleFlash = () => { setAutoOpenCamera(true); setTab("prices"); };
-  const [showCircleSheet, setShowCircleSheet] = useState(false);
-  const [showStatsSheet,  setShowStatsSheet]  = useState(false);
-  const [showFaqSheet,    setShowFaqSheet]    = useState(false);
+  const [showCircleSheet,  setShowCircleSheet]  = useState(false);
+  const [showStatsSheet,   setShowStatsSheet]   = useState(false);
+  const [showFaqSheet,     setShowFaqSheet]     = useState(false);
+  const [showMesPrixSheet, setShowMesPrixSheet] = useState(false);
   const [pseudo,        setPseudo]        = useState(null);
   const [cguAcceptedAt, setCguAcceptedAt] = useState(undefined);
   const [profileMap, setProfileMap] = useState({});
@@ -4297,7 +4325,7 @@ export default function App() {
               )}
             </div>
           )}
-          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setTab("prices")} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout}/>}
+          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout}/>}
           {loaded && tab==="list"      && <ListTab      items={items} setItems={saveItems} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} setItems={saveItems} setTab={setTab} catalog={catalog} priceDB={priceDB}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius} userPos={userPos}/>}
@@ -4320,9 +4348,10 @@ export default function App() {
         </div>
         <TabBar tab={tab} setTab={setTab}/>
         {appToast && <Toast msg={appToast.msg} ok={appToast.ok}/>}
-        {showCircleSheet && <CircleSheet circles={circles} userId={session.user.id} userEmail={session.user.email} profileMap={profileMap} pseudo={pseudo} archives={archives} onClose={()=>setShowCircleSheet(false)} onInvite={inviteByPseudo} onUpdateStatus={updateCircleStatus}/>}
-        {showStatsSheet  && <StatsSheet  userId={session.user.id} archives={archives} onClose={()=>setShowStatsSheet(false)}/>}
-        {showFaqSheet    && <FaqSheet    userId={session.user.id} pseudo={pseudo} onClose={()=>setShowFaqSheet(false)}/>}
+        {showCircleSheet  && <CircleSheet  circles={circles} userId={session.user.id} userEmail={session.user.email} profileMap={profileMap} pseudo={pseudo} archives={archives} onClose={()=>setShowCircleSheet(false)} onInvite={inviteByPseudo} onUpdateStatus={updateCircleStatus}/>}
+        {showStatsSheet   && <StatsSheet   userId={session.user.id} archives={archives} onClose={()=>setShowStatsSheet(false)}/>}
+        {showFaqSheet     && <FaqSheet     userId={session.user.id} pseudo={pseudo} onClose={()=>setShowFaqSheet(false)}/>}
+        {showMesPrixSheet && <MesPrixSheet priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{ const {id:_id,...rest}=newArc; const {data,error}=await supabase.from('archives').insert({...rest,user_id:session?.user?.id}).select('id').single(); if(error){ showAppToast("⚠️ Archive non sauvegardée, vérifie ta connexion",false); } else { const {data:all}=await supabase.from('archives').select('*').order('date'); if(all) setArchives(all); setShowRating({id:data.id,store:newArc.store}); } }} userId={session?.user?.id} produitsRef={produitsRef} onClose={()=>setShowMesPrixSheet(false)}/>}
         {loaded && pseudo === null && <PseudoModal onSave={savePseudo}/>}
         {showRating && (
           <StoreRatingScreen
