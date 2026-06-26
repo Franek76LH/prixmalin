@@ -3646,7 +3646,7 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash
       </div>
 
       {/* ── Barre du haut ── */}
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"18px 20px 0", position:"relative", zIndex:10 }}>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"18px 20px 0", position:"relative", zIndex:9999 }}>
 
         {/* Bouton Moi — haut gauche avec dropdown */}
         <div ref={menuProfilRef} style={{ position:"relative" }}>
