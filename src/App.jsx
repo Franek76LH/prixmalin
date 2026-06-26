@@ -3611,6 +3611,73 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
   );
 }
 
+// ── SCAN CHOIX SHEET ─────────────────────────────────────────────────────────
+function ScanChoixSheet({ onClose, onUnePhoto, onPlusieursPhotos }) {
+  const F = "'Nunito',sans-serif";
+  return (
+    <div
+      style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex",
+               alignItems:"flex-end", zIndex:200, animation:"fadeIn 0.2s ease" }}
+      onClick={onClose}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{ background:C.white, borderRadius:"20px 20px 0 0", width:"100%",
+                 animation:"slideUp 0.3s ease", overflow:"hidden" }}
+      >
+        <div style={{ background:C.orange, padding:"16px 20px", display:"flex",
+                      alignItems:"center", justifyContent:"space-between" }}>
+          <div style={{ fontFamily:F, fontWeight:900, fontSize:17, color:"#111" }}>
+            🧾 Scanner mon ticket
+          </div>
+          <button onClick={onClose}
+            style={{ background:"rgba(0,0,0,0.12)", border:"none", borderRadius:99,
+                     width:28, height:28, fontSize:14, cursor:"pointer", color:"#111" }}>
+            ✕
+          </button>
+        </div>
+
+        <div style={{ padding:"24px 20px 44px" }}>
+          <div style={{ display:"flex", gap:12, marginBottom:16 }}>
+            <button onClick={onUnePhoto}
+              style={{ flex:1, background:C.green, border:"none", borderRadius:16,
+                       padding:"20px 12px", cursor:"pointer", display:"flex",
+                       flexDirection:"column", alignItems:"center", gap:12 }}>
+              <img src="/scan-plusieurs-photos.png" alt=""
+                style={{ width:96, height:96, objectFit:"contain" }} />
+              <span style={{ fontFamily:F, fontWeight:900, fontSize:17, color:C.white }}>
+                Ticket court
+              </span>
+              <span style={{ fontFamily:F, fontSize:12, color:"rgba(255,255,255,0.85)", textAlign:"center", marginTop:4 }}>
+                Tient en une seule photo
+              </span>
+            </button>
+
+            <button onClick={onPlusieursPhotos}
+              style={{ flex:1, background:"#4A90D9", border:"none", borderRadius:16,
+                       padding:"20px 12px", cursor:"pointer", display:"flex",
+                       flexDirection:"column", alignItems:"center", gap:12 }}>
+              <img src="/scan-1-photo.png" alt=""
+                style={{ width:96, height:96, objectFit:"contain" }} />
+              <span style={{ fontFamily:F, fontWeight:900, fontSize:17, color:C.white }}>
+                Grand ticket
+              </span>
+              <span style={{ fontFamily:F, fontSize:12, color:"rgba(255,255,255,0.85)", textAlign:"center", marginTop:4 }}>
+                On le scanne en plusieurs fois
+              </span>
+            </button>
+          </div>
+
+          <div style={{ fontFamily:F, fontSize:12, color:C.textLight,
+                        textAlign:"center", lineHeight:1.6, padding:"0 8px" }}>
+            💡 Commence toujours par l'en-tête du ticket — nom et adresse du magasin
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── HOME TAB ─────────────────────────────────────────────────────────────────
 function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash, archives = [], pseudo, onStats, onMesPrix, onFaq, onSignOut }) {
   const F = "'Nunito',sans-serif";
@@ -3871,7 +3938,9 @@ export default function App() {
   const [produitsRef, setProduitsRef] = useState([]);
   const [circles,    setCircles]    = useState([]);
   const [autoOpenCamera, setAutoOpenCamera] = useState(false);
-  const handleFlash = () => { setAutoOpenCamera(true); setTab("prices"); };
+  const [showScanChoix, setShowScanChoix]  = useState(false);
+  const handleFlash = () => setShowScanChoix(true);
+  const handleFlashConfirmed = () => { setShowScanChoix(false); setAutoOpenCamera(true); setTab("prices"); };
   const [showCircleSheet,  setShowCircleSheet]  = useState(false);
   const [showStatsSheet,   setShowStatsSheet]   = useState(false);
   const [showFaqSheet,     setShowFaqSheet]     = useState(false);
@@ -4351,6 +4420,13 @@ export default function App() {
         {showStatsSheet   && <StatsSheet   userId={session.user.id} archives={archives} onClose={()=>setShowStatsSheet(false)}/>}
         {showFaqSheet     && <FaqSheet     userId={session.user.id} pseudo={pseudo} onClose={()=>setShowFaqSheet(false)}/>}
         {showMesPrixSheet && <MesPrixSheet priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{ const {id:_id,...rest}=newArc; const {data,error}=await supabase.from('archives').insert({...rest,user_id:session?.user?.id}).select('id').single(); if(error){ showAppToast("⚠️ Archive non sauvegardée, vérifie ta connexion",false); } else { const {data:all}=await supabase.from('archives').select('*').order('date'); if(all) setArchives(all); setShowRating({id:data.id,store:newArc.store}); } }} userId={session?.user?.id} produitsRef={produitsRef} onClose={()=>setShowMesPrixSheet(false)}/>}
+        {showScanChoix && (
+          <ScanChoixSheet
+            onClose={() => setShowScanChoix(false)}
+            onUnePhoto={handleFlashConfirmed}
+            onPlusieursPhotos={() => { setShowScanChoix(false); showAppToast("🚧 Bientôt disponible"); }}
+          />
+        )}
         {loaded && pseudo === null && <PseudoModal onSave={savePseudo}/>}
         {showRating && (
           <StoreRatingScreen
