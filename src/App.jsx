@@ -675,7 +675,7 @@ function FaqSheet({ userId, pseudo, onClose }) {
         <div style={{ background:C.red, padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0, borderRadius:"24px 24px 0 0" }}>
           <div>
             <div style={{ fontFamily:F, fontSize:11, fontWeight:700, color:"rgba(255,255,255,0.6)" }}>PrixMalin</div>
-            <div style={{ fontFamily:F, fontSize:20, fontWeight:900, color:"#fff" }}>Foire aux Questions</div>
+            <div style={{ fontFamily:F, fontSize:20, fontWeight:900, color:"#fff" }}>Nous contacter</div>
           </div>
           <button onClick={onClose} style={{ background:"rgba(255,255,255,0.2)", borderRadius:99, width:36, height:36, border:"none", fontSize:16, color:"#fff", cursor:"pointer" }}>✕</button>
         </div>
@@ -691,9 +691,9 @@ function FaqSheet({ userId, pseudo, onClose }) {
                 <div style={{ fontFamily:F, fontSize:14, fontWeight:700, color:C.green, textAlign:"center", padding:"12px 0" }}>Merci, ton message a été envoyé !</div>
               ) : (<>
                 <select value={feedbackCategorie} onChange={e=>setFeedbackCategorie(e.target.value)} style={{ width:"100%", padding:"10px 12px", borderRadius:10, border:`1.5px solid ${C.grayLight}`, fontFamily:F, fontSize:14, color:C.text, background:"#fff", marginBottom:10, outline:"none", boxSizing:"border-box" }}>
-                  <option value="suggestion">Suggestion</option>
-                  <option value="bug">Bug</option>
-                  <option value="autre">Autre</option>
+                  <option value="suggestion">💡 Suggestion</option>
+                  <option value="probleme">🔧 Signaler un problème</option>
+                  <option value="autre">💬 Autre</option>
                 </select>
                 <textarea value={feedbackMessage} onChange={e=>setFeedbackMessage(e.target.value)} placeholder="Décris ton problème ou ta suggestion…" rows={4} style={{ width:"100%", padding:"10px 12px", borderRadius:10, border:`1.5px solid ${feedbackMessage?C.blue:C.grayLight}`, fontFamily:F, fontSize:14, color:C.text, outline:"none", resize:"none", boxSizing:"border-box", marginBottom:10 }}/>
                 {feedbackError && <div style={{ fontFamily:F, fontSize:12, color:"#CC0000", fontWeight:700, marginBottom:8 }}>⚠️ {feedbackError}</div>}
@@ -3681,7 +3681,7 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash
                 { img:"/menu-cercle.png",     label:"Mon Cercle",          action: () => { setShowMenuProfil(false); onCircle(); } },
                 { img:"/menu-stats.png",       label:"Mes Statistiques",    action: () => { setShowMenuProfil(false); onStats?.(); } },
                 { img:"/menu-prix.png",        label:"Mes Prix",            action: () => { setShowMenuProfil(false); onMesPrix?.(); } },
-                { img:"/menu-faq.png",         label:"Foire aux Questions", action: () => { setShowMenuProfil(false); onFaq?.(); } },
+                { img:"/menu-faq.png",         label:"Nous contacter",      action: () => { setShowMenuProfil(false); onFaq?.(); } },
               ].map(({ img, label, action }) => (
                 <div key={label} onClick={action} style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 16px", cursor:"pointer", borderBottom:"1px solid #F0F0F0" }}
                   onMouseEnter={e => e.currentTarget.style.background="#F9F9F9"}
