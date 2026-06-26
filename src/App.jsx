@@ -3590,7 +3590,7 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
 }
 
 // ── HOME TAB ─────────────────────────────────────────────────────────────────
-function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash, archives = [], pseudo }) {
+function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash, archives = [], pseudo, onStats, onMesPrix, onFaq, onSignOut }) {
   const F = "'Nunito',sans-serif";
   const unchecked = items.filter(i => !i.checked).length;
   const members   = circles.filter(c => c.status === 'accepted');
@@ -3598,6 +3598,15 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash
   const scannedArchives = archives.filter(a => a.ticket_scanned && a.realized_saving != null);
   const cagnotteTotal   = scannedArchives.reduce((a, arc) => a + (arc.realized_saving || 0), 0);
   const potentialTotal  = archives.reduce((a, arc) => a + (arc.potential_saving || 0), 0);
+
+  const [showMenuProfil, setShowMenuProfil] = useState(false);
+  const menuProfilRef = useRef(null);
+  useEffect(() => {
+    if (!showMenuProfil) return;
+    const handler = e => { if (menuProfilRef.current && !menuProfilRef.current.contains(e.target)) setShowMenuProfil(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showMenuProfil]);
 
   const NavBtn = ({ label, icon, target, style = {} }) => (
     <button onClick={() => setTab(target)} style={{
@@ -3639,9 +3648,35 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash
       {/* ── Barre du haut ── */}
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"18px 20px 0", position:"relative", zIndex:10 }}>
 
-        {/* Bouton Moi — haut gauche */}
-        <div onClick={onCircle} style={{ background:"#E5181B", borderRadius:99, width:54, height:54, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:F, fontWeight:900, fontSize:13, color:"#fff", boxShadow:"0 3px 12px rgba(229,24,27,0.45)", cursor:"pointer" }}>
-          {pseudo ? pseudo.substring(0, 6) : "Moi"}
+        {/* Bouton Moi — haut gauche avec dropdown */}
+        <div ref={menuProfilRef} style={{ position:"relative" }}>
+          <div onClick={() => setShowMenuProfil(s => !s)} style={{ background:"#E5181B", borderRadius:99, width:54, height:54, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:F, fontWeight:900, fontSize:13, color:"#fff", boxShadow:"0 3px 12px rgba(229,24,27,0.45)", cursor:"pointer" }}>
+            {pseudo ? pseudo.substring(0, 6) : "Moi"}
+          </div>
+          {showMenuProfil && (
+            <div style={{ position:"absolute", top:60, left:0, width:220, background:"#fff", borderRadius:14, boxShadow:"0 6px 24px rgba(0,0,0,0.16)", zIndex:200, overflow:"hidden" }}>
+              {[
+                { img:"/menu-cercle.png",     label:"Mon Cercle",          action: () => { setShowMenuProfil(false); onCircle(); } },
+                { img:"/menu-stats.png",       label:"Mes Statistiques",    action: () => { setShowMenuProfil(false); onStats?.(); } },
+                { img:"/menu-prix.png",        label:"Mes Prix",            action: () => { setShowMenuProfil(false); onMesPrix?.(); } },
+                { img:"/menu-faq.png",         label:"Foire aux Questions", action: () => { setShowMenuProfil(false); onFaq?.(); } },
+              ].map(({ img, label, action }) => (
+                <div key={label} onClick={action} style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 16px", cursor:"pointer", borderBottom:"1px solid #F0F0F0" }}
+                  onMouseEnter={e => e.currentTarget.style.background="#F9F9F9"}
+                  onMouseLeave={e => e.currentTarget.style.background="transparent"}>
+                  <img src={img} alt="" width={32} height={32} style={{ borderRadius:6, flexShrink:0 }} onError={e => e.target.style.display="none"} />
+                  <span style={{ fontFamily:F, fontWeight:700, fontSize:14, color:"#111" }}>{label}</span>
+                </div>
+              ))}
+              <div style={{ borderTop:"2px solid #EBEBEB" }}/>
+              <div onClick={() => { setShowMenuProfil(false); onSignOut?.(); }} style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 16px", cursor:"pointer" }}
+                onMouseEnter={e => e.currentTarget.style.background="#FEE2E2"}
+                onMouseLeave={e => e.currentTarget.style.background="transparent"}>
+                <img src="/menu-deconnexion.png" alt="" width={32} height={32} style={{ borderRadius:6, flexShrink:0 }} onError={e => e.target.style.display="none"} />
+                <span style={{ fontFamily:F, fontWeight:700, fontSize:14, color:"#CC0000" }}>Se Déconnecter</span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Logo PrixMalin — centre */}
@@ -4264,7 +4299,7 @@ export default function App() {
               )}
             </div>
           )}
-          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircle(true)} onFlash={handleFlash} archives={archives} pseudo={pseudo}/>}
+          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircle(true)} onFlash={handleFlash} archives={archives} pseudo={pseudo} onStats={()=>setTab("economies")} onMesPrix={()=>setTab("prices")} onFaq={()=>{}} onSignOut={handleLogout}/>}
           {loaded && tab==="list"      && <ListTab      items={items} setItems={saveItems} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} setItems={saveItems} setTab={setTab} catalog={catalog} priceDB={priceDB}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius} userPos={userPos}/>}
