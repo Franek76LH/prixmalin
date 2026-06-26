@@ -3654,7 +3654,7 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash
             {pseudo ? pseudo.substring(0, 6) : "Moi"}
           </div>
           {showMenuProfil && (
-            <div style={{ position:"absolute", top:60, left:0, width:220, background:"#fff", borderRadius:14, boxShadow:"0 6px 24px rgba(0,0,0,0.16)", zIndex:200, overflow:"hidden" }}>
+            <div style={{ position:"absolute", top:60, left:0, width:220, background:"#fff", borderRadius:14, boxShadow:"0 6px 24px rgba(0,0,0,0.16)", zIndex:9999, overflow:"hidden" }}>
               {[
                 { img:"/menu-cercle.png",     label:"Mon Cercle",          action: () => { setShowMenuProfil(false); onCircle(); } },
                 { img:"/menu-stats.png",       label:"Mes Statistiques",    action: () => { setShowMenuProfil(false); onStats?.(); } },
@@ -3664,7 +3664,7 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash
                 <div key={label} onClick={action} style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 16px", cursor:"pointer", borderBottom:"1px solid #F0F0F0" }}
                   onMouseEnter={e => e.currentTarget.style.background="#F9F9F9"}
                   onMouseLeave={e => e.currentTarget.style.background="transparent"}>
-                  <img src={img} alt="" width={32} height={32} style={{ borderRadius:6, flexShrink:0 }} onError={e => e.target.style.display="none"} />
+                  <img src={img} alt="" width={32} height={32} style={{ borderRadius:6, flexShrink:0 }} />
                   <span style={{ fontFamily:F, fontWeight:700, fontSize:14, color:"#111" }}>{label}</span>
                 </div>
               ))}
@@ -3672,7 +3672,7 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash
               <div onClick={() => { setShowMenuProfil(false); onSignOut?.(); }} style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 16px", cursor:"pointer" }}
                 onMouseEnter={e => e.currentTarget.style.background="#FEE2E2"}
                 onMouseLeave={e => e.currentTarget.style.background="transparent"}>
-                <img src="/menu-deconnexion.png" alt="" width={32} height={32} style={{ borderRadius:6, flexShrink:0 }} onError={e => e.target.style.display="none"} />
+                <img src="/menu-deconnexion.png" alt="" width={32} height={32} style={{ borderRadius:6, flexShrink:0 }} />
                 <span style={{ fontFamily:F, fontWeight:700, fontSize:14, color:"#CC0000" }}>Se Déconnecter</span>
               </div>
             </div>
