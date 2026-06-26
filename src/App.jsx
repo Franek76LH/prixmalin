@@ -652,7 +652,7 @@ function StatsSheet({ userId, archives, onClose }) {
 function FaqSheet({ userId, pseudo, onClose }) {
   const F = "'Nunito',sans-serif";
   const [showFeedback,      setShowFeedback]      = useState(false);
-  const [feedbackCategorie, setFeedbackCategorie] = useState('bug');
+  const [feedbackCategorie, setFeedbackCategorie] = useState('suggestion');
   const [feedbackMessage,   setFeedbackMessage]   = useState('');
   const [feedbackLoading,   setFeedbackLoading]   = useState(false);
   const [feedbackError,     setFeedbackError]     = useState('');
@@ -691,9 +691,8 @@ function FaqSheet({ userId, pseudo, onClose }) {
                 <div style={{ fontFamily:F, fontSize:14, fontWeight:700, color:C.green, textAlign:"center", padding:"12px 0" }}>Merci, ton message a été envoyé !</div>
               ) : (<>
                 <select value={feedbackCategorie} onChange={e=>setFeedbackCategorie(e.target.value)} style={{ width:"100%", padding:"10px 12px", borderRadius:10, border:`1.5px solid ${C.grayLight}`, fontFamily:F, fontSize:14, color:C.text, background:"#fff", marginBottom:10, outline:"none", boxSizing:"border-box" }}>
-                  <option value="bug">Bug</option>
                   <option value="suggestion">Suggestion</option>
-                  <option value="question">Question</option>
+                  <option value="bug">Bug</option>
                   <option value="autre">Autre</option>
                 </select>
                 <textarea value={feedbackMessage} onChange={e=>setFeedbackMessage(e.target.value)} placeholder="Décris ton problème ou ta suggestion…" rows={4} style={{ width:"100%", padding:"10px 12px", borderRadius:10, border:`1.5px solid ${feedbackMessage?C.blue:C.grayLight}`, fontFamily:F, fontSize:14, color:C.text, outline:"none", resize:"none", boxSizing:"border-box", marginBottom:10 }}/>
