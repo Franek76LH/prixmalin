@@ -3611,6 +3611,119 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
   );
 }
 
+// ── MULTI PHOTO SHEET ────────────────────────────────────────────────────────
+function MultiPhotoSheet({ onClose, onTerminer }) {
+  const F = "'Nunito',sans-serif";
+  const MAX = 6;
+  const [photos, setPhotos] = useState([]);
+  const [adding, setAdding] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setAdding(true);
+    try {
+      const base64 = await imageFileToJpegBase64(file);
+      setPhotos(prev => [...prev, { base64, preview: `data:image/jpeg;base64,${base64}` }]);
+    } catch (_) {}
+    setAdding(false);
+    e.target.value = "";
+  };
+
+  const removePhoto = (idx) => setPhotos(prev => prev.filter((_, i) => i !== idx));
+  const canAdd = photos.length < MAX && !adding;
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex",
+                  alignItems:"flex-end", zIndex:200, animation:"fadeIn 0.2s ease" }}
+         onClick={onClose}>
+      <div onClick={e => e.stopPropagation()}
+           style={{ background:C.white, borderRadius:"20px 20px 0 0", width:"100%",
+                    animation:"slideUp 0.3s ease", maxHeight:"90vh", display:"flex", flexDirection:"column" }}>
+
+        <div style={{ background:"#4A90D9", padding:"16px 20px", display:"flex",
+                      alignItems:"center", justifyContent:"space-between",
+                      flexShrink:0, borderRadius:"20px 20px 0 0" }}>
+          <div style={{ fontFamily:F, fontWeight:900, fontSize:17, color:"white" }}>📸 Grand ticket</div>
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            <span style={{ fontFamily:F, fontWeight:800, fontSize:14, color:"rgba(255,255,255,0.9)" }}>
+              {photos.length} / {MAX} photos
+            </span>
+            <button onClick={onClose}
+              style={{ background:"rgba(255,255,255,0.2)", border:"none", borderRadius:99,
+                       width:28, height:28, fontSize:14, cursor:"pointer", color:"white" }}>✕</button>
+          </div>
+        </div>
+
+        <div style={{ overflowY:"auto", flex:1, padding:"20px 20px 8px" }}>
+          <input ref={fileInputRef} type="file" accept="image/*" capture="environment"
+                 onChange={handleFileChange} style={{ display:"none" }} />
+
+          {photos.length === 0 && !adding && (
+            <div style={{ textAlign:"center", padding:"32px 20px", fontFamily:F, color:C.textLight }}>
+              <div style={{ fontSize:48, marginBottom:12 }}>📷</div>
+              <div style={{ fontWeight:700, fontSize:15, color:C.text, marginBottom:6 }}>Aucune photo pour l'instant</div>
+              <div style={{ fontSize:13, lineHeight:1.6 }}>Commence par l'en-tête du ticket<br/>(nom + adresse du magasin)</div>
+            </div>
+          )}
+
+          {adding && (
+            <div style={{ textAlign:"center", padding:"20px", fontFamily:F, color:C.textLight, fontSize:14 }}>
+              ⏳ Traitement en cours…
+            </div>
+          )}
+
+          {photos.length > 0 && (
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:8, marginBottom:16 }}>
+              {photos.map((p, i) => (
+                <div key={i} style={{ position:"relative", borderRadius:10, overflow:"hidden",
+                                      aspectRatio:"1 / 1", background:"#eee" }}>
+                  <img src={p.preview} alt={`Photo ${i + 1}`}
+                       style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+                  <button onClick={() => removePhoto(i)}
+                    style={{ position:"absolute", top:4, right:4, background:"rgba(0,0,0,0.6)",
+                             border:"none", borderRadius:99, width:22, height:22, color:"white",
+                             fontSize:11, cursor:"pointer", display:"flex",
+                             alignItems:"center", justifyContent:"center" }}>✕</button>
+                  <div style={{ position:"absolute", bottom:4, left:6, fontFamily:F,
+                                fontWeight:900, fontSize:11, color:"white",
+                                textShadow:"0 1px 3px rgba(0,0,0,0.8)" }}>{i + 1}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div style={{ padding:"12px 20px 44px", borderTop:`1px solid ${C.grayLight}`, flexShrink:0 }}>
+          {!canAdd && photos.length >= MAX && (
+            <div style={{ fontFamily:F, fontSize:12, color:C.textLight, textAlign:"center", marginBottom:8 }}>
+              Maximum atteint (6 photos)
+            </div>
+          )}
+          <button onClick={() => canAdd && fileInputRef.current?.click()} disabled={!canAdd}
+            style={{ width:"100%", padding:"14px", marginBottom:10,
+                     border:`2px dashed ${canAdd ? "#4A90D9" : "#ccc"}`, borderRadius:14,
+                     background:"transparent", fontFamily:F, fontWeight:900, fontSize:15,
+                     color:canAdd ? "#4A90D9" : "#bbb", cursor:canAdd ? "pointer" : "default" }}>
+            📷 Ajouter une photo
+          </button>
+          <button onClick={photos.length > 0 ? onTerminer : undefined} disabled={photos.length === 0}
+            style={{ width:"100%", padding:"15px", border:"none", borderRadius:14,
+                     background:photos.length > 0 ? C.green : "#ddd", fontFamily:F,
+                     fontWeight:900, fontSize:15,
+                     color:photos.length > 0 ? "white" : "#aaa",
+                     cursor:photos.length > 0 ? "pointer" : "default" }}>
+            {photos.length > 0
+              ? `✅ J'ai terminé (${photos.length} photo${photos.length > 1 ? "s" : ""})`
+              : "J'ai terminé"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── SCAN CHOIX SHEET ─────────────────────────────────────────────────────────
 function ScanChoixSheet({ onClose, onUnePhoto, onPlusieursPhotos }) {
   const F = "'Nunito',sans-serif";
@@ -3939,6 +4052,7 @@ export default function App() {
   const [circles,    setCircles]    = useState([]);
   const [autoOpenCamera, setAutoOpenCamera] = useState(false);
   const [showScanChoix, setShowScanChoix]  = useState(false);
+  const [showMultiPhoto, setShowMultiPhoto] = useState(false);
   const handleFlash = () => setShowScanChoix(true);
   const handleFlashConfirmed = () => { setShowScanChoix(false); setAutoOpenCamera(true); setTab("prices"); };
   const [showCircleSheet,  setShowCircleSheet]  = useState(false);
@@ -4424,7 +4538,13 @@ export default function App() {
           <ScanChoixSheet
             onClose={() => setShowScanChoix(false)}
             onUnePhoto={handleFlashConfirmed}
-            onPlusieursPhotos={() => { setShowScanChoix(false); showAppToast("🚧 Bientôt disponible"); }}
+            onPlusieursPhotos={() => { setShowScanChoix(false); setShowMultiPhoto(true); }}
+          />
+        )}
+        {showMultiPhoto && (
+          <MultiPhotoSheet
+            onClose={() => setShowMultiPhoto(false)}
+            onTerminer={() => { setShowMultiPhoto(false); showAppToast("🚧 Traitement à venir (brique C)"); }}
           />
         )}
         {loaded && pseudo === null && <PseudoModal onSave={savePseudo}/>}
