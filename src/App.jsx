@@ -3664,7 +3664,7 @@ function MultiPhotoSheet({ onClose, refProducts, onSuccess }) {
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex",
                   alignItems:"flex-end", zIndex:200, animation:"fadeIn 0.2s ease" }}
-         onClick={onClose}>
+         onClick={scanningMulti ? undefined : onClose}>
       <div onClick={e => e.stopPropagation()}
            style={{ background:C.white, borderRadius:"20px 20px 0 0", width:"100%",
                     animation:"slideUp 0.3s ease", maxHeight:"90vh", display:"flex", flexDirection:"column" }}>
@@ -3677,9 +3677,12 @@ function MultiPhotoSheet({ onClose, refProducts, onSuccess }) {
             <span style={{ fontFamily:F, fontWeight:800, fontSize:14, color:"rgba(255,255,255,0.9)" }}>
               {photos.length} / {MAX} photos
             </span>
-            <button onClick={onClose}
+            <button onClick={scanningMulti ? undefined : onClose}
               style={{ background:"rgba(255,255,255,0.2)", border:"none", borderRadius:99,
-                       width:28, height:28, fontSize:14, cursor:"pointer", color:"white" }}>✕</button>
+                       width:28, height:28, fontSize:14,
+                       cursor:scanningMulti ? "default" : "pointer",
+                       color:scanningMulti ? "rgba(255,255,255,0.3)" : "white",
+                       opacity:scanningMulti ? 0.4 : 1 }}>✕</button>
           </div>
         </div>
 
