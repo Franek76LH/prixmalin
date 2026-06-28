@@ -32,3 +32,12 @@ export async function scanTicketWithClaude(imageBase64, refProducts = []) {
   if (data?.error) throw new Error(data.error);
   return data;
 }
+
+export async function scanMultipleTicketsWithClaude(imagesBase64, refProducts = []) {
+  const { data, error } = await supabase.functions.invoke("scan-ticket", {
+    body: { imagesBase64, refProducts },
+  });
+  if (error) throw new Error(error.message);
+  if (data?.error) throw new Error(data.error);
+  return data;
+}

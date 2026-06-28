@@ -32,8 +32,10 @@ serve(async (req) => {
   }
 
   try {
-    const { imageBase64, refProducts = [] } = await req.json();
-    if (!imageBase64) throw new Error("imageBase64 manquant");
+    const { imageBase64, imagesBase64, refProducts = [] } = await req.json();
+    const isMulti = Array.isArray(imagesBase64) && imagesBase64.length > 0;
+    if (!imageBase64 && !isMulti) throw new Error("imageBase64 ou imagesBase64 manquant");
+    const images: string[] = isMulti ? imagesBase64 : [imageBase64 as string];
 
     const apiKey = Deno.env.get("OPENROUTER_API_KEY");
     if (!apiKey) throw new Error("OPENROUTER_API_KEY non configurée côté serveur");
@@ -56,8 +58,13 @@ serve(async (req) => {
         messages: [{
           role: "user",
           content: [
-            { type: "image_url", image_url: { url: `data:image/jpeg;base64,${imageBase64}` } },
-            { type: "text", text: `Analyse ce ticket de caisse et extrait les informations suivantes en JSON uniquement, sans texte avant ou après :
+            ...images.map((b64: string) => ({
+              type: "image_url",
+              image_url: { url: `data:image/jpeg;base64,${b64}` },
+            })),
+            { type: "text", text: `${isMulti
+                ? `Ces ${images.length} images sont des morceaux successifs d'UN SEUL ticket de caisse, pris dans l'ordre de haut en bas. Les photos peuvent se CHEVAUCHER : un même produit peut apparaître en bas d'une photo et en haut de la suivante. Tu dois reconstituer UNE SEULE liste de produits, dans l'ordre, en supprimant les doublons dus au chevauchement (ne compte chaque produit qu'une seule fois). Le magasin et la date sont en général sur la première image.\n\n`
+                : ""}Analyse ce ticket de caisse et extrait les informations suivantes en JSON uniquement, sans texte avant ou après :
 {
   "store": "nom du magasin",
   "date": "YYYY-MM-DD",

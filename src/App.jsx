@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { scanTicketWithClaude, imageFileToJpegBase64 } from "./scanTicket";
+import { scanTicketWithClaude, imageFileToJpegBase64, scanMultipleTicketsWithClaude } from "./scanTicket";
 import { STORES, CATEGORY_META, PRODUCT_SUGGESTIONS, STALE_DAYS } from "./constants";
 import { supabase } from "./lib/supabase";
 
@@ -981,7 +981,7 @@ function AddItemSheet({ onClose, onAdd }) {
 }
 
 // ── IMPORT TICKET SHEET ───────────────────────────────────────────────────────
-function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera = false, onManualEntry }) {
+function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera = false, onManualEntry, initialResult = null }) {
   const [jsonText, setJsonText] = useState("");
   const [status,   setStatus]   = useState(directCamera ? "camera" : "idle");
   const [error,    setError]    = useState("");
@@ -1011,6 +1011,18 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   const [savedGpsCoords,    setSavedGpsCoords]    = useState(null);
   const fileInputRef    = useRef(null);
   const galleryInputRef = useRef(null);
+
+  useEffect(() => {
+    if (!initialResult) return;
+    const enseigne = storeIdFromName(initialResult.store);
+    setResult(initialResult);
+    setSelectedStore(enseigne);
+    setEditableProducts(initialResult.products.map((p, i) => ({ ...p, id: i, keep: true })));
+    setStoreNameEdit(initialResult.store || "");
+    setStoreLocation(initialResult.address || "");
+    fetchKnownStores(enseigne);
+    setStatus("store");
+  }, []);
 
   useEffect(() => {
     if (!(scanning || galleryScanning)) return;
@@ -2743,11 +2755,12 @@ function EconomiesTab({ priceDB, archives, items, setTab }) {
 }
 
 // ── PRICES TAB ────────────────────────────────────────────────────────────────
-function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValidated, onCreateArchive, userId, produitsRef = [], autoOpenCamera = false, onAutoOpenConsumed, hideActions = false }) {
+function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValidated, onCreateArchive, userId, produitsRef = [], autoOpenCamera = false, onAutoOpenConsumed, initialScanResult = null, onInitialScanConsumed, hideActions = false }) {
   const [showImport,    setShowImport]    = useState(false);
+  const [capturedResult] = useState(initialScanResult);
 
   useEffect(() => {
-    if (autoOpenCamera) setShowImport(true);
+    if (autoOpenCamera || capturedResult) setShowImport(true);
   }, []);
   const [showEntry,     setShowEntry]     = useState(false);
   const [editPrice,     setEditPrice]     = useState(null);
@@ -3040,7 +3053,7 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
         </button>
       )}
 
-      {showImport    && <ImportTicketSheet onClose={()=>{setShowImport(false);onAutoOpenConsumed?.();}} onImport={importPrices} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))} directCamera={autoOpenCamera} onManualEntry={()=>{ setShowImport(false); setShowEntry(true); }}/>}
+      {showImport    && <ImportTicketSheet onClose={()=>{setShowImport(false);onAutoOpenConsumed?.();onInitialScanConsumed?.();}} onImport={importPrices} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))} directCamera={autoOpenCamera} onManualEntry={()=>{ setShowImport(false); setShowEntry(true); }} initialResult={capturedResult}/>}
       {showEntry     && <PriceEntrySheet  onClose={()=>{setShowEntry(false);setEditPrice(null);}} onSave={savePrice} existingPrice={editPrice}/>}
       {toast && <Toast msg={toast.msg} ok={toast.ok}/>}
     </div>
@@ -3612,11 +3625,13 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
 }
 
 // ── MULTI PHOTO SHEET ────────────────────────────────────────────────────────
-function MultiPhotoSheet({ onClose, onTerminer }) {
+function MultiPhotoSheet({ onClose, refProducts, onSuccess }) {
   const F = "'Nunito',sans-serif";
   const MAX = 6;
   const [photos, setPhotos] = useState([]);
   const [adding, setAdding] = useState(false);
+  const [scanningMulti, setScanningMulti] = useState(false);
+  const [scanError, setScanError] = useState("");
   const fileInputRef = useRef(null);
 
   const handleFileChange = async (e) => {
@@ -3632,7 +3647,19 @@ function MultiPhotoSheet({ onClose, onTerminer }) {
   };
 
   const removePhoto = (idx) => setPhotos(prev => prev.filter((_, i) => i !== idx));
-  const canAdd = photos.length < MAX && !adding;
+  const canAdd = photos.length < MAX && !adding && !scanningMulti;
+
+  const handleTerminer = async () => {
+    setScanningMulti(true);
+    setScanError("");
+    try {
+      const result = await scanMultipleTicketsWithClaude(photos.map(p => p.base64), refProducts);
+      onSuccess(result);
+    } catch (_) {
+      setScanError("Échec de l'analyse, réessaie");
+    }
+    setScanningMulti(false);
+  };
 
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex",
@@ -3696,9 +3723,14 @@ function MultiPhotoSheet({ onClose, onTerminer }) {
         </div>
 
         <div style={{ padding:"12px 20px 44px", borderTop:`1px solid ${C.grayLight}`, flexShrink:0 }}>
-          {!canAdd && photos.length >= MAX && (
+          {!canAdd && photos.length >= MAX && !scanningMulti && (
             <div style={{ fontFamily:F, fontSize:12, color:C.textLight, textAlign:"center", marginBottom:8 }}>
               Maximum atteint (6 photos)
+            </div>
+          )}
+          {scanError && (
+            <div style={{ fontFamily:F, fontSize:13, color:C.red, fontWeight:700, textAlign:"center", marginBottom:8 }}>
+              ⚠️ {scanError}
             </div>
           )}
           <button onClick={() => canAdd && fileInputRef.current?.click()} disabled={!canAdd}
@@ -3708,15 +3740,18 @@ function MultiPhotoSheet({ onClose, onTerminer }) {
                      color:canAdd ? "#4A90D9" : "#bbb", cursor:canAdd ? "pointer" : "default" }}>
             📷 Ajouter une photo
           </button>
-          <button onClick={photos.length > 0 ? onTerminer : undefined} disabled={photos.length === 0}
+          <button onClick={photos.length > 0 && !scanningMulti ? handleTerminer : undefined}
+                  disabled={photos.length === 0 || scanningMulti}
             style={{ width:"100%", padding:"15px", border:"none", borderRadius:14,
                      background:photos.length > 0 ? C.green : "#ddd", fontFamily:F,
                      fontWeight:900, fontSize:15,
                      color:photos.length > 0 ? "white" : "#aaa",
-                     cursor:photos.length > 0 ? "pointer" : "default" }}>
-            {photos.length > 0
-              ? `✅ J'ai terminé (${photos.length} photo${photos.length > 1 ? "s" : ""})`
-              : "J'ai terminé"}
+                     cursor:photos.length > 0 && !scanningMulti ? "pointer" : "default" }}>
+            {scanningMulti
+              ? "⏳ Analyse en cours…"
+              : photos.length > 0
+                ? `✅ J'ai terminé (${photos.length} photo${photos.length > 1 ? "s" : ""})`
+                : "J'ai terminé"}
           </button>
         </div>
       </div>
@@ -4053,6 +4088,7 @@ export default function App() {
   const [autoOpenCamera, setAutoOpenCamera] = useState(false);
   const [showScanChoix, setShowScanChoix]  = useState(false);
   const [showMultiPhoto, setShowMultiPhoto] = useState(false);
+  const [autoImportResult, setAutoImportResult] = useState(null);
   const handleFlash = () => setShowScanChoix(true);
   const handleFlashConfirmed = () => { setShowScanChoix(false); setAutoOpenCamera(true); setTab("prices"); };
   const [showCircleSheet,  setShowCircleSheet]  = useState(false);
@@ -4511,7 +4547,7 @@ export default function App() {
           {loaded && tab==="list"      && <ListTab      items={items} setItems={saveItems} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} setItems={saveItems} setTab={setTab} catalog={catalog} priceDB={priceDB}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius} userPos={userPos}/>}
-          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
+          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;
             const {data,error}=await supabase.from('archives').insert({...rest,user_id:session?.user?.id}).select('id').single();
             if(error){ console.error("Erreur création archive ticket :",error); showAppToast("⚠️ Archive non sauvegardée, vérifie ta connexion",false); }
@@ -4544,7 +4580,8 @@ export default function App() {
         {showMultiPhoto && (
           <MultiPhotoSheet
             onClose={() => setShowMultiPhoto(false)}
-            onTerminer={() => { setShowMultiPhoto(false); showAppToast("🚧 Traitement à venir (brique C)"); }}
+            refProducts={produitsRef.map(p => ({ nom: p.produit_generique, categorie: p.sous_categorie }))}
+            onSuccess={(result) => { setShowMultiPhoto(false); setAutoImportResult(result); setTab("prices"); }}
           />
         )}
         {loaded && pseudo === null && <PseudoModal onSave={savePseudo}/>}
