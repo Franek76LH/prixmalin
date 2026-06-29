@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { scanTicketWithClaude, imageFileToJpegBase64, scanMultipleTicketsWithClaude } from "./scanTicket";
-import { STORES, CATEGORY_META, PRODUCT_SUGGESTIONS, STALE_DAYS } from "./constants";
+import { STORES, CATEGORY_META, PRODUCT_SUGGESTIONS, STALE_DAYS, JOURS_MOYENNE } from "./constants";
 import { supabase } from "./lib/supabase";
 
 const C = {
@@ -2795,9 +2795,10 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
         if (!archiveItem) return;
         const qty = archiveItem.qty || 1;
         const eKey = `${normName(e.brand||'')}_${normName(e.product)}_${normFormat(e.format||'')}`;
+        const cutoffMoy = Date.now() - JOURS_MOYENNE * 86400000;
         const alts = priceDB.filter(p => {
           const pKey = `${normName(p.brand||'')}_${normName(p.product)}_${normFormat(p.format||'')}`;
-          return pKey === eKey && p.storeId !== e.storeId;
+          return pKey === eKey && p.storeId !== e.storeId && new Date(p.date).getTime() >= cutoffMoy;
         });
         if (alts.length > 0) {
           const avgMarket = alts.reduce((s, p) => s + p.price, 0) / alts.length;
@@ -3089,15 +3090,22 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos }) {
   );
 
   const analysis = useMemo(()=>{
+    const storeMap = Object.fromEntries(storesGeo.map(s => [s.id, s]));
     return items.map(item=>{
       const matches = priceDB.filter(p=>itemMatchesPrice(item,p));
       const byStore = {};
+      const cutoff = Date.now() - STALE_DAYS * 86400000;
       matches.forEach(p=>{
-        if(!byStore[p.storeId]||new Date(p.date)>new Date(byStore[p.storeId].date)) byStore[p.storeId]=p;
+        if(new Date(p.date).getTime() < cutoff) return;
+        if(userPos && p.store_id) {
+          const geo = storeMap[p.store_id];
+          if(geo?.latitude && geo?.longitude && distanceKm(userPos.lat, userPos.lng, geo.latitude, geo.longitude) > searchRadius) return;
+        }
+        if(!byStore[p.storeId]||p.price<byStore[p.storeId].price) byStore[p.storeId]=p;
       });
       return { item, byStore };
     });
-  },[items,priceDB]);
+  },[items, priceDB, userPos, searchRadius, storesGeo]);
 
   const storeTotals = useMemo(()=>{
     const totals={};
@@ -3133,7 +3141,12 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos }) {
   const worstTotal      = ranked.length>1 ? ranked[ranked.length-1].total : 0;
   const savingsVsSecond = (best && secondBest) ? secondBest.total - best.total : 0;
 
-  const bestStoreEntry = best ? priceDB.find(p => p.storeId === best.id && p.store_address?.trim()) : null;
+  const bestStoreEntry = best
+    ? analysis
+        .map(({ byStore }) => byStore[best.id])
+        .filter(p => p?.store_address?.trim())
+        .sort((a, b) => new Date(b.date) - new Date(a.date))[0] ?? null
+    : null;
   const mapsQuery      = best ? `${best.name}${bestStoreEntry ? ' ' + bestStoreEntry.store_address : ''}` : '';
   const mapsUrl        = best ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapsQuery)}` : '#';
   const maxSavings   = best ? worstTotal - best.total : 0;
@@ -4422,9 +4435,10 @@ export default function App() {
         if (!archiveItem) return;
         const qty = archiveItem.qty || 1;
         const eKey = `${normName(e.brand||'')}_${normName(e.product)}_${normFormat(e.format||'')}`;
+        const cutoffMoy = Date.now() - JOURS_MOYENNE * 86400000;
         const alts = priceDB.filter(p => {
           const pKey = `${normName(p.brand||'')}_${normName(p.product)}_${normFormat(p.format||'')}`;
-          return pKey === eKey && p.storeId !== e.storeId;
+          return pKey === eKey && p.storeId !== e.storeId && new Date(p.date).getTime() >= cutoffMoy;
         });
         if (alts.length > 0) {
           const avgMarket = alts.reduce((s, p) => s + p.price, 0) / alts.length;

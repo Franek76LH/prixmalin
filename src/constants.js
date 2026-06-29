@@ -54,3 +54,4 @@ export const PRODUCT_SUGGESTIONS = [
 ];
 
 export const STALE_DAYS = 30;
+export const JOURS_MOYENNE = 60;
