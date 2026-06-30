@@ -1,8 +1,8 @@
 # Modèle de données PrixMalin
-## Version : 1.3
+## Version : 1.4
 **Date : 30 juin 2026**
 **Statut : document fondateur — PrixMalin Core**
-**Périmètre : schéma complet Supabase, toutes tables, tous champs, toutes relations**
+**Périmètre : schéma métier cible du PrixMalin Core, tables, champs et relations ; les tables transverses existantes `profiles` et `feedback` restent conservées hors cœur jusqu’à leur audit détaillé**
 
 ---
 
@@ -44,6 +44,12 @@ Il est la référence unique pour toute migration, tout script SQL, et toute req
 - Renforcement des contraintes de validation des variantes, alias et résolutions OCR
 - Protection des variantes et alias non validés dans les accès publics et le comparateur
 - Clarification des règles de suppression des cercles et de cohérence des montants
+- Alignement avec le référentiel : 14 catégories visibles, `Non classé` restant un état technique
+- Alignement du périmètre legacy : migration directe de `price_db` vers `prices`, archivage de `produits_ref`, `products_catalog` et `savings`, conservation de `profiles` et `feedback`
+- Ajout de `receipts.client_scan_id` pour l’idempotence des envois
+- Ajout de l’unicité partielle de `prices.source_reference` pour les imports
+- Ajout des contraintes temporelles des snapshots
+- Clarification du mode d’accès serveur à `comparable_prices`
 
 ---
 
@@ -55,7 +61,7 @@ Il est la référence unique pour toute migration, tout script SQL, et toute req
 |---|---|
 | `retailers` | Les enseignes normalisées (Leclerc, Lidl, Carrefour…) |
 | `brands` | Les marques normalisées (Barilla, Président, MDD…) |
-| `categories` | Les 15 rayons de niveau 1 |
+| `categories` | Les 14 catégories visibles de niveau 1 |
 | `subcategories` | Les sous-rayons de niveau 2 (5 à 8 par catégorie) |
 | `products` | Les produits génériques de niveau 3 — ancre du référentiel |
 | `product_variants` | Les produits exacts (Barilla Penne Rigate 500 g) |
@@ -72,13 +78,23 @@ Il est la référence unique pour toute migration, tout script SQL, et toute req
 | `favorites` | Les produits favoris des utilisateurs |
 | `shopping_list` | La liste de courses active d'un utilisateur |
 
-### 1.2 Tables héritées à supprimer après migration
+### 1.2 Tables héritées à archiver après migration
 
-| Table | Remplacée par |
+| Table | Traitement cible |
 |---|---|
-| `price_db` | `receipt_lines` + `prices` |
-| `archives` | `prices` avec `is_archived = true` |
-| `community_prices` | `prices` avec `shared_with_circle = true` |
+| `price_db` | Migration directe vers `prices` avec `source_type = 'import'` ; aucune fausse ligne de ticket n’est créée |
+| `archives` | Migration vers `prices` avec `is_archived = true` |
+| `community_prices` | Migration vers `prices` avec `shared_with_circle = true` |
+| `produits_ref` | Source à auditer avant le seed, puis archivage |
+| `products_catalog` | Source partielle à auditer, puis archivage |
+| `savings` | Non reprise automatiquement ; remplacée fonctionnellement par les snapshots après validation |
+
+### 1.3 Tables transverses existantes conservées
+
+| Table | Traitement |
+|---|---|
+| `profiles` | Conservée sans modification structurelle dans cette version ; utilisée notamment pour la définition des rôles si confirmée par l’audit |
+| `feedback` | Conservée sans modification ; hors périmètre du modèle métier Core |
 
 ---
 
@@ -121,7 +137,7 @@ Les marques normalisées. Évite les doublons (Barilla / BARILLA / barilla).
 
 ### 3.1 Table `categories`
 
-Les 15 catégories de niveau 1.
+Les 14 catégories visibles de niveau 1.
 
 | Champ | Type | Contrainte | Description |
 |---|---|---|---|
@@ -130,6 +146,8 @@ Les 15 catégories de niveau 1.
 | `label` | text | NOT NULL | Nom affiché (ex : `Épicerie salée`) |
 | `display_order` | integer | NOT NULL, CHECK >= 0 | Ordre d'affichage |
 | `created_at` | timestamptz | NOT NULL, default now() | Date de création |
+
+**Règle `Non classé` :** aucune catégorie technique `Non classé` n’est créée. Une ligne non résolue reste dans `receipt_lines` avec `product_id = NULL` et une validation générique non validée.
 
 ---
 
@@ -327,6 +345,7 @@ Un ticket de caisse scanné (peut être composé de plusieurs photos).
 |---|---|---|---|
 | `id` | uuid | PK, default gen_random_uuid() | Identifiant unique |
 | `user_id` | uuid | FK → auth.users.id NOT NULL, ON DELETE RESTRICT | Utilisateur ayant scanné |
+| `client_scan_id` | uuid | NOT NULL, UNIQUE | Identifiant généré par le client avant l’envoi — garantit l’idempotence des nouvelles tentatives |
 | `store_id` | uuid | FK → stores.id, nullable, ON DELETE SET NULL | Magasin identifié |
 | `scanned_at` | timestamptz | NOT NULL, default now() | Date et heure du scan |
 | `purchase_date` | date | nullable | Date d'achat indiquée sur le ticket |
@@ -348,12 +367,17 @@ Un ticket de caisse scanné (peut être composé de plusieurs photos).
 **Contraintes :**
 - `CHECK (total_amount >= 0)`
 - `CHECK (photo_count >= 1)`
+- `UNIQUE (client_scan_id)`
 - `CHECK (duplicate_of_receipt_id IS NOT NULL WHEN duplicate_status IN ('duplicate','suspected_duplicate'))`
 - `CHECK (duplicate_of_receipt_id IS NULL WHEN duplicate_status = 'original')`
 - `CHECK (duplicate_of_receipt_id != id)`
 - `CHECK (processing_error IS NOT NULL WHEN processing_status = 'failed')`
 - `CHECK (processed_at IS NOT NULL WHEN processing_status IN ('validated','rejected','failed'))`
 - Index B-tree sur `receipt_fingerprint` (non UNIQUE — les doublons ont leur propre ligne)
+
+**Règle d’idempotence :**
+- si `client_scan_id` existe déjà, l’API retourne le ticket existant sans créer une nouvelle ligne ;
+- le contrôle par `receipt_fingerprint` intervient ensuite pour détecter un même achat transmis avec un nouvel identifiant client.
 
 **Règle métier doublons :**
 - Ticket inédit → `duplicate_status = 'original'`, insertion complète avec lignes et prix
@@ -495,6 +519,8 @@ Les prix validés — source unique de vérité pour toutes les fonctions de com
 - `CHECK (user_id IS NOT NULL WHEN source_type IN ('receipt','manual'))`
 - `CHECK (receipt_line_id IS NOT NULL WHEN source_type = 'receipt')`
 - `CHECK (receipt_line_id IS NULL WHEN source_type IN ('manual','import'))`
+- `CHECK (source_reference IS NOT NULL WHEN source_type = 'import')`
+- `UNIQUE (source_reference) WHERE source_type = 'import' AND source_reference IS NOT NULL`
 - `CHECK (circle_id IS NOT NULL WHEN shared_with_circle = true)`
 - `CHECK (circle_id IS NULL WHEN shared_with_circle = false)`
 - `CHECK (archived_at IS NOT NULL WHEN is_archived = true)`
@@ -508,6 +534,12 @@ Les prix validés — source unique de vérité pour toutes les fonctions de com
 4. `observed_at + 30 jours` (règle applicative par défaut)
 
 Une modification ultérieure de `default_price_validity_days` n'affecte pas les prix existants.
+
+**Gestion de la qualité dans la version 1.4 :**
+- un prix utilisable par le comparateur possède `is_validated = true`, `is_archived = false` et une date `valid_until` non dépassée ;
+- un prix suspect ou en attente de revue possède `is_validated = false` ;
+- une erreur rejetée, une donnée historique ou une observation remplacée peut être conservée avec `is_archived = true` ;
+- les statuts détaillés d’anomalie pourront être ajoutés ultérieurement sans modifier cette règle d’accès.
 
 **Règle `promotion_end_date` :**
 - Applicable pour `price_type` ∈ `{promo, loyalty_card, batch}`
@@ -544,6 +576,8 @@ WHERE is_validated = true
   AND product_id IS NOT NULL
 ```
 
+**Mode d’accès :** la vue est créée avec `security_invoker = true`, mais son accès direct est révoqué pour `anon` et `authenticated`. Le comparateur l’interroge côté serveur ou via une Edge Function, afin de ne jamais exposer les données personnelles sources.
+
 La vue masque les variantes non validées avec une expression de type :
 ```sql
 CASE
@@ -575,6 +609,10 @@ Chaque calcul du comparateur est figé dans un snapshot.
 | `missing_item_count` | integer | nullable, CHECK >= 0 | Nombre d'articles sans prix disponible |
 | `filters_applied` | jsonb | nullable | Filtres utilisés |
 | `created_at` | timestamptz | NOT NULL, default now() | Date de création |
+
+**Contraintes :**
+- `CHECK (period_end >= period_start)`
+- `CHECK (expires_at IS NULL OR expires_at >= computed_at)`
 
 **ON DELETE :** suppression d'un snapshot → CASCADE sur `recommendation_snapshot_items`.
 
@@ -777,9 +815,11 @@ auth.users (1)
 | `prices` | `(product_id, store_id, observed_at DESC)` WHERE `is_validated = true AND is_archived = false` | B-tree partiel | Requêtes comparateur |
 | `prices` | `(user_id, observed_at)` | B-tree | Historique utilisateur |
 | `prices` | `receipt_line_id` WHERE `receipt_line_id IS NOT NULL` | B-tree UNIQUE partiel | Unicité ligne → prix |
+| `prices` | `source_reference` WHERE `source_type = 'import' AND source_reference IS NOT NULL` | B-tree UNIQUE partiel | Idempotence des imports |
 | `receipt_lines` | `receipt_id` | B-tree | Chargement des lignes d'un ticket |
 | `receipt_lines` | `product_id` | B-tree | Jointures vers prices |
 | `receipt_lines` | `image_id` | B-tree | Jointures vers receipt_images |
+| `receipts` | `client_scan_id` | B-tree UNIQUE | Idempotence des envois |
 | `receipts` | `receipt_fingerprint` | B-tree | Détection doublons — non UNIQUE |
 | `receipts` | `user_id` | B-tree | Historique utilisateur |
 | `receipts` | `store_id` | B-tree | Filtrage par magasin |
@@ -878,9 +918,14 @@ Le SQL de ces déclencheurs est dans le document 06. Ce document décrit égalem
 
 | Table actuelle | Action |
 |---|---|
-| `price_db` | Migration vers `receipt_lines` + `prices`, puis suppression |
-| `archives` | Migration vers `prices` avec `is_archived = true`, puis suppression |
-| `community_prices` | Migration vers `prices` avec `shared_with_circle = true`, puis suppression |
+| `price_db` | Migration directe vers `prices` avec `source_type = 'import'`, puis archivage |
+| `archives` | Migration vers `prices` avec `is_archived = true`, puis archivage |
+| `community_prices` | Migration vers `prices` avec `shared_with_circle = true`, puis archivage |
+| `produits_ref` | Audit, utilisation éventuelle pour le seed, puis archivage |
+| `products_catalog` | Audit, rapprochement éventuel avec le référentiel, puis archivage |
+| `savings` | Conservation legacy sans reprise automatique, puis archivage après validation |
+| `profiles` | Conservée hors cœur sans modification dans cette version |
+| `feedback` | Conservée hors cœur sans modification |
 | `stores.enseigne` | Conservé pendant la migration, remplacé par `retailer_id` |
 | `favorites` | Ajout de `product_id` et `product_variant_id`, conservé |
 | `shopping_list` | Ajout de `product_id` et `product_variant_id`, conservé |
@@ -898,4 +943,5 @@ Le plan détaillé (ordre des migrations, scripts, tests, points de non-retour) 
 | v1.1 | juin 2026 | Ajout quantité/unité/prix unitaire |
 | v1.2 | 29 juin 2026 | freshness_class, price_type, receipt_fingerprint, scores de confiance, stores.status, recommendation_snapshots |
 | v1.3 | 30 juin 2026 | retailers, brands, product_variants (avec modération), circle_members, receipt_images ; correction gestion doublons ; processing_status ; line_number/line_type/montants bruts ; validations séparées avec méthode de validation ; correction contradiction validation automatique ; correction unicité alias NULL ; correction priorité valid_until (NOT NULL) ; source_type, currency_code, is_archived ; merged_into_store_id ; enrichissement snapshots ; correction signe saving_vs_avg ; vue sécurisée comparateur ; tables circles/favorites/shopping_list documentées ; création automatique du propriétaire de cercle ; limitation à un seul cercle actif ; protection des variantes et alias non validés ; harmonisation complète ON DELETE, index, RLS et contraintes de cohérence |
+| v1.4 | 30 juin 2026 | Alignement transversal : 14 catégories visibles, client_scan_id, idempotence des imports, contraintes temporelles des snapshots, périmètre legacy complet et accès serveur sécurisé à comparable_prices |
 

@@ -1,7 +1,7 @@
 # Référentiel Produit PrixMalin
 
-**Version : 1.1**  
-**Date : 29 juin 2026**  
+**Version : 1.2**  
+**Date : 30 juin 2026**  
 **Statut : document fondateur — PrixMalin Core**  
 **Périmètre : classification des produits, règles de rattachement et gouvernance du référentiel**
 
@@ -142,7 +142,7 @@ Une suppression métier doit être réalisée par désactivation ou remplacement
 
 # 4. Modèle conceptuel du produit
 
-Le référentiel distingue quatre niveaux métier.
+Le référentiel distingue les niveaux métier suivants.
 
 ```text
 Catégorie
@@ -158,13 +158,24 @@ Alias de ticket
 Observations de prix
 ```
 
+**Correspondance avec le modèle de données :**
+
+| Concept métier | Élément technique |
+|---|---|
+| Catégorie | `categories` |
+| Sous-catégorie | `subcategories` |
+| Produit générique | `products` |
+| Produit de référence | `product_variants` |
+| Alias de ticket | `product_aliases` |
+| Observation de prix | `prices` |
+
 ## 4.1. Catégorie
 
 La catégorie est le niveau principal de navigation.
 
 PrixMalin comporte **14 catégories visibles par l’utilisateur**.
 
-L’état **Non classé** constitue une quinzième entrée technique, mais ce n’est pas une catégorie utilisateur.
+L’état **Non classé** est un état technique de résolution. Il ne constitue pas une ligne de la table `categories`. Dans le modèle de données, il correspond à une ligne de ticket dont `product_id` est nul et dont la validation générique reste en attente.
 
 ## 4.2. Sous-catégorie
 
@@ -433,13 +444,20 @@ Le moteur de reconnaissance doit pouvoir tenir compte de :
 
 ## 7.3. Cycle de vie d’un alias
 
+Le modèle initial utilise trois statuts persistés :
+
 ```text
-observé
-→ candidat
-→ validé
-→ contesté
-→ désactivé
+pending
+→ validated
+ou
+→ rejected
 ```
+
+- `pending` : alias observé ou proposé, non utilisable pour une résolution automatique à forte confiance ;
+- `validated` : alias contrôlé et utilisable dans sa portée ;
+- `rejected` : correspondance refusée.
+
+Lorsqu’un alias validé devient ambigu ou contesté, il revient à `pending` pendant la revue. Les notions « contesté » et « désactivé » décrivent donc un comportement métier, pas des valeurs supplémentaires stockées dans `validation_status`.
 
 ---
 
@@ -495,10 +513,14 @@ Toute proposition doit préciser :
 
 Chaque catégorie, sous-catégorie et produit générique doit disposer d’un identifiant technique stable.
 
+- `categories.slug` et `subcategories.slug` fournissent des identifiants lisibles et versionnés ;
+- `products.id` constitue l’identifiant stable du produit générique ;
+- les UUID du référentiel sont fournis par le seed et ne doivent pas être régénérés à chaque environnement.
+
 ```text
-category_slug = epicerie_salee
+category_slug = epicerie-salee
 subcategory_slug = pates
-generic_product_slug = penne
+product_id = UUID stable fourni par le seed
 ```
 
 ## 9.4. Source officielle et déploiement
@@ -535,6 +557,7 @@ L’application ne doit pas analyser directement le Markdown en production.
 |---|---|---|
 | 1.0 | Juin 2026 | Version fondatrice de l’arborescence |
 | 1.1 | 29 juin 2026 | Séparation produit générique / produit de référence, formalisation des alias, observations de prix, gouvernance et clarification des 14 catégories visibles + état Non classé |
+| 1.2 | 30 juin 2026 | Alignement avec le modèle de données v1.4 : correspondance des tables, Non classé comme état technique, statuts d’alias unifiés et identifiants stables du seed |
 
 ---
 
