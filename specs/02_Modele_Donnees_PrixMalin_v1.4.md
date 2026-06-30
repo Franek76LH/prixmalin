@@ -681,7 +681,8 @@ Les membres d'un cercle — nécessaire pour appliquer les règles RLS de partag
 **Création automatique du propriétaire :** lors de la création d’un cercle, une ligne `circle_members` est créée automatiquement avec `user_id = circles.created_by`, `role = 'owner'`, `status = 'active'` et `joined_at = created_at`.
 
 **Politique RLS :**
-- Seuls les membres actifs d’un cercle peuvent lire les données liées à ce cercle.
+- Les membres actifs peuvent lire les données du cercle.
+- Un utilisateur invité peut lire uniquement les informations nécessaires à sa propre invitation en attente.
 - Le créateur du cercle peut gérer les membres et leurs rôles.
 - Un utilisateur invité peut uniquement accepter ou refuser sa propre invitation.
 - Un membre ne peut pas modifier lui-même son `role`, son `circle_id` ou son `user_id`.
@@ -833,6 +834,12 @@ auth.users (1)
 | `circle_members` | `(circle_id, user_id)` | B-tree UNIQUE | Unicité membre/cercle |
 | `circle_members` | `user_id` WHERE `status = 'active'` | B-tree UNIQUE partiel | Un seul cercle actif par utilisateur |
 | `circle_members` | `circle_id` WHERE `role = 'owner' AND status = 'active'` | B-tree UNIQUE partiel | Un seul propriétaire actif par cercle |
+| `product_variants` | `(created_by, validation_status)` | B-tree | Politiques RLS créateur/statut |
+| `product_aliases` | `(created_by, validation_status)` | B-tree | Politiques RLS créateur/statut |
+| `stores` | `(created_by, status)` | B-tree | Propositions de magasins |
+| `prices` | `circle_id` WHERE `shared_with_circle = true` | B-tree partiel | Lecture des prix partagés |
+| `circles` | `created_by` | B-tree | Gestion par le créateur |
+| `shopping_list` | `user_id` | B-tree | Accès propriétaire |
 
 **Note :** une extension `pg_trgm` (trigrammes PostgreSQL) devra être activée sur Supabase pour la recherche approximative sur `normalized_alias` et `receipt_lines.raw_text`. Détails dans le document 06.
 
@@ -849,19 +856,21 @@ auth.users (1)
 | `products` | Publique | Admin uniquement |
 | `product_variants` | Variantes `validated` publiques ; variantes `pending` visibles par leur créateur et les admins ; variantes `rejected` réservées aux admins et, si nécessaire, au créateur | Admin + utilisateurs authentifiés (statut `pending` à la création) |
 | `product_aliases` | Alias `validated` publics ; alias `pending` visibles par leur créateur et les admins ; alias `rejected` réservés aux admins et, si nécessaire, au créateur | Admin + utilisateurs authentifiés (statut `pending` à la création) |
-| `stores` | Publique | Voir règles section 4 |
-| `receipts` | Propriétaire | Propriétaire |
-| `receipt_images` | Via `receipts.user_id` (propriétaire) | Via `receipts.user_id` (propriétaire) |
-| `receipt_lines` | Via `receipts.user_id` (propriétaire) | Via `receipts.user_id` (propriétaire) |
-| `prices` | Propriétaire + membres actifs du cercle si `shared_with_circle` | Propriétaire |
-| `recommendation_snapshots` | Propriétaire | Propriétaire |
-| `recommendation_snapshot_items` | Via `recommendation_snapshots.user_id` (propriétaire) | Via `recommendation_snapshots.user_id` (propriétaire) |
-| `circles` | Membres actifs du cercle | Créateur |
-| `circle_members` | Membres actifs du cercle | Créateur du cercle ; l’utilisateur invité peut uniquement accepter ou refuser sa propre invitation, sans modifier son rôle ni son rattachement |
+| `stores` | Publique | Création `unverified` par utilisateur ; modification et validation via serveur |
+| `receipts` | Propriétaire + admin | Serveur uniquement |
+| `receipt_images` | Via `receipts.user_id` + admin | Serveur uniquement |
+| `receipt_lines` | Via `receipts.user_id` + admin | Serveur ou RPC de confirmation limitée |
+| `prices` | Propriétaire + membres actifs du cercle + admin | Serveur ou RPC métier uniquement |
+| `recommendation_snapshots` | Propriétaire + admin | Serveur uniquement |
+| `recommendation_snapshot_items` | Via `recommendation_snapshots.user_id` + admin | Serveur uniquement |
+| `circles` | Membres actifs, utilisateur invité pour sa propre invitation, admin | Création directe ; modification limitée du nom/code ; opérations sensibles côté serveur |
+| `circle_members` | Propre ligne + membres actifs du cercle + admin | RPC dédiées uniquement |
 | `favorites` | Propriétaire | Propriétaire |
 | `shopping_list` | Propriétaire | Propriétaire |
 
-**Note :** les tables sans `user_id` direct (`receipt_lines`, `receipt_images`, `recommendation_snapshot_items`) vérifient le propriétaire par jointure vers leur table parente.
+**Note :** les tables sans `user_id` direct (`receipt_lines`, `receipt_images`, `recommendation_snapshot_items`) vérifient le propriétaire par une fonction auxiliaire sécurisée ou une jointure vers leur table parente.
+
+**Canal d’écriture :** les droits de propriétaire décrivent la visibilité métier. Les tables de preuve, de validation, de prix et de recommandation ne sont pas modifiables directement depuis le client. Le document 08 définit les RPC et accès serveur autorisés.
 
 ---
 

@@ -92,9 +92,11 @@ Snapshots et recommandations
 - `stores` ;
 - `retailers`.
 
-**Écritures :**
+**Écritures côté serveur :**
 - `prices` ;
 - éventuellement `stores` avec `status = unverified`.
+
+Le navigateur ne possède pas de droit direct d’insertion dans `prices`. La saisie passe par une Edge Function ou une RPC métier validant le produit, le magasin, la date et la fraîcheur.
 
 **Valeurs principales :**
 
@@ -221,7 +223,9 @@ La formulation « économie réalisée » reste inactive tant qu’un lien expli
 **Règles :**
 - un utilisateur appartient à un seul cercle actif ;
 - plusieurs invitations en attente sont possibles ;
-- un prix peut être partagé avec le cercle actif ;
+- l’invitation, l’acceptation, le retrait et la sortie d’un cercle passent par des RPC dédiées ;
+- aucune modification directe de `circle_members` n’est accordée au client ;
+- un prix peut être partagé avec le cercle actif via une opération serveur ;
 - les alias et variantes proposés par un utilisateur restent `pending` ;
 - les catégories, sous-catégories et produits génériques sont administrés.
 
@@ -320,7 +324,18 @@ Un utilisateur invité ne peut modifier que sa propre réponse à une invitation
 
 Son accès direct est révoqué pour `anon` et `authenticated`. Une Edge Function ou un service serveur exécute le calcul et renvoie uniquement le résultat nécessaire.
 
-### 6.3 Tables personnelles
+### 6.3 Canaux d’écriture
+
+| Données | Canal |
+|---|---|
+| Favoris et liste de courses | accès direct propriétaire protégé par RLS |
+| Proposition de variante ou alias | insertion directe en `pending` |
+| Proposition de magasin | insertion directe en `unverified` |
+| Tickets, lignes OCR, prix et snapshots | serveur uniquement |
+| Confirmation d’une ligne | RPC ou Edge Function limitée |
+| Gestion des membres d’un cercle | RPC dédiées |
+
+### 6.4 Tables personnelles
 
 | Table | Accès |
 |---|---|

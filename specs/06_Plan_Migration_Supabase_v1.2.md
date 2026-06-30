@@ -2,13 +2,13 @@
 ## Version : 1.2
 **Date : 30 juin 2026**  
 **Statut : document fondateur audité — prêt pour préparation des migrations**  
-**Périmètre : migration de la base Supabase actuelle vers le modèle de données PrixMalin v1.4**
+**Périmètre : migration de la base Supabase actuelle vers le modèle de données PrixMalin v1.3 corrigé**
 
 ---
 
 ## 0. Objet du document
 
-Ce document décrit la stratégie permettant de faire évoluer la base Supabase actuelle vers le modèle de données PrixMalin v1.4, sans perte de données, sans exposition temporaire des nouvelles tables et avec une bascule contrôlée de l’application.
+Ce document décrit la stratégie permettant de faire évoluer la base Supabase actuelle vers le modèle de données PrixMalin v1.3 corrigé, sans perte de données, sans exposition temporaire des nouvelles tables et avec une bascule contrôlée de l’application.
 
 Il répond à six questions :
 
@@ -22,9 +22,9 @@ Il répond à six questions :
 ### Documents de référence
 
 - Document 01 : version validée la plus récente du référentiel produit PrixMalin.
-- Document 02 : modèle de données PrixMalin v1.4.
+- Document 02 : modèle de données PrixMalin v1.3 corrigé.
 - Document 03 : règles de reconnaissance et de double validation générique/exacte.
-- Document 08 à produire : politiques RLS et fonctions d’autorisation.
+- Document 08 v1.1 : politiques RLS, fonctions d’autorisation et RPC sécurisées.
 
 ### Clarification relative au CLI Supabase
 
@@ -755,10 +755,11 @@ WHERE role = 'owner' AND status = 'active';
 CREATE INDEX circle_members_circle_idx
 ON public.circle_members (circle_id, status);
 
-CREATE OR REPLACE FUNCTION public.create_circle_owner()
+CREATE OR REPLACE FUNCTION private.create_circle_owner()
 RETURNS trigger
 LANGUAGE plpgsql
-SET search_path = public, pg_temp
+SECURITY DEFINER
+SET search_path = ''
 AS $$
 BEGIN
   INSERT INTO public.circle_members (
@@ -772,13 +773,16 @@ BEGIN
 END;
 $$;
 
+REVOKE ALL ON FUNCTION private.create_circle_owner()
+FROM PUBLIC, anon, authenticated;
+
 CREATE TRIGGER circles_v2_updated_at
 BEFORE UPDATE ON public.circles_v2
 FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 CREATE TRIGGER circles_v2_create_owner
 AFTER INSERT ON public.circles_v2
-FOR EACH ROW EXECUTE FUNCTION public.create_circle_owner();
+FOR EACH ROW EXECUTE FUNCTION private.create_circle_owner();
 
 ALTER TABLE public.circles_v2 ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.circle_members ENABLE ROW LEVEL SECURITY;
@@ -1388,6 +1392,10 @@ Le document 08 contient le détail des politiques, mais leur déploiement est un
 
 ### 15.1 Points minimaux
 
+- aucune politique récursive sur `circle_members` ;
+- les fonctions `SECURITY DEFINER` utilisent un `search_path` vide et des relations qualifiées ;
+- les tickets, lignes OCR, prix et snapshots sont en écriture serveur uniquement ;
+- les invitations et réponses de cercle passent par les RPC du document 08 ;
 - tables de référence : lecture publique contrôlée, écriture administrateur ;
 - variantes et alias : visibilité selon `validation_status` et `created_by` ;
 - magasins : création `unverified` par utilisateur authentifié, validation administrateur ;
@@ -1688,6 +1696,9 @@ La date du 28 juillet 2026 ne doit être conservée comme contrainte absolue qu�
 
 - [ ] RLS est activée sur toutes les nouvelles tables publiques.
 - [ ] Les politiques du document 08 sont déployées avant la bascule.
+- [ ] Aucun droit direct `INSERT/UPDATE/DELETE` n’est accordé à `authenticated` sur les tickets, lignes OCR, prix ou snapshots.
+- [ ] Les tests utilisent au minimum deux utilisateurs normaux distincts, un admin, `anon` et `service_role`.
+- [ ] Les tables `profiles` et `feedback` ont été auditées ou restent en refus par défaut.
 - [ ] Les photos de ticket sont dans un bucket privé.
 - [ ] `comparable_prices` n’est pas accessible directement aux clients.
 - [ ] La clé `service_role` est utilisée uniquement côté serveur.
