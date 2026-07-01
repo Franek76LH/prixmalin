@@ -849,27 +849,69 @@ function AddItemSheet({ onClose, onAdd }) {
   const [brandFixed, setBrandFixed] = useState(false);
   const [added,       setAdded]       = useState([]);
   const [suggestions, setSuggestions] = useState([]);
+  const [produit_id,  setProduitId]   = useState(null);
+  const [variantes,   setVariantes]   = useState([]);
+  const [variante_id, setVarianteId]  = useState(null);
 
-  const canSubmit = product.trim() && format.trim();
+  const canSubmit = product.trim() && (variantes.length === 0 ? format.trim() : (variante_id !== null));
 
   const submit = () => {
-    if(!canSubmit) return;
-    const item = { id:Date.now(), product:product.trim(), format:format.trim(), brand:brandFixed?brand.trim():"", qty, checked:false };
+    if (!canSubmit) return;
+    const item = {
+      id:                  Date.now(),
+      product:             product.trim(),
+      format:              variante_id && variante_id !== 'any'
+                             ? (variantes.find(v => v.id === variante_id)?.libelle || '')
+                             : format.trim(),
+      brand:               brandFixed ? brand.trim() : '',
+      qty,
+      checked:             false,
+      produit_id:          produit_id || null,
+      variante_produit_id: variante_id && variante_id !== 'any' ? variante_id : null,
+    };
     onAdd(item);
-    setAdded(prev=>[...prev, item]);
-    setProduct(""); setFormat(""); setBrand(""); setQty(1); setBrandFixed(false);
+    setAdded(prev => [...prev, item]);
+    setProduct(''); setFormat(''); setBrand(''); setQty(1); setBrandFixed(false);
+    setProduitId(null); setVariantes([]); setVarianteId(null);
   };
 
-  const pickSuggestion = s => { setProduct(s.name); setFormat(s.format); };
+  const pickSuggestion = async s => {
+    const nom = s.produits?.nom_reference || s.libelle_alias;
+    setProduct(nom);
+    setSuggestions([]);
+    const pid = s.produit_id || null;
+    setProduitId(pid);
+    setVarianteId(null);
+    setFormat('');
+    if (pid) {
+      const { data } = await supabase
+        .from('variantes_produit')
+        .select('id, libelle')
+        .eq('produit_id', pid)
+        .eq('actif', true)
+        .order('quantite_nette');
+      setVariantes(data || []);
+    } else {
+      setVariantes([]);
+    }
+  };
 
   const searchProducts = async val => {
     if (val.length < 2) { setSuggestions([]); return; }
-    const { data } = await supabase.from('price_db')
-      .select('product')
-      .ilike('product', `%${val}%`)
-      .limit(6);
-    const names = [...new Set((data||[]).map(r=>r.product))].slice(0, 6);
-    setSuggestions(names);
+    const { data } = await supabase
+      .from('alias_produits')
+      .select('libelle_alias, produit_id, produits(nom_reference)')
+      .ilike('libelle_alias', `%${val}%`)
+      .eq('statut', 'actif')
+      .limit(8);
+    const seen = new Set();
+    const deduped = (data || []).filter(r => {
+      const key = r.produit_id;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    setSuggestions(deduped);
   };
 
   return (
@@ -926,10 +968,10 @@ function AddItemSheet({ onClose, onAdd }) {
                 {suggestions.map((s, i) => (
                   <button
                     key={i}
-                    onClick={()=>{ setProduct(s); setSuggestions([]); }}
+                    onClick={()=>pickSuggestion(s)}
                     style={{ display:"block", width:"100%", padding:"11px 16px", background:"transparent", border:"none", borderBottom:i<suggestions.length-1?`1px solid ${C.grayLight}`:"none", fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:14, color:C.text, cursor:"pointer", textAlign:"left" }}
                   >
-                    {s}
+                    {s.produits?.nom_reference || s.libelle_alias}
                   </button>
                 ))}
               </div>
@@ -937,8 +979,40 @@ function AddItemSheet({ onClose, onAdd }) {
           </div>
 
           {/* Format */}
-          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Format / Volume *</div>
-          <input value={format} onChange={e=>setFormat(e.target.value)} placeholder="Ex : 1L, 1,5L, 500g, 1kg, x6..." style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${format?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:15, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:14 }} />
+          {variantes.length > 0 ? (
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 12, color: C.textLight, marginBottom: 6 }}>Format</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {variantes.map(v => (
+                  <button key={v.id} onClick={() => setVarianteId(v.id)}
+                    style={{
+                      padding: '8px 14px', borderRadius: 20, fontSize: 14, cursor: 'pointer',
+                      background: variante_id === v.id ? C.green : C.grayLight,
+                      color:      variante_id === v.id ? C.white : C.text,
+                      border:     variante_id === v.id ? `2px solid ${C.green}` : `2px solid transparent`,
+                      fontWeight: variante_id === v.id ? 700 : 400,
+                    }}>
+                    {v.libelle}
+                  </button>
+                ))}
+                <button onClick={() => setVarianteId('any')}
+                  style={{
+                    padding: '8px 14px', borderRadius: 20, fontSize: 14, cursor: 'pointer',
+                    background: variante_id === 'any' ? C.gray : C.grayLight,
+                    color:      variante_id === 'any' ? C.white : C.textLight,
+                    border:     '2px solid transparent',
+                    fontWeight: 400,
+                  }}>
+                  Format indifférent
+                </button>
+              </div>
+            </div>
+          ) : (
+            <input placeholder="Format (ex: 1L, 500g…)" value={format}
+              onChange={e => setFormat(e.target.value)}
+              style={{ width:'100%', padding:'10px 12px', borderRadius:10, border:`1px solid ${C.grayLight}`,
+                fontSize:15, boxSizing:'border-box', marginBottom:12 }}/>
+          )}
 
           {/* Marque optionnelle */}
           <div style={{ background:C.grayLight, borderRadius:12, padding:"12px 16px", marginBottom:18 }}>
@@ -4295,7 +4369,7 @@ export default function App() {
     try {
       // Rapprochement automatique via alias_produits (correspondance exacte uniquement)
       let produit_id = item.produit_id ?? null;
-      let texte_libre = item.product;
+      let texte_libre = item.produit_id ? null : item.product;
       if (!produit_id && item.product?.trim()) {
         const { data: aliases } = await supabase
           .from('alias_produits')
