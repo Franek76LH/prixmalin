@@ -2211,13 +2211,13 @@ function ProductPickerSheet({ category, onClose, onAdd, items, catalog = [], ope
   );
 }
 
-function CatalogTab({ items, setItems, setTab, catalog, priceDB }) {
+function CatalogTab({ items, onAdd, setTab, catalog, priceDB }) {
   const [selectedCat,  setSelectedCat]  = useState(null);
   const [openProduct,  setOpenProduct]  = useState(null);
   const [searchQuery,  setSearchQuery]  = useState("");
   const totalInList = items.filter(i=>!i.checked).length;
 
-  const addItem = item => setItems([...items, item]);
+  const addItem = item => onAdd(item);
 
   const searchResults = searchQuery.trim()
     ? catalog.filter(p => p.product_name?.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -2404,17 +2404,17 @@ function EditItemSheet({ item, onClose, onSave }) {
 }
 
 // ── LIST TAB ──────────────────────────────────────────────────────────────────
-function ListTab({ items, setItems, setTab, favorites, saveFavorites, searchRadius, setSearchRadius, userPos, setUserPos }) {
+function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites, saveFavorites, searchRadius, setSearchRadius, userPos, setUserPos }) {
   const [showAdd,      setShowAdd]      = useState(false);
   const [showFavModal, setShowFavModal] = useState(false);
   const [editItem,     setEditItem]     = useState(null);
   const [toast,        setToast]        = useState(null);
 
   const showToast = (msg, ok=true) => { setToast({msg,ok}); setTimeout(()=>setToast(null),2500); };
-  const addItem       = item => { setItems([...items, item]); showToast(`✓ ${item.product} ajouté`); };
-  const toggleCheck   = id  => setItems(items.map(i=>i.id===id?{...i,checked:!i.checked}:i));
-  const removeItem    = id  => setItems(items.filter(i=>i.id!==id));
-  const updateItem    = updated => setItems(items.map(i=>i.id===updated.id?updated:i));
+  const addItem       = item => { onAdd(item); showToast(`✓ ${item.product} ajouté`); };
+  const toggleCheck   = id  => onToggle(id);
+  const removeItem    = id  => onRemove(id);
+  const updateItem    = updated => onUpdate(updated);
   const removeFavorite = i  => saveFavorites(favorites.filter((_,idx)=>idx!==i));
   const unchecked = items.filter(i=>!i.checked);
   const checked   = items.filter(i=>i.checked);
@@ -2428,32 +2428,33 @@ function ListTab({ items, setItems, setTab, favorites, saveFavorites, searchRadi
 
   // Recharger les favoris dans la liste
   const loadFavorites = () => {
+    items.forEach(i => onRemove(i.id));
     const newItems = favorites.map(f=>({ ...f, id:Date.now()+Math.random(), checked:false }));
-    setItems(newItems);
+    newItems.forEach(item => onAdd(item));
     setShowFavModal(false);
   };
 
   // Ajouter les favoris à la liste existante (sans effacer)
   const appendFavorites = () => {
     const newItems = favorites.map(f=>({ ...f, id:Date.now()+Math.random(), checked:false }));
-    setItems([...items, ...newItems]);
+    newItems.forEach(item => onAdd(item));
     setShowFavModal(false);
   };
 
   const ItemRow = ({item, done}) => (
-    <div style={{ display:"flex", alignItems:"center", gap:12, background:done?C.grayLight:C.white, borderRadius:12, padding:"12px 14px", border:`1px solid ${done?C.grayLight:C.grayLight}`, opacity:done?0.65:1, boxShadow:done?"none":"0 1px 4px rgba(0,0,0,0.06)" }}>
+    <div style={{ display:"flex", alignItems:"center", gap:12, background:done?'#F3FAF5':C.white, borderRadius:12, padding:"12px 14px", border:`1px solid ${done?'#C8E6C9':C.grayLight}`, opacity:1, boxShadow:done?'inset 3px 0 0 #4CAF50':'0 1px 4px rgba(0,0,0,0.06)' }}>
       <button onClick={()=>toggleCheck(item.id)} style={{ width:26, height:26, borderRadius:6, border:`2px solid ${done?C.green:C.blue}`, background:done?C.green:C.white, cursor:"pointer", flexShrink:0, color:C.white, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13 }}>
         {done?"✓":""}
       </button>
       <div style={{ flex:1 }}>
-        <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:done?C.textLight:C.text, textDecoration:done?"line-through":"none" }}>
+        <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, textDecoration:'none' }}>
           {item.brand?`${item.brand} · `:""}{item.product}
         </div>
         <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.gray, marginTop:1 }}>
           {item.format}{item.brand?"":""} {!item.brand&&<span style={{ color:C.orange, fontSize:11 }}>· toutes marques</span>}
         </div>
       </div>
-      <div style={{ background:done?C.gray:C.blue, color:C.white, borderRadius:8, padding:"3px 9px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13 }}>×{item.qty}</div>
+      <div style={{ background:done?C.green:C.blue, color:C.white, borderRadius:8, padding:"3px 9px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13 }}>×{item.qty}</div>
       {!done && <button onClick={()=>setEditItem(item)} style={{ background:C.grayLight, border:"none", borderRadius:8, padding:"4px 7px", fontSize:12, cursor:"pointer" }}>✏️</button>}
       <button onClick={()=>removeItem(item.id)} style={{ background:"none", border:"none", fontSize:15, cursor:"pointer", color:C.gray }}>✕</button>
     </div>
@@ -4169,7 +4170,12 @@ export default function App() {
     (async ()=>{
       try {
         const [list, prices, arcs, favs, refs, circs, prof] = await Promise.all([
-          supabase.from('shopping_list').select('id, items').order('id').limit(1),
+          // LEGACY - shopping_list conservé temporairement
+          // supabase.from('shopping_list').select('id, items').order('id').limit(1),
+          supabase.from('liste_courses')
+            .select('id, texte_libre, quantite, format_selectionne, statut, produit_id, variante_produit_id')
+            .eq('utilisateur_id', session?.user?.id)
+            .order('cree_le'),
           supabase.from('price_db').select('*'),
           supabase.from('archives').select('*').order('date'),
           supabase.from('favorites').select('id, items').order('id').limit(1),
@@ -4177,8 +4183,19 @@ export default function App() {
           supabase.from('circles').select('*'),
           supabase.from('profiles').select('pseudo, cgu_accepted_at').eq('id', session.user.id).maybeSingle(),
         ]);
-        if (refs.data)  setProduitsRef(refs.data);
-        if (list.data?.[0]) { setItems(list.data[0].items || []); listRowId.current = list.data[0].id; }
+        if (refs.data) setProduitsRef(refs.data);
+        if (list.data) {
+          setItems((list.data || []).map(row => ({
+            id: row.id,
+            product: row.texte_libre,
+            qty: Number(row.quantite) || 1,
+            format: row.format_selectionne || '',
+            brand: '',
+            checked: row.statut === 'achete',
+            produit_id: row.produit_id,
+            variante_produit_id: row.variante_produit_id,
+          })));
+        }
         if (prices.data) {
           setPriceDB(prices.data.map(p => ({ ...p, storeId: p.storeId || 'autre', category: p.category || guessCategory(p.product) })));
           const toFix = prices.data.filter(p => !p.category);
@@ -4229,19 +4246,89 @@ export default function App() {
     })();
   },[session, loadRetry]);
 
-  const saveItems = async (v) => {
-    setItems(v);
+  // LEGACY - shopping_list conservé temporairement
+  // const saveItems = async (v) => {
+  //   setItems(v);
+  //   try {
+  //     if (listRowId.current) {
+  //       const { error } = await supabase.from('shopping_list').update({items:v}).eq('id', listRowId.current);
+  //       if (error) throw error;
+  //     } else {
+  //       const { data, error } = await supabase.from('shopping_list').insert({items:v, user_id: session?.user?.id}).select('id').single();
+  //       if (error) throw error;
+  //       if (data) listRowId.current = data.id;
+  //     }
+  //   } catch(e) {
+  //     console.error("Erreur sauvegarde liste :", e);
+  //     showAppToast("⚠️ Sauvegarde échouée, vérifie ta connexion", false);
+  //   }
+  // };
+
+  const addItem = async (item) => {
+    const optimistic = { ...item, id: item.id ?? crypto.randomUUID() };
+    setItems(prev => [...prev, optimistic]);
     try {
-      if (listRowId.current) {
-        const { error } = await supabase.from('shopping_list').update({items:v}).eq('id', listRowId.current);
-        if (error) throw error;
-      } else {
-        const { data, error } = await supabase.from('shopping_list').insert({items:v, user_id: session?.user?.id}).select('id').single();
-        if (error) throw error;
-        if (data) listRowId.current = data.id;
-      }
+      const { data, error } = await supabase.from('liste_courses').insert({
+        utilisateur_id:      session?.user?.id,
+        texte_libre:         item.product,
+        quantite:            item.qty ?? 1,
+        format_selectionne:  item.format || null,
+        statut:              'a_acheter',
+        produit_id:          item.produit_id ?? null,
+        variante_produit_id: item.variante_produit_id ?? null,
+      }).select('id').single();
+      if (error) throw error;
+      if (data) setItems(prev => prev.map(i => i.id === optimistic.id ? { ...i, id: data.id } : i));
     } catch(e) {
-      console.error("Erreur sauvegarde liste :", e);
+      console.error("Erreur ajout liste :", e);
+      setItems(prev => prev.filter(i => i.id !== optimistic.id));
+      showAppToast("⚠️ Sauvegarde échouée, vérifie ta connexion", false);
+    }
+  };
+
+  const updateItem = async (updated) => {
+    setItems(prev => prev.map(i => i.id === updated.id ? updated : i));
+    try {
+      const { error } = await supabase.from('liste_courses').update({
+        texte_libre:         updated.product,
+        quantite:            updated.qty ?? 1,
+        format_selectionne:  updated.format || null,
+        produit_id:          updated.produit_id ?? null,
+        variante_produit_id: updated.variante_produit_id ?? null,
+      }).eq('id', updated.id);
+      if (error) throw error;
+    } catch(e) {
+      console.error("Erreur modification liste :", e);
+      showAppToast("⚠️ Sauvegarde échouée, vérifie ta connexion", false);
+    }
+  };
+
+  const toggleCheck = async (id) => {
+    const item = items.find(i => i.id === id);
+    if (!item) return;
+    const newChecked = !item.checked;
+    setItems(prev => prev.map(i => i.id === id ? { ...i, checked: newChecked } : i));
+    try {
+      const { error } = await supabase.from('liste_courses')
+        .update({ statut: newChecked ? 'achete' : 'a_acheter' })
+        .eq('id', id);
+      if (error) throw error;
+    } catch(e) {
+      console.error("Erreur coche liste :", e);
+      setItems(prev => prev.map(i => i.id === id ? { ...i, checked: item.checked } : i));
+      showAppToast("⚠️ Sauvegarde échouée, vérifie ta connexion", false);
+    }
+  };
+
+  const removeItem = async (id) => {
+    const previous = items.find(i => i.id === id);
+    setItems(prev => prev.filter(i => i.id !== id));
+    try {
+      const { error } = await supabase.from('liste_courses').delete().eq('id', id);
+      if (error) throw error;
+    } catch(e) {
+      console.error("Erreur suppression liste :", e);
+      if (previous) setItems(prev => [...prev, previous]);
       showAppToast("⚠️ Sauvegarde échouée, vérifie ta connexion", false);
     }
   };
@@ -4327,7 +4414,7 @@ export default function App() {
     return { error };
   };
 
-  const handleValidate = (store, potentialSaving = 0) => {
+  const handleValidate = async (store, potentialSaving = 0) => {
     let totalSaving = 0;
     const details = [];
     items.forEach(item => {
@@ -4352,7 +4439,12 @@ export default function App() {
       ticket_scanned: false,
     };
     saveArchives([...archives, arc]);
-    saveItems([]);
+    setItems([]);
+    try {
+      await supabase.from('liste_courses').delete().eq('utilisateur_id', session?.user?.id);
+    } catch(e) {
+      console.error("Erreur vidage liste :", e);
+    }
     setShowSuccess({ store, potentials: { totalSaving, details } });
     setTimeout(()=>{setShowSuccess(null);setTab("archive");},2800);
   };
@@ -4561,8 +4653,8 @@ export default function App() {
             </div>
           )}
           {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout}/>}
-          {loaded && tab==="list"      && <ListTab      items={items} setItems={saveItems} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos}/>}
-          {loaded && tab==="catalog"   && <CatalogTab   items={items} setItems={saveItems} setTab={setTab} catalog={catalog} priceDB={priceDB}/>}
+          {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos}/>}
+          {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} setTab={setTab} catalog={catalog} priceDB={priceDB}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius} userPos={userPos}/>}
           {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;
@@ -4576,7 +4668,7 @@ export default function App() {
           }} userId={session?.user?.id} produitsRef={produitsRef}/>}
           {loaded && tab==="archive"   && <ArchiveTab   archives={archives} storeRatings={storeRatings} onDelete={deleteArchive} priceDB={priceDB} onImport={handleImportPrices} onSavePrice={handleSavePrice} produitsRef={produitsRef} onAddToList={arcItem=>{
             const newItem={id:Date.now()+Math.random(),product:arcItem.product,format:arcItem.format||"",brand:arcItem.brand||"",qty:arcItem.qty||1,checked:false};
-            saveItems([...items,newItem]);
+            addItem(newItem);
             showAppToast(`✓ ${arcItem.product} ajouté à ta liste`);
           }}/>}
           {loaded && tab==="economies" && <EconomiesTab priceDB={priceDB} archives={archives} items={items} setTab={setTab}/>}
