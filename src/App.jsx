@@ -4173,7 +4173,9 @@ export default function App() {
           // LEGACY - shopping_list conservé temporairement
           // supabase.from('shopping_list').select('id, items').order('id').limit(1),
           supabase.from('liste_courses')
-            .select('id, texte_libre, quantite, format_selectionne, statut, produit_id, variante_produit_id')
+            .select(`id, texte_libre, quantite, format_selectionne, statut, produit_id, variante_produit_id,
+              produit:produits(id, nom_reference),
+              variante:variantes_produit(id, libelle, quantite_nette, unite_quantite, nombre_unites)`)
             .eq('utilisateur_id', session?.user?.id)
             .order('cree_le'),
           supabase.from('price_db').select('*'),
@@ -4186,14 +4188,16 @@ export default function App() {
         if (refs.data) setProduitsRef(refs.data);
         if (list.data) {
           setItems((list.data || []).map(row => ({
-            id: row.id,
-            product: row.texte_libre,
-            qty: Number(row.quantite) || 1,
-            format: row.format_selectionne || '',
-            brand: '',
-            checked: row.statut === 'achete',
-            produit_id: row.produit_id,
+            id:                  row.id,
+            product:             row.produit?.nom_reference ?? row.texte_libre ?? 'Produit sans nom',
+            qty:                 Number(row.quantite) || 1,
+            format:              row.format_selectionne || '',
+            brand:               '',
+            checked:             row.statut === 'achete',
+            produit_id:          row.produit_id,
             variante_produit_id: row.variante_produit_id,
+            produit:             row.produit ?? null,
+            variante:            row.variante ?? null,
           })));
         }
         if (prices.data) {
@@ -4264,21 +4268,56 @@ export default function App() {
   //   }
   // };
 
+  const chargerListe = async () => {
+    const { data } = await supabase.from('liste_courses')
+      .select(`id, texte_libre, quantite, format_selectionne, statut, produit_id, variante_produit_id,
+        produit:produits(id, nom_reference),
+        variante:variantes_produit(id, libelle, quantite_nette, unite_quantite, nombre_unites)`)
+      .eq('utilisateur_id', session?.user?.id)
+      .order('cree_le');
+    if (data) setItems(data.map(row => ({
+      id:                  row.id,
+      product:             row.produit?.nom_reference ?? row.texte_libre ?? 'Produit sans nom',
+      qty:                 Number(row.quantite) || 1,
+      format:              row.format_selectionne || '',
+      brand:               '',
+      checked:             row.statut === 'achete',
+      produit_id:          row.produit_id,
+      variante_produit_id: row.variante_produit_id,
+      produit:             row.produit ?? null,
+      variante:            row.variante ?? null,
+    })));
+  };
+
   const addItem = async (item) => {
     const optimistic = { ...item, id: item.id ?? crypto.randomUUID() };
     setItems(prev => [...prev, optimistic]);
     try {
+      // Rapprochement automatique via alias_produits (correspondance exacte uniquement)
+      let produit_id = item.produit_id ?? null;
+      let texte_libre = item.product;
+      if (!produit_id && item.product?.trim()) {
+        const { data: aliases } = await supabase
+          .from('alias_produits')
+          .select('produit_id')
+          .eq('statut', 'actif')
+          .ilike('libelle_alias', item.product.trim());
+        if (aliases && aliases.length === 1) {
+          produit_id = aliases[0].produit_id;
+          texte_libre = null; // contrainte liste_courses_produit_ou_texte
+        }
+      }
       const { data, error } = await supabase.from('liste_courses').insert({
         utilisateur_id:      session?.user?.id,
-        texte_libre:         item.product,
+        texte_libre:         texte_libre,
         quantite:            item.qty ?? 1,
         format_selectionne:  item.format || null,
         statut:              'a_acheter',
-        produit_id:          item.produit_id ?? null,
+        produit_id:          produit_id,
         variante_produit_id: item.variante_produit_id ?? null,
       }).select('id').single();
       if (error) throw error;
-      if (data) setItems(prev => prev.map(i => i.id === optimistic.id ? { ...i, id: data.id } : i));
+      if (data) await chargerListe();
     } catch(e) {
       console.error("Erreur ajout liste :", e);
       setItems(prev => prev.filter(i => i.id !== optimistic.id));
