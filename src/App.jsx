@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { scanTicketWithClaude, imageFileToJpegBase64, scanMultipleTicketsWithClaude } from "./scanTicket";
 import { STORES, CATEGORY_META, PRODUCT_SUGGESTIONS, STALE_DAYS, JOURS_MOYENNE } from "./constants";
 import { supabase } from "./lib/supabase";
+import { formatVariante, mapperLigneListeCourses, chargerVariantes, getCategoryPresentation } from "./lib/catalogueCore";
 
 const C = {
   blue:      "#CC0000",   blueLight:  "#FFF0F0",
@@ -207,8 +208,6 @@ function guessCategory(name) {
   return "Autres";
 }
 
-const PURE_STORES = new Set(['auchan','carrefour','casino','intermarche','leclerc','e.leclerc','monoprix','lidl','u','vival','spar','netto','franprix','superu','super u','simply','simply market','biocbon','bio c bon']);
-
 const SHARE_CATEGORIES = [
   "Fruits et légumes",
   "Viandes & charcuterie",
@@ -225,13 +224,6 @@ const SHARE_CATEGORIES = [
   "Animalerie",
   "Ustensiles & équipement",
 ];
-function filterMDD(brands) {
-  return brands.filter(m => {
-    const n = m.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();
-    return !PURE_STORES.has(n);
-  });
-}
-
 // Clé de matching pour la liste : produit+format+(marque si précisée)
 function itemMatchesPrice(item, price) {
   const sameProduct = normName(price.product) === normName(item.product);
@@ -852,8 +844,27 @@ function AddItemSheet({ onClose, onAdd }) {
   const [produit_id,  setProduitId]   = useState(null);
   const [variantes,   setVariantes]   = useState([]);
   const [variante_id, setVarianteId]  = useState(null);
+  const [variantesLoading, setVariantesLoading] = useState(false);
+  const [varianteError,    setVarianteError]    = useState(null);
+  const variantSeq = useRef(0);
 
-  const canSubmit = product.trim() && (variantes.length === 0 ? format.trim() : (variante_id !== null));
+  // Trois cas : produit libre (texte obligatoire), produit Core sans variante
+  // (Format indifférent suffit, jamais de texte imposé), produit Core avec variantes
+  // (une variante ou "any" doit être choisie). Une erreur de chargement bloque
+  // l'ajout tant qu'elle n'est pas résolue — on ne confond jamais "erreur réseau"
+  // avec "ce produit n'a réellement aucune variante". Le chargement en cours bloque
+  // aussi l'ajout, pour ne jamais soumettre une variante d'un autre produit.
+  const canSubmit = product.trim() && (
+    !produit_id
+      ? format.trim()
+      : variantesLoading
+        ? false
+        : varianteError
+          ? false
+          : variantes.length === 0
+            ? variante_id === 'any'
+            : variante_id !== null
+  );
 
   const submit = () => {
     if (!canSubmit) return;
@@ -861,7 +872,7 @@ function AddItemSheet({ onClose, onAdd }) {
       id:                  Date.now(),
       product:             product.trim(),
       format:              variante_id && variante_id !== 'any'
-                             ? (variantes.find(v => v.id === variante_id)?.libelle || '')
+                             ? formatVariante(variantes.find(v => v.id === variante_id))
                              : format.trim(),
       brand:               brandFixed ? brand.trim() : '',
       qty,
@@ -872,28 +883,65 @@ function AddItemSheet({ onClose, onAdd }) {
     onAdd(item);
     setAdded(prev => [...prev, item]);
     setProduct(''); setFormat(''); setBrand(''); setQty(1); setBrandFixed(false);
-    setProduitId(null); setVariantes([]); setVarianteId(null);
+    setProduitId(null); setVariantes([]); setVarianteId(null); setVarianteError(null);
   };
 
-  const pickSuggestion = async s => {
+  // Protège tous les setState (succès, erreur, finally) contre une réponse
+  // obsolète : une requête A ne doit jamais écraser l'état d'une requête B
+  // plus récente, y compris pour remettre variantesLoading à false.
+  const loadVariantesFor = async (pid) => {
+    const mySeq = ++variantSeq.current;
+    setVarianteError(null);
+    setVariantesLoading(true);
+    try {
+      const data = await chargerVariantes(pid);
+      if (mySeq !== variantSeq.current) return; // réponse obsolète, ignorée
+      setVariantes(data);
+      // Un produit Core réellement sans variante active passe directement en
+      // "Format indifférent" (166/169 produits) ; sinon l'utilisateur doit choisir.
+      setVarianteId(data.length === 0 ? 'any' : null);
+    } catch (e) {
+      if (mySeq !== variantSeq.current) return;
+      console.error("Erreur chargement variantes :", e);
+      setVariantes([]);
+      setVarianteId(null); // jamais 'any' sur erreur : on ne sait pas si le produit a des variantes
+      setVarianteError("Impossible de charger les formats.");
+    } finally {
+      if (mySeq === variantSeq.current) {
+        setVariantesLoading(false);
+      }
+    }
+  };
+
+  const pickSuggestion = s => {
     const nom = s.produits?.nom_reference || s.libelle_alias;
     setProduct(nom);
     setSuggestions([]);
     const pid = s.produit_id || null;
     setProduitId(pid);
-    setVarianteId(null);
     setFormat('');
+    // Vide immédiatement l'ancien état (synchrone), avant même de lancer le
+    // chargement du nouveau produit — jamais de variante d'un autre produit affichée.
+    setVariantes([]);
+    setVarianteId(null);
+    setVarianteError(null);
     if (pid) {
-      const { data } = await supabase
-        .from('variantes_produit')
-        .select('id, libelle')
-        .eq('produit_id', pid)
-        .eq('actif', true)
-        .order('quantite_nette');
-      setVariantes(data || []);
-    } else {
-      setVariantes([]);
+      loadVariantesFor(pid);
     }
+  };
+
+  // Chip prédéfinie (constants.js) : toujours en texte libre, ne doit jamais hériter
+  // d'un produit_id résolu par une sélection précédente. Invalide aussi toute
+  // requête de variantes encore en cours.
+  const pickPredefinedSuggestion = (s) => {
+    variantSeq.current++;
+    setProduct(s.name);
+    setFormat(s.format);
+    setProduitId(null);
+    setVariantes([]);
+    setVarianteId(null);
+    setVarianteError(null);
+    setSuggestions([]);
   };
 
   const searchProducts = async val => {
@@ -947,7 +995,7 @@ function AddItemSheet({ onClose, onAdd }) {
           <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Suggestions</div>
           <div style={{ display:"flex", gap:7, flexWrap:"wrap", marginBottom:18 }}>
             {PRODUCT_SUGGESTIONS.map((s,i)=>(
-              <button key={i} onClick={()=>pickSuggestion(s)} style={{ padding:"6px 12px", background:(product===s.name&&format===s.format)?C.blue:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, color:(product===s.name&&format===s.format)?C.white:C.text, cursor:"pointer" }}>
+              <button key={i} onClick={()=>pickPredefinedSuggestion(s)} style={{ padding:"6px 12px", background:(product===s.name&&format===s.format)?C.blue:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, color:(product===s.name&&format===s.format)?C.white:C.text, cursor:"pointer" }}>
                 {s.name} {s.format}
               </button>
             ))}
@@ -958,7 +1006,21 @@ function AddItemSheet({ onClose, onAdd }) {
           <div style={{ position:"relative" }}>
             <input
               value={product}
-              onChange={e=>{ setProduct(e.target.value); searchProducts(e.target.value); }}
+              onChange={e=>{
+                const val = e.target.value;
+                setProduct(val);
+                // Éditer le texte après une sélection Core invalide cette sélection :
+                // retour au parcours texte libre, aucune requête de variantes en cours n'est plus prise en compte.
+                if (produit_id) {
+                  variantSeq.current++;
+                  setProduitId(null);
+                  setVariantes([]);
+                  setVarianteId(null);
+                  setVarianteError(null);
+                  setVariantesLoading(false);
+                }
+                searchProducts(val);
+              }}
               onBlur={()=>setTimeout(()=>setSuggestions([]), 150)}
               placeholder="Ex : Cola Zéro, Lait, Pâtes..."
               style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${product?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:15, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:14 }}
@@ -979,39 +1041,53 @@ function AddItemSheet({ onClose, onAdd }) {
           </div>
 
           {/* Format */}
-          {variantes.length > 0 ? (
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 12, color: C.textLight, marginBottom: 6 }}>Format</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {variantes.map(v => (
-                  <button key={v.id} onClick={() => setVarianteId(v.id)}
-                    style={{
-                      padding: '8px 14px', borderRadius: 20, fontSize: 14, cursor: 'pointer',
-                      background: variante_id === v.id ? C.green : C.grayLight,
-                      color:      variante_id === v.id ? C.white : C.text,
-                      border:     variante_id === v.id ? `2px solid ${C.green}` : `2px solid transparent`,
-                      fontWeight: variante_id === v.id ? 700 : 400,
-                    }}>
-                    {v.libelle}
-                  </button>
-                ))}
-                <button onClick={() => setVarianteId('any')}
-                  style={{
-                    padding: '8px 14px', borderRadius: 20, fontSize: 14, cursor: 'pointer',
-                    background: variante_id === 'any' ? C.gray : C.grayLight,
-                    color:      variante_id === 'any' ? C.white : C.textLight,
-                    border:     '2px solid transparent',
-                    fontWeight: 400,
-                  }}>
-                  Format indifférent
-                </button>
-              </div>
-            </div>
-          ) : (
+          {!produit_id ? (
             <input placeholder="Format (ex: 1L, 500g…)" value={format}
               onChange={e => setFormat(e.target.value)}
               style={{ width:'100%', padding:'10px 12px', borderRadius:10, border:`1px solid ${C.grayLight}`,
                 fontSize:15, boxSizing:'border-box', marginBottom:12 }}/>
+          ) : (
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 12, color: C.textLight, marginBottom: 6 }}>Format</div>
+              {variantesLoading && (
+                <div style={{ fontSize:13, color:C.textLight, marginBottom:8 }}>Chargement des formats…</div>
+              )}
+              {varianteError && !variantesLoading && (
+                <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8, flexWrap:'wrap' }}>
+                  <span style={{ fontSize:13, color:C.red }}>⚠️ {varianteError}</span>
+                  <button onClick={()=>loadVariantesFor(produit_id)}
+                    style={{ background:'none', border:'none', color:C.blue, fontWeight:700, cursor:'pointer', fontSize:13, textDecoration:'underline' }}>
+                    Réessayer
+                  </button>
+                </div>
+              )}
+              {!variantesLoading && !varianteError && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {variantes.map(v => (
+                    <button key={v.id} onClick={() => setVarianteId(v.id)}
+                      style={{
+                        padding: '8px 14px', borderRadius: 20, fontSize: 14, cursor: 'pointer',
+                        background: variante_id === v.id ? C.green : C.grayLight,
+                        color:      variante_id === v.id ? C.white : C.text,
+                        border:     variante_id === v.id ? `2px solid ${C.green}` : `2px solid transparent`,
+                        fontWeight: variante_id === v.id ? 700 : 400,
+                      }}>
+                      {formatVariante(v)}
+                    </button>
+                  ))}
+                  <button onClick={() => setVarianteId('any')}
+                    style={{
+                      padding: '8px 14px', borderRadius: 20, fontSize: 14, cursor: 'pointer',
+                      background: variante_id === 'any' ? C.gray : C.grayLight,
+                      color:      variante_id === 'any' ? C.white : C.textLight,
+                      border:     '2px solid transparent',
+                      fontWeight: 400,
+                    }}>
+                    Format indifférent
+                  </button>
+                </div>
+              )}
+            </div>
           )}
 
           {/* Marque optionnelle */}
@@ -2099,48 +2175,98 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
 
 
 // ── CATALOG TAB ───────────────────────────────────────────────────────────────
-function ProductPickerSheet({ category, onClose, onAdd, items, catalog = [], openProduct = null, priceDB = [] }) {
-  const [selected,      setSelected]      = useState(openProduct);
-  const [format,        setFormat]        = useState("");
-  const [brand,         setBrand]         = useState("");
-  const [brandFixed,    setBrandFixed]    = useState(false);
-  const [showMddPicker, setShowMddPicker] = useState(false);
-  const [qty,           setQty]           = useState(1);
-  const [added,         setAdded]         = useState([]);
+function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, items }) {
+  const [variantes,        setVariantes]        = useState([]);
+  const [varianteId,       setVarianteId]       = useState(null);
+  const [variantesLoading, setVariantesLoading] = useState(true);
+  const [varianteError,    setVarianteError]    = useState(null);
+  const [qty,              setQty]              = useState(1);
+  const [submitting,       setSubmitting]       = useState(false);
+  const [submitError,      setSubmitError]      = useState(null);
 
-  const knownFormats = useMemo(()=>{
-    if(!selected||!priceDB.length) return [];
-    const name = normName(selected.product_name);
-    return [...new Set(priceDB.filter(p=>normName(p.product)===name).map(p=>p.format).filter(Boolean))];
-  },[selected,priceDB]);
-
-  useEffect(()=>{
-    if(knownFormats.length===1) setFormat(knownFormats[0]);
-    else setFormat("");
-  },[knownFormats]);
-
-  const submit = () => {
-    if(!selected || !format.trim()) return;
-    const item = { id:Date.now()+Math.random(), product:selected.product_name, format:format.trim(), brand:brandFixed?brand:"", qty, checked:false };
-    onAdd(item);
-    setAdded(prev=>[...prev,item]);
-    setSelected(null); setFormat(""); setBrand(""); setQty(1); setBrandFixed(false); setShowMddPicker(false);
+  const loadVariantes = async () => {
+    setVarianteError(null);
+    setVariantesLoading(true);
+    try {
+      const data = await chargerVariantes(produit.id);
+      setVariantes(data);
+      setVarianteId(data.length === 0 ? 'any' : null);
+    } catch (e) {
+      console.error("Erreur chargement variantes :", e);
+      setVariantes([]);
+      setVarianteId(null); // jamais 'any' sur erreur : on ne sait pas si le produit a des variantes
+      setVarianteError("Impossible de charger les formats.");
+    } finally {
+      setVariantesLoading(false);
+    }
   };
 
-  const alreadyIn = (name) => items.some(i => i.product.toLowerCase().trim() === name.toLowerCase().trim());
+  useEffect(() => {
+    loadVariantes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [produit.id]);
+
+  const alreadyInList = items.some(i => i.product.toLowerCase().trim() === produit.nom_reference.toLowerCase().trim());
+  const canSubmit = !variantesLoading && !varianteError && varianteId !== null && !submitting;
+
+  // Le résultat booléen d'addItem (via App.addItem) détermine si l'article a bien
+  // été enregistré — un simple await ne suffit pas car les erreurs y sont interceptées.
+  const submit = async () => {
+    if (!canSubmit || submitting) return;
+
+    setSubmitting(true);
+    setSubmitError(null);
+
+    let ajoutReussi = false;
+
+    try {
+      const item = {
+        id:                  Date.now() + Math.random(),
+        product:             produit.nom_reference,
+        format:              '',
+        brand:               '',
+        qty,
+        checked:             false,
+        produit_id:          produit.id,
+        variante_produit_id:
+          varianteId && varianteId !== 'any' ? varianteId : null,
+      };
+
+      const ok = await onAdd(item);
+
+      if (ok === true) {
+        ajoutReussi = true;
+      } else {
+        setSubmitError("Ajout impossible, réessaie.");
+      }
+    } catch (error) {
+      console.error("Erreur ajout depuis le Catalogue :", error);
+      setSubmitError("Ajout impossible, réessaie.");
+    } finally {
+      // En cas de succès, on laisse le bouton en état "chargement" jusqu'au
+      // démontage de la fiche (onClose ci-dessous) — évite un dernier flash visuel.
+      if (!ajoutReussi) {
+        setSubmitting(false);
+      }
+    }
+
+    if (ajoutReussi) {
+      onClose(); // retour automatique à la liste des produits de la sous-catégorie
+    }
+  };
 
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", zIndex:300, animation:"fadeIn 0.2s ease" }} onClick={onClose}>
       <div onClick={e=>e.stopPropagation()} style={{ background:C.white, borderRadius:"20px 20px 0 0", width:"100%", maxHeight:"90vh", display:"flex", flexDirection:"column", animation:"slideUp 0.3s ease", overflow:"hidden" }}>
 
-        {/* Header catégorie */}
-        <div style={{ background:`linear-gradient(135deg, ${category.color}, ${category.color}CC)`, padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0 }}>
+        {/* Header produit */}
+        <div style={{ background:`linear-gradient(135deg, ${categoryPresentation.color}, ${categoryPresentation.color}CC)`, padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0 }}>
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-            <span style={{ fontSize:28 }}>{category.emoji}</span>
+            <span style={{ fontSize:28 }}>{categoryPresentation.emoji}</span>
             <div>
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:18, color:C.white }}>{category.name}</div>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:18, color:C.white }}>{produit.nom_reference}</div>
               <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:"rgba(255,255,255,0.7)" }}>
-                {added.length>0 ? `✓ ${added.length} ajouté${added.length>1?"s":""}` : "Sélectionne un produit"}
+                Choisis un format
               </div>
             </div>
           </div>
@@ -2149,153 +2275,218 @@ function ProductPickerSheet({ category, onClose, onAdd, items, catalog = [], ope
 
         <div style={{ overflowY:"auto", flex:1, padding:"16px 16px 40px" }}>
 
-          {/* Grille produits */}
-          {!selected && (
-            <>
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:12 }}>
-                Choisis un produit
-              </div>
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:16 }}>
-                {catalog.filter(p => p.category === category?.name).map((p,i)=>{
-                  const inList = alreadyIn(p.product_name);
-                  return (
-                    <button key={i} onClick={()=>{ setSelected(p); setFormat(""); setBrand(""); }} style={{
-                      padding:"14px 12px", background:inList?"#F0FFF5":C.white,
-                      border:`2px solid ${inList?C.green:C.grayLight}`,
-                      borderRadius:14, cursor:"pointer", textAlign:"left",
-                      boxShadow:"0 2px 8px rgba(0,0,0,0.06)",
-                      position:"relative",
-                    }}>
-                      {inList && <span style={{ position:"absolute", top:6, right:8, fontSize:12 }}>✓</span>}
-                      <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, marginBottom:4 }}>{p.product_name}</div>
+          {alreadyInList && !submitting && (
+            <div style={{ background:"#F0FFF5", border:`1.5px solid ${C.green}`, borderRadius:12, padding:"10px 12px", marginBottom:14, fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:700, color:C.green }}>
+              ✓ Déjà dans ta liste
+            </div>
+          )}
+
+          {/* Format */}
+          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Format</div>
+
+          {variantesLoading && (
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.gray, marginBottom:14 }}>Chargement des formats…</div>
+          )}
+
+          {varianteError && !variantesLoading && (
+            <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", marginBottom:14 }}>
+              <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.red }}>⚠️ {varianteError}</span>
+              <button onClick={loadVariantes} style={{ background:"none", border:"none", color:C.blue, fontWeight:700, cursor:"pointer", fontSize:13, textDecoration:"underline" }}>Réessayer</button>
+            </div>
+          )}
+
+          {!variantesLoading && !varianteError && (
+            <div style={{ marginBottom:14 }}>
+              {variantes.length === 0 ? (
+                <div>
+                  <span style={{ display:"inline-block", padding:"9px 16px", background:C.green, borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.white }}>
+                    ✓ Format indifférent
+                  </span>
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.gray, marginTop:6 }}>
+                    Aucun autre format référencé
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                  {variantes.map(v => (
+                    <button key={v.id} onClick={()=>setVarianteId(v.id)} style={{ padding:"9px 16px", background:varianteId===v.id?C.green:"#fff", border:`2px solid ${C.green}`, borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:varianteId===v.id?C.white:C.green, cursor:"pointer" }}>
+                      {formatVariante(v)}
                     </button>
-                  );
-                })}
-              </div>
-            </>
-          )}
-
-          {/* Détail produit sélectionné */}
-          {selected && (
-            <>
-              <button onClick={()=>setSelected(null)} style={{ display:"flex", alignItems:"center", gap:6, background:"none", border:"none", cursor:"pointer", marginBottom:16, fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:14, color:C.gray }}>
-                ← Retour
-              </button>
-
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:18, color:C.text, marginBottom:2 }}>{selected.product_name}</div>
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.gray, marginBottom:14 }}>{category.name}</div>
-
-              {/* Marque */}
-              {(selected.marques_nationales?.length > 0 || filterMDD(selected.marques_distributeurs||[]).length > 0) && (
-                <div style={{ marginBottom:14 }}>
-                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>
-                    Marque <span style={{ fontWeight:600, textTransform:"none", color:C.gray }}>· optionnel</span>
-                  </div>
-                  <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:8 }}>
-                    {selected.marques_nationales?.map((m,i) => (
-                      <button key={i} onClick={()=>{ brandFixed&&brand===m?(setBrand(""),setBrandFixed(false)):(setBrand(m),setBrandFixed(true)); setShowMddPicker(false); }}
-                        style={{ padding:"10px 16px", background:brandFixed&&brand===m?C.orange:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:brandFixed&&brand===m?"#111":C.text, cursor:"pointer" }}>
-                        {m}
-                      </button>
-                    ))}
-                    {filterMDD(selected.marques_distributeurs||[]).length > 0 && (
-                      <button onClick={()=>{ const on=!(brandFixed&&brand==="MDD"); if(on){setBrand("MDD");setBrandFixed(true);}else{setBrand("");setBrandFixed(false);setShowMddPicker(false);} }}
-                        style={{ padding:"10px 16px", background:brandFixed&&brand==="MDD"?C.blue:C.grayLight, border:"none", borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:brandFixed&&brand==="MDD"?C.white:C.text, cursor:"pointer" }}>
-                        MDD
-                      </button>
-                    )}
-                  </div>
-                  {brandFixed && (brand==="MDD" || filterMDD(selected.marques_distributeurs||[]).includes(brand)) && filterMDD(selected.marques_distributeurs||[]).length > 0 && (
-                    !showMddPicker ? (
-                      <button onClick={()=>setShowMddPicker(true)}
-                        style={{ background:"none", border:"none", padding:0, fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:700, color:C.blue, cursor:"pointer", textDecoration:"underline" }}>
-                        Préciser une MDD spécifique
-                      </button>
-                    ) : (
-                      <div>
-                        <div style={{ background:"#FFF8E1", border:"1px solid #FFD54F", borderRadius:10, padding:"10px 12px", marginBottom:8, fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:600, color:"#7B5800", lineHeight:1.5 }}>
-                          ⚠️ En choisissant une MDD spécifique, le comparateur ne pourra pas comparer les prix entre magasins, car cette marque n'est vendue que dans son enseigne.
-                        </div>
-                        <select
-                          value={filterMDD(selected.marques_distributeurs||[]).includes(brand) ? brand : ""}
-                          onChange={e=>{ if(e.target.value) setBrand(e.target.value); else setBrand("MDD"); }}
-                          style={{ width:"100%", padding:"10px 12px", borderRadius:10, border:`2px solid ${C.blue}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", cursor:"pointer" }}
-                        >
-                          <option value="">— Aucune préférence (MDD)</option>
-                          {filterMDD(selected.marques_distributeurs).map((m,i) => (
-                            <option key={i} value={m}>{m}</option>
-                          ))}
-                        </select>
-                      </div>
-                    )
-                  )}
-                </div>
-              )}
-
-              {/* Format */}
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Format / Volume *</div>
-
-              {knownFormats.length > 0 && (
-                <div style={{ background:"#F0FFF5", borderRadius:12, padding:"10px 12px", marginBottom:10, border:`1.5px solid ${C.green}` }}>
-                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.green, marginBottom:8 }}>
-                    {knownFormats.length===1 ? "✓ Format pré-rempli depuis tes prix" : "✓ Formats déjà dans tes prix"}
-                  </div>
-                  <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-                    {knownFormats.map((f,i)=>(
-                      <button key={i} onClick={()=>setFormat(f)} style={{ padding:"9px 16px", background:format===f?C.green:"#fff", border:`2px solid ${C.green}`, borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:format===f?C.white:C.green, cursor:"pointer" }}>{f}</button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {selected.formats?.filter(f=>!knownFormats.includes(f)).length > 0 && (
-                <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:8 }}>
-                  {selected.formats.filter(f=>!knownFormats.includes(f)).map((f,i) => (
-                    <button key={i} onClick={()=>setFormat(f)} style={{
-                      padding:"9px 16px", background:format===f?C.blue:C.grayLight,
-                      border:"none", borderRadius:99,
-                      fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14,
-                      color:format===f?C.white:C.text, cursor:"pointer",
-                    }}>{f}</button>
                   ))}
+                  <button onClick={()=>setVarianteId('any')} style={{ padding:"9px 16px", background:varianteId==='any'?C.green:C.grayLight, border:`2px solid ${varianteId==='any'?C.green:"transparent"}`, borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:varianteId==='any'?C.white:C.textLight, cursor:"pointer" }}>
+                    Format indifférent
+                  </button>
                 </div>
               )}
-
-              <input value={format} onChange={e=>setFormat(e.target.value)} placeholder="Ex : 1L, 500g, 1kg, x6..."
-                style={{ width:"100%", padding:"12px 16px", borderRadius:10, border:`2px solid ${format?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:15, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:14 }} />
-
-              {/* Quantité */}
-              <div style={{ display:"flex", alignItems:"center", background:C.grayLight, borderRadius:12, padding:"10px 16px", marginBottom:14 }}>
-                <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, flex:1 }}>Quantité</span>
-                <div style={{ display:"flex", alignItems:"center", gap:14 }}>
-                  <button onClick={()=>setQty(q=>Math.max(1,q-1))} style={{ width:32, height:32, borderRadius:99, border:"2px solid #CC0000", background:C.white, cursor:"pointer", color:"#CC0000", fontWeight:900, fontSize:18, display:"flex", alignItems:"center", justifyContent:"center" }}>−</button>
-                  <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:20, color:"#CC0000", minWidth:24, textAlign:"center" }}>{qty}</span>
-                  <button onClick={()=>setQty(q=>q+1)} style={{ width:32, height:32, borderRadius:99, border:"none", background:"#CC0000", cursor:"pointer", color:C.white, fontSize:18, display:"flex", alignItems:"center", justifyContent:"center" }}>+</button>
-                </div>
-              </div>
-
-              <button onClick={submit} disabled={!format.trim()} style={{ width:"100%", padding:"15px", border:"none", borderRadius:12, background:format.trim()?C.orange:C.grayLight, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:format.trim()?"#111111":C.gray, cursor:format.trim()?"pointer":"default", boxShadow:format.trim()?"0 6px 16px rgba(200,160,0,0.4)":"none" }}>
-                + Ajouter à ma liste
-              </button>
-            </>
+            </div>
           )}
+
+          {/* Quantité */}
+          <div style={{ display:"flex", alignItems:"center", background:C.grayLight, borderRadius:12, padding:"10px 16px", marginBottom:14 }}>
+            <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, flex:1 }}>Quantité</span>
+            <div style={{ display:"flex", alignItems:"center", gap:14 }}>
+              <button onClick={()=>setQty(q=>Math.max(1,q-1))} style={{ width:32, height:32, borderRadius:99, border:"2px solid #CC0000", background:C.white, cursor:"pointer", color:"#CC0000", fontWeight:900, fontSize:18, display:"flex", alignItems:"center", justifyContent:"center" }}>−</button>
+              <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:20, color:"#CC0000", minWidth:24, textAlign:"center" }}>{qty}</span>
+              <button onClick={()=>setQty(q=>q+1)} style={{ width:32, height:32, borderRadius:99, border:"none", background:"#CC0000", cursor:"pointer", color:C.white, fontSize:18, display:"flex", alignItems:"center", justifyContent:"center" }}>+</button>
+            </div>
+          </div>
+
+          {submitError && (
+            <div style={{ color:C.red, fontSize:13, fontFamily:"'Nunito',sans-serif", fontWeight:700, marginBottom:8 }}>⚠️ {submitError}</div>
+          )}
+
+          <button onClick={submit} disabled={!canSubmit} style={{ width:"100%", padding:"15px", border:"none", borderRadius:12, background:canSubmit?C.orange:C.grayLight, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:canSubmit?"#111111":C.gray, cursor:canSubmit?"pointer":"default", boxShadow:canSubmit?"0 6px 16px rgba(200,160,0,0.4)":"none" }}>
+            + Ajouter à ma liste
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
-function CatalogTab({ items, onAdd, setTab, catalog, priceDB }) {
-  const [selectedCat,  setSelectedCat]  = useState(null);
-  const [openProduct,  setOpenProduct]  = useState(null);
-  const [searchQuery,  setSearchQuery]  = useState("");
+function CatalogTab({ items, onAdd, setTab }) {
+  const [categories,      setCategories]      = useState([]);
+  const [catLoading,      setCatLoading]      = useState(true);
+  const [catError,        setCatError]        = useState(null);
+  const [categoryCounts,  setCategoryCounts]  = useState({});
+
+  const [selectedCat,     setSelectedCat]     = useState(null);
+  const [sousCategories,  setSousCategories]  = useState([]);
+  const [scLoading,       setScLoading]       = useState(false);
+  const [scError,         setScError]         = useState(null);
+
+  const [selectedSousCat, setSelectedSousCat] = useState(null);
+  const [produits,        setProduits]        = useState([]);
+  const [prodLoading,     setProdLoading]     = useState(false);
+  const [prodError,       setProdError]       = useState(null);
+
+  const [openProduct,     setOpenProduct]     = useState(null);
+  const [searchQuery,     setSearchQuery]     = useState("");
+  const [searchResults,   setSearchResults]   = useState([]);
+  const [searching,       setSearching]       = useState(false);
+  const [searchError,     setSearchError]     = useState(null);
+  const searchSeq = useRef(0);
+
   const totalInList = items.filter(i=>!i.checked).length;
 
-  const addItem = item => onAdd(item);
+  // Propage le booléen de succès/échec d'App.addItem jusqu'à ProductPickerSheet.
+  const addItem = item => { return onAdd(item); };
 
-  const searchResults = searchQuery.trim()
-    ? catalog.filter(p => p.product_name?.toLowerCase().includes(searchQuery.toLowerCase()))
-    : [];
+  // Une seule requête légère (pas une par catégorie) : les catégories visibles,
+  // et un comptage local des produits actifs par categorie_id pour les badges.
+  const loadCategories = useCallback(async () => {
+    setCatLoading(true);
+    setCatError(null);
+    try {
+      const [catsRes, prodsRes] = await Promise.all([
+        supabase.from('categories').select('id, nom, slug, icone, ordre_affichage').eq('visible', true).order('ordre_affichage'),
+        supabase.from('produits').select('id, sous_categories!inner(categorie_id)').eq('actif', true).eq('sous_categories.actif', true),
+      ]);
+      if (catsRes.error) { setCatError("Impossible de charger les catégories."); return; }
+      setCategories(catsRes.data || []);
+      if (prodsRes.error) {
+        console.error("Erreur chargement compteurs catégories :", prodsRes.error);
+        setCategoryCounts({});
+        return;
+      }
+      const counts = {};
+      (prodsRes.data || []).forEach(p => {
+        const catId = p.sous_categories?.categorie_id;
+        if (catId) counts[catId] = (counts[catId] || 0) + 1;
+      });
+      setCategoryCounts(counts);
+    } catch (e) {
+      console.error("Erreur chargement catégories :", e);
+      setCatError("Impossible de charger les catégories.");
+    } finally {
+      setCatLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadCategories();
+  }, [loadCategories]);
+
+  const selectCategory = (cat) => {
+    setSelectedCat(cat);
+    setSousCategories([]); setSelectedSousCat(null); setProduits([]); setOpenProduct(null);
+    setScLoading(true); setScError(null);
+    supabase.from('sous_categories')
+      .select('id, categorie_id, nom, slug, ordre_affichage')
+      .eq('categorie_id', cat.id)
+      .eq('actif', true)
+      .order('ordre_affichage')
+      .then(({ data, error }) => {
+        if (error) { setScError("Impossible de charger les sous-catégories."); setScLoading(false); return; }
+        setSousCategories(data || []);
+        setScLoading(false);
+      });
+  };
+
+  const selectSousCat = (sc) => {
+    setSelectedSousCat(sc);
+    setProduits([]); setOpenProduct(null);
+    setProdLoading(true); setProdError(null);
+    supabase.from('produits')
+      .select('id, sous_categorie_id, nom_reference, slug, type_unite, unite_base')
+      .eq('sous_categorie_id', sc.id)
+      .eq('actif', true)
+      .order('nom_reference')
+      .then(({ data, error }) => {
+        if (error) { setProdError("Impossible de charger les produits."); setProdLoading(false); return; }
+        setProduits(data || []);
+        setProdLoading(false);
+      });
+  };
+
+  const backToCategories = () => {
+    setSelectedCat(null); setSousCategories([]); setSelectedSousCat(null); setProduits([]); setOpenProduct(null);
+  };
+  const backToSousCategories = () => {
+    setSelectedSousCat(null); setProduits([]); setOpenProduct(null);
+  };
+
+  // Recherche Core sur produits.nom_reference : debounce ~280ms, protection anti-désordre.
+  const runSearch = useCallback(async (q) => {
+    const mySeq = ++searchSeq.current;
+    setSearching(true);
+    setSearchError(null);
+    try {
+      const { data, error } = await supabase.from('produits')
+        .select('id, nom_reference, sous_categorie_id, sous_categories(id, nom, categorie_id, categories(id, nom, slug, icone))')
+        .eq('actif', true)
+        .ilike('nom_reference', `%${q}%`)
+        .order('nom_reference')
+        .limit(20);
+      if (mySeq !== searchSeq.current) return; // réponse obsolète, ignorée
+      if (error) { setSearchError("Recherche impossible."); setSearching(false); return; }
+      setSearchResults(data || []);
+      setSearching(false);
+    } catch (e) {
+      if (mySeq !== searchSeq.current) return;
+      console.error("Erreur recherche produits :", e);
+      setSearchError("Recherche impossible.");
+      setSearching(false);
+    }
+  }, []);
+
+  // Aucun setState synchrone dans le corps de l'effet : uniquement l'armement du timer.
+  useEffect(() => {
+    if (searchQuery.trim().length < 2) return;
+    const timer = setTimeout(() => runSearch(searchQuery.trim()), 280);
+    return () => clearTimeout(timer);
+  }, [searchQuery, runSearch]);
+
+  const pickSearchResult = (r) => {
+    setSelectedCat(r.sous_categories.categories);
+    setSelectedSousCat(r.sous_categories);
+    setOpenProduct({ id: r.id, nom_reference: r.nom_reference });
+    searchSeq.current++; // invalide toute requête en cours
+    setSearchQuery("");
+    setSearchResults([]);
+    setSearchError(null);
+    setSearching(false);
+  };
 
   return (
     <div style={{ padding:"16px 16px 110px" }}>
@@ -2311,21 +2502,39 @@ function CatalogTab({ items, onAdd, setTab, catalog, priceDB }) {
       </div>
 
       {/* Barre de recherche */}
-      <input value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="🔍 Chercher un produit..."
+      <input value={searchQuery} onChange={e=>{
+          const val = e.target.value;
+          setSearchQuery(val);
+          if (val.trim().length < 2) {
+            searchSeq.current++; // invalide toute requête en cours
+            setSearchResults([]);
+            setSearchError(null);
+            setSearching(false);
+          }
+        }} placeholder="🔍 Chercher un produit..."
         style={{ width:"100%", padding:"12px 16px", borderRadius:12, border:`2px solid ${searchQuery?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:16 }} />
 
       {/* Résultats de recherche */}
-      {searchResults.length > 0 && (
+      {searching && (
+        <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.gray, marginBottom:16 }}>Recherche…</div>
+      )}
+      {searchError && !searching && (
+        <div style={{ background:"#FEE", borderRadius:12, padding:"12px 14px", marginBottom:16, display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+          <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.red, fontWeight:700 }}>⚠️ {searchError}</span>
+          <button onClick={()=>runSearch(searchQuery.trim())} style={{ background:"none", border:"none", color:C.blue, fontWeight:700, cursor:"pointer", fontSize:13, textDecoration:"underline" }}>Réessayer</button>
+        </div>
+      )}
+      {!searching && !searchError && searchResults.length > 0 && (
         <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:20 }}>
-          {searchResults.map((p,i) => {
-            const cat = CATEGORY_META.find(c => c.name === p.category);
+          {searchResults.map((r) => {
+            const pres = getCategoryPresentation(r.sous_categories?.categories || {});
             return (
-              <button key={i} onClick={()=>{ setSelectedCat(cat||CATEGORY_META[0]); setOpenProduct(p); setSearchQuery(""); }}
+              <button key={r.id} onClick={()=>pickSearchResult(r)}
                 style={{ display:"flex", alignItems:"center", gap:12, background:C.white, border:`1px solid ${C.grayLight}`, borderRadius:12, padding:"12px 14px", cursor:"pointer", textAlign:"left", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
-                <span style={{ fontSize:22 }}>{cat?.emoji||"🛍️"}</span>
+                <span style={{ fontSize:22 }}>{pres.emoji}</span>
                 <div style={{ flex:1 }}>
-                  <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{p.product_name}</div>
-                  {cat && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:cat.color, fontWeight:700, marginTop:2 }}>{cat.name}</div>}
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{r.nom_reference}</div>
+                  {r.sous_categories?.categories && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:pres.color, fontWeight:700, marginTop:2 }}>{r.sous_categories.categories.nom}</div>}
                 </div>
                 <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:20, color:C.blue }}>+</span>
               </button>
@@ -2333,7 +2542,7 @@ function CatalogTab({ items, onAdd, setTab, catalog, priceDB }) {
           })}
         </div>
       )}
-      {searchQuery.trim() && searchResults.length === 0 && (
+      {!searching && !searchError && searchQuery.trim().length >= 2 && searchResults.length === 0 && (
         <div style={{ background:C.grayLight, borderRadius:12, padding:"16px", textAlign:"center", marginBottom:16 }}>
           <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.gray }}>Aucun produit trouvé pour « {searchQuery} »</div>
         </div>
@@ -2355,55 +2564,140 @@ function CatalogTab({ items, onAdd, setTab, catalog, priceDB }) {
         </button>
       )}
 
-      {/* Grille catégories */}
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-       {CATEGORY_META.map((cat,i)=>{
-          const count = catalog.filter(p => p.category === cat.name).length;
-          return (
-            <button key={cat.id} onClick={()=>setSelectedCat(cat)} style={{
-              padding:0, background:C.white,
-              border:`2px solid ${count>0?cat.color:C.grayLight}`,
-              borderRadius:20, cursor:"pointer", overflow:"hidden",
-              boxShadow: count>0 ? `0 6px 20px ${cat.color}40` : "0 2px 10px rgba(0,0,0,0.08)",
-              animation: `slideIn 0.3s ease ${i*0.05}s both`,
-              position:"relative",
-              aspectRatio:"1",
-            }}>
-              {/* Badge compteur */}
-              {count>0 && (
-                <div style={{ position:"absolute", top:10, right:10, width:24, height:24, borderRadius:99, background:cat.color, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:12, color:C.white, zIndex:2, boxShadow:"0 2px 6px rgba(0,0,0,0.2)" }}>
-                  {count}
-                </div>
-              )}
-              {/* Fond dégradé plein + emoji géant */}
-              <div style={{
-                background:`linear-gradient(145deg, ${cat.color}22, ${cat.color}55)`,
-                width:"100%", height:"68%",
-                display:"flex", alignItems:"center", justifyContent:"center",
-              }}>
-                <span style={{ fontSize:60, lineHeight:1, filter:"drop-shadow(0 4px 8px rgba(0,0,0,0.15))" }}>{cat.emoji}</span>
-              </div>
-              {/* Label en bas */}
-              <div style={{ padding:"8px 10px 10px", textAlign:"center", background:C.white }}>
-                <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, color:C.text, lineHeight:1.2 }}>{cat.name}</div>
-                <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, color:cat.color, marginTop:2, fontWeight:700 }}>
-                  {count} produits
-                </div>
-              </div>
-            </button>
-          );
-        })}
-      </div>
+      {/* Niveau 1 : Catégories */}
+      {!selectedCat && (
+        <>
+          {catLoading && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.gray, textAlign:"center", padding:"20px 0" }}>Chargement…</div>}
+          {catError && !catLoading && (
+            <div style={{ background:"#FEE", borderRadius:12, padding:"16px", textAlign:"center", marginBottom:16 }}>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.red, fontWeight:700, marginBottom:8 }}>⚠️ {catError}</div>
+              <button onClick={loadCategories} style={{ background:"none", border:"none", color:C.blue, fontWeight:700, cursor:"pointer", textDecoration:"underline" }}>Réessayer</button>
+            </div>
+          )}
+          {!catLoading && !catError && categories.length === 0 && (
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.gray, textAlign:"center", padding:"20px 0" }}>Aucune catégorie disponible.</div>
+          )}
+          {!catLoading && !catError && categories.length > 0 && (
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+              {categories.map((cat,i) => {
+                const pres = getCategoryPresentation(cat);
+                const count = categoryCounts[cat.id] || 0;
+                return (
+                  <button key={cat.id} onClick={()=>selectCategory(cat)} style={{
+                    padding:0, background:C.white,
+                    border:`2px solid ${count>0?pres.color:C.grayLight}`,
+                    borderRadius:20, cursor:"pointer", overflow:"hidden",
+                    boxShadow: count>0 ? `0 6px 20px ${pres.color}40` : "0 2px 10px rgba(0,0,0,0.08)",
+                    animation: `slideIn 0.3s ease ${i*0.05}s both`,
+                    position:"relative",
+                    aspectRatio:"1",
+                  }}>
+                    {/* Badge compteur */}
+                    {count>0 && (
+                      <div style={{ position:"absolute", top:10, right:10, width:24, height:24, borderRadius:99, background:pres.color, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:12, color:C.white, zIndex:2, boxShadow:"0 2px 6px rgba(0,0,0,0.2)" }}>
+                        {count}
+                      </div>
+                    )}
+                    {/* Fond dégradé plein + emoji géant */}
+                    <div style={{
+                      background:`linear-gradient(145deg, ${pres.color}22, ${pres.color}55)`,
+                      width:"100%", height:"68%",
+                      display:"flex", alignItems:"center", justifyContent:"center",
+                    }}>
+                      <span style={{ fontSize:60, lineHeight:1, filter:"drop-shadow(0 4px 8px rgba(0,0,0,0.15))" }}>{pres.emoji}</span>
+                    </div>
+                    {/* Label en bas */}
+                    <div style={{ padding:"8px 10px 10px", textAlign:"center", background:C.white }}>
+                      <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, color:C.text, lineHeight:1.2 }}>{cat.nom}</div>
+                      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, color:pres.color, marginTop:2, fontWeight:700 }}>
+                        {count} produit{count>1?"s":""}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
 
-      {selectedCat && (
+      {/* Niveau 2 : Sous-catégories */}
+      {selectedCat && !selectedSousCat && (
+        <div>
+          <button onClick={backToCategories} style={{ display:"flex", alignItems:"center", gap:6, background:"none", border:"none", cursor:"pointer", marginBottom:16, fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:14, color:C.gray }}>
+            ← Catégories
+          </button>
+          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:18, color:C.text, marginBottom:14 }}>{selectedCat.nom}</div>
+          {scLoading && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.gray, textAlign:"center", padding:"20px 0" }}>Chargement…</div>}
+          {scError && !scLoading && (
+            <div style={{ background:"#FEE", borderRadius:12, padding:"16px", textAlign:"center" }}>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.red, fontWeight:700, marginBottom:8 }}>⚠️ {scError}</div>
+              <button onClick={()=>selectCategory(selectedCat)} style={{ background:"none", border:"none", color:C.blue, fontWeight:700, cursor:"pointer", textDecoration:"underline" }}>Réessayer</button>
+            </div>
+          )}
+          {!scLoading && !scError && sousCategories.length === 0 && (
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.gray, textAlign:"center", padding:"20px 0" }}>Aucune sous-catégorie disponible.</div>
+          )}
+          {!scLoading && !scError && sousCategories.length > 0 && (
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {sousCategories.map(sc => (
+                <button key={sc.id} onClick={()=>selectSousCat(sc)}
+                  style={{ display:"flex", alignItems:"center", justifyContent:"space-between", background:C.white, border:`1px solid ${C.grayLight}`, borderRadius:12, padding:"14px 16px", cursor:"pointer", textAlign:"left", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+                  <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{sc.nom}</span>
+                  <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:18, color:C.gray }}>›</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Niveau 3 : Produits */}
+      {selectedSousCat && (
+        <div>
+          <button onClick={backToSousCategories} style={{ display:"flex", alignItems:"center", gap:6, background:"none", border:"none", cursor:"pointer", marginBottom:16, fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:14, color:C.gray }}>
+            ← {selectedCat?.nom}
+          </button>
+          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:18, color:C.text, marginBottom:14 }}>{selectedSousCat.nom}</div>
+          {prodLoading && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.gray, textAlign:"center", padding:"20px 0" }}>Chargement…</div>}
+          {prodError && !prodLoading && (
+            <div style={{ background:"#FEE", borderRadius:12, padding:"16px", textAlign:"center" }}>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.red, fontWeight:700, marginBottom:8 }}>⚠️ {prodError}</div>
+              <button onClick={()=>selectSousCat(selectedSousCat)} style={{ background:"none", border:"none", color:C.blue, fontWeight:700, cursor:"pointer", textDecoration:"underline" }}>Réessayer</button>
+            </div>
+          )}
+          {!prodLoading && !prodError && produits.length === 0 && (
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.gray, textAlign:"center", padding:"20px 0" }}>Aucun produit disponible.</div>
+          )}
+          {!prodLoading && !prodError && produits.length > 0 && (
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+              {produits.map(p => {
+                const inList = items.some(i => i.product.toLowerCase().trim() === p.nom_reference.toLowerCase().trim());
+                return (
+                  <button key={p.id} onClick={()=>setOpenProduct(p)} style={{
+                    padding:"14px 12px", background:inList?"#F0FFF5":C.white,
+                    border:`2px solid ${inList?C.green:C.grayLight}`,
+                    borderRadius:14, cursor:"pointer", textAlign:"left",
+                    boxShadow:"0 2px 8px rgba(0,0,0,0.06)",
+                    position:"relative",
+                  }}>
+                    {inList && <span style={{ position:"absolute", top:6, right:8, fontSize:12 }}>✓</span>}
+                    <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{p.nom_reference}</div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {openProduct && (
         <ProductPickerSheet
-          category={selectedCat}
-          onClose={()=>{ setSelectedCat(null); setOpenProduct(null); }}
+          produit={openProduct}
+          categoryPresentation={getCategoryPresentation(selectedCat || {})}
+          onClose={()=>setOpenProduct(null)}
           onAdd={addItem}
           items={items}
-          catalog={catalog}
-          openProduct={openProduct}
-          priceDB={priceDB}
         />
       )}
     </div>
@@ -2412,17 +2706,174 @@ function CatalogTab({ items, onAdd, setTab, catalog, priceDB }) {
 
 // ── EDIT ITEM SHEET ───────────────────────────────────────────────────────────
 function EditItemSheet({ item, onClose, onSave }) {
+  const isCore = !!item.produit_id;
+
+  // Branche article libre — comportement inchangé
   const [product,    setProduct]    = useState(item.product);
   const [format,     setFormat]     = useState(item.format);
   const [brand,      setBrand]      = useState(item.brand || "");
   const [brandFixed, setBrandFixed] = useState(!!item.brand);
   const [qty,        setQty]        = useState(item.qty);
-  const canSubmit = product.trim() && format.trim();
 
-  const submit = () => {
-    if (!canSubmit) return;
-    onSave({ ...item, product:product.trim(), format:format.trim(), brand:brandFixed?brand.trim():"", qty });
-    onClose();
+  // Branche article Core — produit (modifiable via recherche) + sélecteur de variantes
+  const [produitId,        setProduitId]        = useState(item.produit_id || null);
+  const [produitNom,       setProduitNom]       = useState(item.product);
+  const [changingProduct,  setChangingProduct]  = useState(false);
+  const [searchQuery,      setSearchQuery]      = useState("");
+  const [suggestions,      setSuggestions]      = useState([]);
+  const [variantes,        setVariantes]        = useState([]);
+  const [varianteId,       setVarianteId]       = useState(item.variante_produit_id || null);
+  const [variantesLoading, setVariantesLoading] = useState(isCore);
+  const [varianteError,    setVarianteError]    = useState(null);
+  const [submitting,       setSubmitting]       = useState(false);
+  const [submitError,      setSubmitError]      = useState(null);
+  const variantSeq = useRef(0);
+  const searchSeq  = useRef(0);
+
+  // Protège tous les setState (succès, erreur, finally) contre une réponse
+  // obsolète — même garde que dans AddItemSheet.
+  const loadVariantesFor = async (pid, preserveVarianteId) => {
+    const mySeq = ++variantSeq.current;
+    setVarianteError(null);
+    setVariantesLoading(true);
+    try {
+      const data = await chargerVariantes(pid);
+      if (mySeq !== variantSeq.current) return; // réponse obsolète, ignorée
+      setVariantes(data);
+      if (data.length === 0) {
+        setVarianteId('any');
+      } else if (preserveVarianteId && data.some(v => v.id === preserveVarianteId)) {
+        setVarianteId(preserveVarianteId);
+      } else {
+        setVarianteId(null);
+      }
+    } catch (e) {
+      if (mySeq !== variantSeq.current) return;
+      console.error("Erreur chargement variantes :", e);
+      setVariantes([]);
+      setVarianteId(null); // jamais 'any' sur erreur : on ne sait pas si le produit a des variantes
+      setVarianteError("Impossible de charger les formats.");
+    } finally {
+      if (mySeq === variantSeq.current) {
+        setVariantesLoading(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (isCore) loadVariantesFor(item.produit_id, item.variante_produit_id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Protège tous les setState (succès, erreur résolue, exception) contre une
+  // réponse obsolète, sur le même principe que loadVariantesFor.
+  const searchProducts = async val => {
+    if (val.length < 2) {
+      searchSeq.current++; // invalide toute recherche en cours
+      setSuggestions([]);
+      return;
+    }
+    const mySeq = ++searchSeq.current;
+    try {
+      const { data, error } = await supabase
+        .from('alias_produits')
+        .select('libelle_alias, produit_id, produits(nom_reference)')
+        .ilike('libelle_alias', `%${val}%`)
+        .eq('statut', 'actif')
+        .limit(8);
+      if (mySeq !== searchSeq.current) return; // réponse obsolète, ignorée
+      if (error) { console.error("Erreur recherche produits :", error); setSuggestions([]); return; }
+      const seen = new Set();
+      const deduped = (data || []).filter(r => {
+        const key = r.produit_id;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      setSuggestions(deduped);
+    } catch (e) {
+      if (mySeq !== searchSeq.current) return;
+      console.error("Erreur recherche produits :", e);
+      setSuggestions([]);
+    }
+  };
+
+  // Sélection d'un nouveau produit : réinitialise variante/erreur de façon
+  // synchrone avant de lancer le chargement du nouveau produit — jamais de
+  // variante de l'ancien produit affichée pendant le chargement.
+  const pickSuggestion = s => {
+    const nom = s.produits?.nom_reference || s.libelle_alias;
+    const pid = s.produit_id || null;
+    if (!pid) return;
+    searchSeq.current++; // invalide toute recherche encore en cours
+    setSuggestions([]);
+    setProduitId(pid);
+    setProduitNom(nom);
+    setChangingProduct(false);
+    setSearchQuery("");
+    setVariantes([]);
+    setVarianteId(null);
+    setVarianteError(null);
+    loadVariantesFor(pid, null);
+  };
+
+  const cancelChangeProduct = () => {
+    searchSeq.current++; // invalide toute recherche encore en cours
+    setSuggestions([]);
+    setChangingProduct(false);
+    setSearchQuery("");
+  };
+
+  const canSubmit = isCore
+    ? (!changingProduct && !variantesLoading && !varianteError && varianteId !== null)
+    : (product.trim() && format.trim());
+
+  const submit = async () => {
+    if (!canSubmit || submitting) return;
+
+    setSubmitting(true);
+    setSubmitError(null);
+
+    let succes = false;
+
+    try {
+      const payload = isCore
+        ? (() => {
+            const varianteObj = (varianteId && varianteId !== 'any') ? variantes.find(v => v.id === varianteId) : null;
+            return {
+              ...item,
+              qty,
+              produit_id:           produitId,
+              product:              produitNom,
+              variante_produit_id:  varianteObj?.id ?? null,
+              variante:             varianteObj ?? null,
+              format:               '',
+              formatDisplay:        varianteObj ? formatVariante(varianteObj) : 'Format indifférent',
+            };
+          })()
+        : { ...item, product: product.trim(), format: format.trim(), brand: brandFixed ? brand.trim() : "", qty };
+
+      const ok = await onSave(payload);
+
+      if (ok === true) {
+        succes = true;
+      } else {
+        setSubmitError("Enregistrement impossible, réessaie.");
+      }
+    } catch (error) {
+      console.error("Erreur modification depuis la fiche :", error);
+      setSubmitError("Enregistrement impossible, réessaie.");
+    } finally {
+      // En cas de succès, on laisse le bouton en état "chargement" jusqu'au
+      // démontage de la fiche (onClose ci-dessous) — évite un dernier flash visuel.
+      if (!succes) {
+        setSubmitting(false);
+      }
+    }
+
+    if (succes) {
+      onClose();
+    }
   };
 
   return (
@@ -2433,33 +2884,118 @@ function EditItemSheet({ item, onClose, onSave }) {
           <button onClick={onClose} style={{ background:"rgba(255,255,255,0.2)", border:"none", borderRadius:99, width:28, height:28, color:C.white, fontSize:14, cursor:"pointer" }}>✕</button>
         </div>
         <div style={{ padding:"20px 20px 44px" }}>
-          {[
-            {label:"Produit *", val:product, set:setProduct, ph:"Ex : Cola Zéro, Lait..."},
-            {label:"Format *",  val:format,  set:setFormat,  ph:"Ex : 1L, 500g, x6..."},
-          ].map(f=>(
-            <div key={f.label} style={{ marginBottom:14 }}>
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>{f.label}</div>
-              <input value={f.val} onChange={e=>f.set(e.target.value)} placeholder={f.ph}
-                style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${f.val?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:15, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }} />
-            </div>
-          ))}
-          <div style={{ background:C.grayLight, borderRadius:12, padding:"12px 16px", marginBottom:18 }}>
-            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:brandFixed?12:0 }}>
-              <div>
-                <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>Marque imposée ?</div>
-                <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, marginTop:2 }}>
-                  {brandFixed ? "Oui — une marque précise" : "Non — peu importe la marque"}
-                </div>
+          {isCore ? (
+            <>
+              <div style={{ marginBottom:14 }}>
+                <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Produit</div>
+                {!changingProduct ? (
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <div style={{ flex:1, padding:"13px 16px", borderRadius:10, background:C.grayLight, fontFamily:"'Nunito',sans-serif", fontSize:15, fontWeight:700, color:C.text }}>
+                      {produitNom}
+                    </div>
+                    <button onClick={()=>setChangingProduct(true)} style={{ background:"none", border:"none", color:C.blue, fontWeight:700, cursor:"pointer", fontSize:13, textDecoration:"underline", whiteSpace:"nowrap" }}>
+                      Changer
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ position:"relative" }}>
+                    <input
+                      value={searchQuery}
+                      onChange={e=>{ const val = e.target.value; setSearchQuery(val); searchProducts(val); }}
+                      onBlur={()=>setTimeout(()=>setSuggestions([]), 150)}
+                      placeholder="Chercher un nouveau produit..."
+                      autoFocus
+                      style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${C.blue}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:15, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }}
+                    />
+                    {suggestions.length > 0 && (
+                      <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0, right:0, background:C.white, border:`1px solid ${C.grayLight}`, borderRadius:10, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", zIndex:300, overflow:"hidden" }}>
+                        {suggestions.map((s, i) => (
+                          <button
+                            key={i}
+                            onClick={()=>pickSuggestion(s)}
+                            style={{ display:"block", width:"100%", padding:"11px 16px", background:"transparent", border:"none", borderBottom:i<suggestions.length-1?`1px solid ${C.grayLight}`:"none", fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:14, color:C.text, cursor:"pointer", textAlign:"left" }}
+                          >
+                            {s.produits?.nom_reference || s.libelle_alias}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <button onClick={cancelChangeProduct} style={{ marginTop:8, background:"none", border:"none", color:C.gray, fontWeight:700, cursor:"pointer", fontSize:13, textDecoration:"underline" }}>
+                      Annuler
+                    </button>
+                  </div>
+                )}
               </div>
-              <button onClick={()=>setBrandFixed(v=>!v)} style={{ width:44, height:26, borderRadius:99, border:"none", background:brandFixed?C.blue:C.gray, cursor:"pointer", position:"relative", transition:"background 0.2s", flexShrink:0 }}>
-                <div style={{ width:20, height:20, borderRadius:99, background:C.white, position:"absolute", top:3, transition:"left 0.2s", left:brandFixed?21:3 }} />
-              </button>
+              <div style={{ marginBottom:14 }}>
+                <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Format</div>
+                {variantesLoading && (
+                  <div style={{ fontSize:13, color:C.textLight }}>Chargement des formats…</div>
+                )}
+                {varianteError && !variantesLoading && (
+                  <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
+                    <span style={{ fontSize:13, color:C.red }}>⚠️ {varianteError}</span>
+                    <button onClick={()=>loadVariantesFor(produitId, varianteId)} style={{ background:'none', border:'none', color:C.blue, fontWeight:700, cursor:'pointer', fontSize:13, textDecoration:'underline' }}>Réessayer</button>
+                  </div>
+                )}
+                {!variantesLoading && !varianteError && (
+                  <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                    {variantes.map(v => (
+                      <button key={v.id} onClick={()=>setVarianteId(v.id)}
+                        style={{
+                          padding:'8px 14px', borderRadius:20, fontSize:14, cursor:'pointer',
+                          background: varianteId===v.id ? C.green : C.grayLight,
+                          color:      varianteId===v.id ? C.white : C.text,
+                          border:     varianteId===v.id ? `2px solid ${C.green}` : '2px solid transparent',
+                          fontWeight: varianteId===v.id ? 700 : 400,
+                        }}>
+                        {formatVariante(v)}
+                      </button>
+                    ))}
+                    <button onClick={()=>setVarianteId('any')}
+                      style={{
+                        padding:'8px 14px', borderRadius:20, fontSize:14, cursor:'pointer',
+                        background: varianteId==='any' ? C.gray : C.grayLight,
+                        color:      varianteId==='any' ? C.white : C.textLight,
+                        border:     '2px solid transparent',
+                        fontWeight: 400,
+                      }}>
+                      Format indifférent
+                    </button>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            [
+              {label:"Produit *", val:product, set:setProduct, ph:"Ex : Cola Zéro, Lait..."},
+              {label:"Format *",  val:format,  set:setFormat,  ph:"Ex : 1L, 500g, x6..."},
+            ].map(f=>(
+              <div key={f.label} style={{ marginBottom:14 }}>
+                <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>{f.label}</div>
+                <input value={f.val} onChange={e=>f.set(e.target.value)} placeholder={f.ph}
+                  style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${f.val?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:15, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }} />
+              </div>
+            ))
+          )}
+          {!isCore && (
+            <div style={{ background:C.grayLight, borderRadius:12, padding:"12px 16px", marginBottom:18 }}>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:brandFixed?12:0 }}>
+                <div>
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>Marque imposée ?</div>
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, marginTop:2 }}>
+                    {brandFixed ? "Oui — une marque précise" : "Non — peu importe la marque"}
+                  </div>
+                </div>
+                <button onClick={()=>setBrandFixed(v=>!v)} style={{ width:44, height:26, borderRadius:99, border:"none", background:brandFixed?C.blue:C.gray, cursor:"pointer", position:"relative", transition:"background 0.2s", flexShrink:0 }}>
+                  <div style={{ width:20, height:20, borderRadius:99, background:C.white, position:"absolute", top:3, transition:"left 0.2s", left:brandFixed?21:3 }} />
+                </button>
+              </div>
+              {brandFixed && (
+                <input value={brand} onChange={e=>setBrand(e.target.value)} placeholder="Ex : Look, Coca-Cola..."
+                  style={{ width:"100%", padding:"11px 14px", borderRadius:10, border:`2px solid ${brand?C.orange:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }} />
+              )}
             </div>
-            {brandFixed && (
-              <input value={brand} onChange={e=>setBrand(e.target.value)} placeholder="Ex : Look, Coca-Cola..."
-                style={{ width:"100%", padding:"11px 14px", borderRadius:10, border:`2px solid ${brand?C.orange:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }} />
-            )}
-          </div>
+          )}
           <div style={{ display:"flex", alignItems:"center", background:C.grayLight, borderRadius:12, padding:"10px 16px", marginBottom:22 }}>
             <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, flex:1 }}>Quantité</span>
             <div style={{ display:"flex", alignItems:"center", gap:14 }}>
@@ -2468,7 +3004,10 @@ function EditItemSheet({ item, onClose, onSave }) {
               <button onClick={()=>setQty(q=>q+1)} style={{ width:32, height:32, borderRadius:99, border:"none", background:C.blue, cursor:"pointer", color:C.white, fontSize:18, display:"flex", alignItems:"center", justifyContent:"center" }}>+</button>
             </div>
           </div>
-          <button onClick={submit} disabled={!canSubmit} style={{ width:"100%", padding:"15px", border:"none", borderRadius:12, background:canSubmit?C.orange:C.grayLight, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:canSubmit?"#111111":C.gray, cursor:canSubmit?"pointer":"default" }}>
+          {submitError && (
+            <div style={{ color:C.red, fontSize:13, fontFamily:"'Nunito',sans-serif", fontWeight:700, marginBottom:8 }}>⚠️ {submitError}</div>
+          )}
+          <button onClick={submit} disabled={!canSubmit || submitting} style={{ width:"100%", padding:"15px", border:"none", borderRadius:12, background:(canSubmit&&!submitting)?C.orange:C.grayLight, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:(canSubmit&&!submitting)?"#111111":C.gray, cursor:(canSubmit&&!submitting)?"pointer":"default" }}>
             💾 Enregistrer les modifications
           </button>
         </div>
@@ -2493,9 +3032,18 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
   const unchecked = items.filter(i=>!i.checked);
   const checked   = items.filter(i=>i.checked);
 
-  // Sauvegarder la liste courante comme favoris
+  // Sauvegarder la liste courante comme favoris — les identifiants Core sont
+  // conservés s'ils existent, pour éviter de repasser par le rapprochement alias
+  // au rechargement ; les anciens favoris sans ces champs restent inchangés.
   const saveAsFavorites = () => {
-    const favItems = items.map(i=>({ product:i.product, format:i.format, brand:i.brand, qty:i.qty }));
+    const favItems = items.map(i=>({
+      product: i.product,
+      format:  i.format,
+      brand:   i.brand,
+      qty:     i.qty,
+      ...(i.produit_id ? { produit_id: i.produit_id } : {}),
+      ...(i.variante_produit_id ? { variante_produit_id: i.variante_produit_id } : {}),
+    }));
     saveFavorites(favItems);
     setShowFavModal(false);
   };
@@ -2525,7 +3073,7 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
           {item.brand?`${item.brand} · `:""}{item.product}
         </div>
         <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.gray, marginTop:1 }}>
-          {item.format}{item.brand?"":""} {!item.brand&&<span style={{ color:C.orange, fontSize:11 }}>· toutes marques</span>}
+          {item.formatDisplay ?? item.format}{item.brand?"":""} {!item.brand&&<span style={{ color:C.orange, fontSize:11 }}>· toutes marques</span>}
         </div>
       </div>
       <div style={{ background:done?C.green:C.blue, color:C.white, borderRadius:8, padding:"3px 9px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13 }}>×{item.qty}</div>
@@ -2605,7 +3153,7 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
       )}
 
       {showAdd && <AddItemSheet onClose={()=>setShowAdd(false)} onAdd={addItem}/>}
-      {editItem && <EditItemSheet item={editItem} onClose={()=>setEditItem(null)} onSave={updated=>{updateItem(updated);setEditItem(null);}}/>}
+      {editItem && <EditItemSheet item={editItem} onClose={()=>setEditItem(null)} onSave={updateItem}/>}
       {toast && <Toast msg={toast.msg} ok={toast.ok}/>}
 
       {/* Modal favoris */}
@@ -4189,22 +4737,6 @@ export default function App() {
   const [pseudo,        setPseudo]        = useState(null);
   const [cguAcceptedAt, setCguAcceptedAt] = useState(undefined);
   const [profileMap, setProfileMap] = useState({});
-  const catalog = useMemo(() => {
-    const split = s => s ? s.split(';').map(x => x.trim()).filter(Boolean) : [];
-    const refProducts = produitsRef.map(p => ({
-      product_name: p.produit_generique,
-      category: p.sous_categorie,
-      formats: split(p.formats_courants),
-      marques_nationales: split(p.marques_nationales),
-      marques_distributeurs: split(p.marques_distributeurs),
-    }));
-    const seen = new Set(refProducts.map(p => p.product_name.toLowerCase()));
-    const priceProducts = priceDB
-      .filter(p => p.product?.trim() && !seen.has(p.product.trim().toLowerCase()))
-      .map(p => ({ product_name: p.product.trim(), category: p.category || guessCategory(p.product) }))
-      .filter(p => { const k = p.product_name.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
-    return [...refProducts, ...priceProducts];
-  }, [produitsRef, priceDB]);
 
   const listRowId = useRef(null);
   const favRowId  = useRef(null);
@@ -4261,18 +4793,7 @@ export default function App() {
         ]);
         if (refs.data) setProduitsRef(refs.data);
         if (list.data) {
-          setItems((list.data || []).map(row => ({
-            id:                  row.id,
-            product:             row.produit?.nom_reference ?? row.texte_libre ?? 'Produit sans nom',
-            qty:                 Number(row.quantite) || 1,
-            format:              row.format_selectionne || '',
-            brand:               '',
-            checked:             row.statut === 'achete',
-            produit_id:          row.produit_id,
-            variante_produit_id: row.variante_produit_id,
-            produit:             row.produit ?? null,
-            variante:            row.variante ?? null,
-          })));
+          setItems((list.data || []).map(mapperLigneListeCourses));
         }
         if (prices.data) {
           setPriceDB(prices.data.map(p => ({ ...p, storeId: p.storeId || 'autre', category: p.category || guessCategory(p.product) })));
@@ -4343,76 +4864,120 @@ export default function App() {
   // };
 
   const chargerListe = async () => {
-    const { data } = await supabase.from('liste_courses')
+    const { data, error } = await supabase.from('liste_courses')
       .select(`id, texte_libre, quantite, format_selectionne, statut, produit_id, variante_produit_id,
         produit:produits(id, nom_reference),
         variante:variantes_produit(id, libelle, quantite_nette, unite_quantite, nombre_unites)`)
       .eq('utilisateur_id', session?.user?.id)
       .order('cree_le');
-    if (data) setItems(data.map(row => ({
-      id:                  row.id,
-      product:             row.produit?.nom_reference ?? row.texte_libre ?? 'Produit sans nom',
-      qty:                 Number(row.quantite) || 1,
-      format:              row.format_selectionne || '',
-      brand:               '',
-      checked:             row.statut === 'achete',
-      produit_id:          row.produit_id,
-      variante_produit_id: row.variante_produit_id,
-      produit:             row.produit ?? null,
-      variante:            row.variante ?? null,
-    })));
+    if (error) {
+      console.error("Erreur rechargement liste_courses :", error);
+      throw error;
+    }
+    setItems((data || []).map(mapperLigneListeCourses));
+    return true;
   };
 
   const addItem = async (item) => {
-    const optimistic = { ...item, id: item.id ?? crypto.randomUUID() };
+    const optimistic = { ...item, id: item.id ?? (Date.now() + Math.random()) };
     setItems(prev => [...prev, optimistic]);
-    try {
-      // Rapprochement automatique via alias_produits (correspondance exacte uniquement)
-      let produit_id = item.produit_id ?? null;
-      let texte_libre = item.produit_id ? null : item.product;
-      if (!produit_id && item.product?.trim()) {
-        const { data: aliases } = await supabase
-          .from('alias_produits')
-          .select('produit_id')
-          .eq('statut', 'actif')
-          .ilike('libelle_alias', item.product.trim());
-        if (aliases && aliases.length === 1) {
-          produit_id = aliases[0].produit_id;
-          texte_libre = null; // contrainte liste_courses_produit_ou_texte
-        }
+
+    // Rapprochement automatique via alias_produits (correspondance exacte uniquement)
+    let produit_id = item.produit_id ?? null;
+    let texte_libre = item.produit_id ? null : item.product;
+    if (!produit_id && item.product?.trim()) {
+      const { data: aliases } = await supabase
+        .from('alias_produits')
+        .select('produit_id')
+        .eq('statut', 'actif')
+        .ilike('libelle_alias', item.product.trim());
+      if (aliases && aliases.length === 1) {
+        produit_id = aliases[0].produit_id;
+        texte_libre = null; // contrainte liste_courses_produit_ou_texte
       }
-      const { data, error } = await supabase.from('liste_courses').insert({
-        utilisateur_id:      session?.user?.id,
-        texte_libre:         texte_libre,
-        quantite:            item.qty ?? 1,
-        format_selectionne:  item.format || null,
-        statut:              'a_acheter',
-        produit_id:          produit_id,
-        variante_produit_id: item.variante_produit_id ?? null,
-      }).select('id').single();
-      if (error) throw error;
-      if (data) await chargerListe();
-    } catch(e) {
+    }
+
+    const payload = {
+      utilisateur_id:      session?.user?.id,
+      texte_libre:         texte_libre,
+      quantite:            item.qty ?? 1,
+      format_selectionne:  item.format || null,
+      statut:              'a_acheter',
+      produit_id:          produit_id,
+      variante_produit_id: item.variante_produit_id ?? null,
+    };
+
+    // Phase 1 : insertion — seule cette phase déclenche un rollback de l'optimiste.
+    let insertedId;
+    try {
+      const { data, error } = await supabase.from('liste_courses').insert(payload).select('id').single();
+      if (error || !data?.id) {
+        throw error || new Error("Insertion sans id retourné");
+      }
+      insertedId = data.id;
+    } catch (e) {
       console.error("Erreur ajout liste :", e);
       setItems(prev => prev.filter(i => i.id !== optimistic.id));
       showAppToast("⚠️ Sauvegarde échouée, vérifie ta connexion", false);
+      return false;
+    }
+
+    // La ligne existe désormais bel et bien en base : on remplace l'id temporaire
+    // par le véritable id, et on ne la supprime plus jamais localement à partir d'ici.
+    setItems(prev => prev.map(i => i.id === optimistic.id ? { ...i, id: insertedId } : i));
+
+    // Phase 2 : rechargement — un échec ici n'annule pas l'insertion déjà réussie.
+    try {
+      await chargerListe();
+      return true;
+    } catch (e) {
+      console.error("Erreur rechargement après ajout :", e);
+      showAppToast("⚠️ Produit ajouté, mais la liste n'a pas pu être actualisée.", false);
+      return true;
     }
   };
 
   const updateItem = async (updated) => {
+    const previous = items.find(i => i.id === updated.id);
     setItems(prev => prev.map(i => i.id === updated.id ? updated : i));
+
+    const payload = updated.produit_id
+      ? {
+          texte_libre:         null,
+          quantite:            updated.qty ?? 1,
+          format_selectionne:  null,
+          produit_id:          updated.produit_id,
+          variante_produit_id: updated.variante_produit_id ?? null,
+        }
+      : {
+          texte_libre:         (updated.product || '').trim() || null,
+          quantite:            updated.qty ?? 1,
+          format_selectionne:  updated.format || null,
+          produit_id:          null,
+          variante_produit_id: null,
+        };
+
+    // Phase 1 : écriture — seule cette phase déclenche un rollback vers `previous`.
     try {
-      const { error } = await supabase.from('liste_courses').update({
-        texte_libre:         updated.product,
-        quantite:            updated.qty ?? 1,
-        format_selectionne:  updated.format || null,
-        produit_id:          updated.produit_id ?? null,
-        variante_produit_id: updated.variante_produit_id ?? null,
-      }).eq('id', updated.id);
-      if (error) throw error;
-    } catch(e) {
+      const { data, error } = await supabase.from('liste_courses').update(payload).eq('id', updated.id).select('id').single();
+      if (error || !data?.id) {
+        throw error || new Error("Mise à jour sans id retourné");
+      }
+    } catch (e) {
       console.error("Erreur modification liste :", e);
+      if (previous) setItems(prev => prev.map(i => i.id === updated.id ? previous : i));
       showAppToast("⚠️ Sauvegarde échouée, vérifie ta connexion", false);
+      return false;
+    }
+
+    // Phase 2 : rechargement — un échec ici n'annule pas l'écriture déjà réussie.
+    try {
+      await chargerListe();
+      return true;
+    } catch (e) {
+      console.error("Erreur rechargement après modification :", e);
+      showAppToast("⚠️ Modification enregistrée, mais la liste n'a pas pu être actualisée.", false);
+      return true;
     }
   };
 
@@ -4767,7 +5332,7 @@ export default function App() {
           )}
           {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout}/>}
           {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos}/>}
-          {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} setTab={setTab} catalog={catalog} priceDB={priceDB}/>}
+          {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} setTab={setTab}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius} userPos={userPos}/>}
           {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;
