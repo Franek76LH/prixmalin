@@ -846,20 +846,24 @@ function AddItemSheet({ onClose, onAdd }) {
   const [variante_id, setVarianteId]  = useState(null);
   const [variantesLoading, setVariantesLoading] = useState(false);
   const [varianteError,    setVarianteError]    = useState(null);
+  const variantSeq = useRef(0);
 
   // Trois cas : produit libre (texte obligatoire), produit Core sans variante
   // (Format indifférent suffit, jamais de texte imposé), produit Core avec variantes
   // (une variante ou "any" doit être choisie). Une erreur de chargement bloque
   // l'ajout tant qu'elle n'est pas résolue — on ne confond jamais "erreur réseau"
-  // avec "ce produit n'a réellement aucune variante".
+  // avec "ce produit n'a réellement aucune variante". Le chargement en cours bloque
+  // aussi l'ajout, pour ne jamais soumettre une variante d'un autre produit.
   const canSubmit = product.trim() && (
     !produit_id
       ? format.trim()
-      : varianteError
+      : variantesLoading
         ? false
-        : variantes.length === 0
-          ? variante_id === 'any'
-          : variante_id !== null
+        : varianteError
+          ? false
+          : variantes.length === 0
+            ? variante_id === 'any'
+            : variante_id !== null
   );
 
   const submit = () => {
@@ -882,22 +886,30 @@ function AddItemSheet({ onClose, onAdd }) {
     setProduitId(null); setVariantes([]); setVarianteId(null); setVarianteError(null);
   };
 
+  // Protège tous les setState (succès, erreur, finally) contre une réponse
+  // obsolète : une requête A ne doit jamais écraser l'état d'une requête B
+  // plus récente, y compris pour remettre variantesLoading à false.
   const loadVariantesFor = async (pid) => {
+    const mySeq = ++variantSeq.current;
     setVarianteError(null);
     setVariantesLoading(true);
     try {
       const data = await chargerVariantes(pid);
+      if (mySeq !== variantSeq.current) return; // réponse obsolète, ignorée
       setVariantes(data);
       // Un produit Core réellement sans variante active passe directement en
       // "Format indifférent" (166/169 produits) ; sinon l'utilisateur doit choisir.
       setVarianteId(data.length === 0 ? 'any' : null);
     } catch (e) {
+      if (mySeq !== variantSeq.current) return;
       console.error("Erreur chargement variantes :", e);
       setVariantes([]);
       setVarianteId(null); // jamais 'any' sur erreur : on ne sait pas si le produit a des variantes
       setVarianteError("Impossible de charger les formats.");
     } finally {
-      setVariantesLoading(false);
+      if (mySeq === variantSeq.current) {
+        setVariantesLoading(false);
+      }
     }
   };
 
@@ -908,18 +920,21 @@ function AddItemSheet({ onClose, onAdd }) {
     const pid = s.produit_id || null;
     setProduitId(pid);
     setFormat('');
+    // Vide immédiatement l'ancien état (synchrone), avant même de lancer le
+    // chargement du nouveau produit — jamais de variante d'un autre produit affichée.
+    setVariantes([]);
+    setVarianteId(null);
+    setVarianteError(null);
     if (pid) {
       loadVariantesFor(pid);
-    } else {
-      setVariantes([]);
-      setVarianteId(null);
-      setVarianteError(null);
     }
   };
 
   // Chip prédéfinie (constants.js) : toujours en texte libre, ne doit jamais hériter
-  // d'un produit_id résolu par une sélection précédente.
+  // d'un produit_id résolu par une sélection précédente. Invalide aussi toute
+  // requête de variantes encore en cours.
   const pickPredefinedSuggestion = (s) => {
+    variantSeq.current++;
     setProduct(s.name);
     setFormat(s.format);
     setProduitId(null);
@@ -991,7 +1006,21 @@ function AddItemSheet({ onClose, onAdd }) {
           <div style={{ position:"relative" }}>
             <input
               value={product}
-              onChange={e=>{ setProduct(e.target.value); searchProducts(e.target.value); }}
+              onChange={e=>{
+                const val = e.target.value;
+                setProduct(val);
+                // Éditer le texte après une sélection Core invalide cette sélection :
+                // retour au parcours texte libre, aucune requête de variantes en cours n'est plus prise en compte.
+                if (produit_id) {
+                  variantSeq.current++;
+                  setProduitId(null);
+                  setVariantes([]);
+                  setVarianteId(null);
+                  setVarianteError(null);
+                  setVariantesLoading(false);
+                }
+                searchProducts(val);
+              }}
               onBlur={()=>setTimeout(()=>setSuggestions([]), 150)}
               placeholder="Ex : Cola Zéro, Lait, Pâtes..."
               style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${product?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:15, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:14 }}
@@ -2691,6 +2720,8 @@ function EditItemSheet({ item, onClose, onSave }) {
   const [varianteId,       setVarianteId]       = useState(item.variante_produit_id || null);
   const [variantesLoading, setVariantesLoading] = useState(isCore);
   const [varianteError,    setVarianteError]    = useState(null);
+  const [submitting,       setSubmitting]       = useState(false);
+  const [submitError,      setSubmitError]      = useState(null);
 
   const loadVariantes = async () => {
     setVarianteError(null);
@@ -2724,22 +2755,50 @@ function EditItemSheet({ item, onClose, onSave }) {
     ? (!variantesLoading && !varianteError && varianteId !== null)
     : (product.trim() && format.trim());
 
-  const submit = () => {
-    if (!canSubmit) return;
-    if (isCore) {
-      const varianteObj = (varianteId && varianteId !== 'any') ? variantes.find(v => v.id === varianteId) : null;
-      onSave({
-        ...item,
-        qty,
-        variante_produit_id: varianteObj?.id ?? null,
-        variante:            varianteObj ?? null,
-        format:              '',
-        formatDisplay:       varianteObj ? formatVariante(varianteObj) : 'Format indifférent',
-      });
-    } else {
-      onSave({ ...item, product:product.trim(), format:format.trim(), brand:brandFixed?brand.trim():"", qty });
+  const submit = async () => {
+    if (!canSubmit || submitting) return;
+
+    setSubmitting(true);
+    setSubmitError(null);
+
+    let succes = false;
+
+    try {
+      const payload = isCore
+        ? (() => {
+            const varianteObj = (varianteId && varianteId !== 'any') ? variantes.find(v => v.id === varianteId) : null;
+            return {
+              ...item,
+              qty,
+              variante_produit_id: varianteObj?.id ?? null,
+              variante:            varianteObj ?? null,
+              format:              '',
+              formatDisplay:       varianteObj ? formatVariante(varianteObj) : 'Format indifférent',
+            };
+          })()
+        : { ...item, product: product.trim(), format: format.trim(), brand: brandFixed ? brand.trim() : "", qty };
+
+      const ok = await onSave(payload);
+
+      if (ok === true) {
+        succes = true;
+      } else {
+        setSubmitError("Enregistrement impossible, réessaie.");
+      }
+    } catch (error) {
+      console.error("Erreur modification depuis la fiche :", error);
+      setSubmitError("Enregistrement impossible, réessaie.");
+    } finally {
+      // En cas de succès, on laisse le bouton en état "chargement" jusqu'au
+      // démontage de la fiche (onClose ci-dessous) — évite un dernier flash visuel.
+      if (!succes) {
+        setSubmitting(false);
+      }
     }
-    onClose();
+
+    if (succes) {
+      onClose();
+    }
   };
 
   return (
@@ -2836,7 +2895,10 @@ function EditItemSheet({ item, onClose, onSave }) {
               <button onClick={()=>setQty(q=>q+1)} style={{ width:32, height:32, borderRadius:99, border:"none", background:C.blue, cursor:"pointer", color:C.white, fontSize:18, display:"flex", alignItems:"center", justifyContent:"center" }}>+</button>
             </div>
           </div>
-          <button onClick={submit} disabled={!canSubmit} style={{ width:"100%", padding:"15px", border:"none", borderRadius:12, background:canSubmit?C.orange:C.grayLight, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:canSubmit?"#111111":C.gray, cursor:canSubmit?"pointer":"default" }}>
+          {submitError && (
+            <div style={{ color:C.red, fontSize:13, fontFamily:"'Nunito',sans-serif", fontWeight:700, marginBottom:8 }}>⚠️ {submitError}</div>
+          )}
+          <button onClick={submit} disabled={!canSubmit || submitting} style={{ width:"100%", padding:"15px", border:"none", borderRadius:12, background:(canSubmit&&!submitting)?C.orange:C.grayLight, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:(canSubmit&&!submitting)?"#111111":C.gray, cursor:(canSubmit&&!submitting)?"pointer":"default" }}>
             💾 Enregistrer les modifications
           </button>
         </div>
@@ -2982,7 +3044,7 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
       )}
 
       {showAdd && <AddItemSheet onClose={()=>setShowAdd(false)} onAdd={addItem}/>}
-      {editItem && <EditItemSheet item={editItem} onClose={()=>setEditItem(null)} onSave={updated=>{updateItem(updated);setEditItem(null);}}/>}
+      {editItem && <EditItemSheet item={editItem} onClose={()=>setEditItem(null)} onSave={updateItem}/>}
       {toast && <Toast msg={toast.msg} ok={toast.ok}/>}
 
       {/* Modal favoris */}
@@ -4769,29 +4831,44 @@ export default function App() {
   const updateItem = async (updated) => {
     const previous = items.find(i => i.id === updated.id);
     setItems(prev => prev.map(i => i.id === updated.id ? updated : i));
+
+    const payload = updated.produit_id
+      ? {
+          texte_libre:         null,
+          quantite:            updated.qty ?? 1,
+          format_selectionne:  null,
+          produit_id:          updated.produit_id,
+          variante_produit_id: updated.variante_produit_id ?? null,
+        }
+      : {
+          texte_libre:         (updated.product || '').trim() || null,
+          quantite:            updated.qty ?? 1,
+          format_selectionne:  updated.format || null,
+          produit_id:          null,
+          variante_produit_id: null,
+        };
+
+    // Phase 1 : écriture — seule cette phase déclenche un rollback vers `previous`.
     try {
-      const payload = updated.produit_id
-        ? {
-            texte_libre:         null,
-            quantite:            updated.qty ?? 1,
-            format_selectionne:  null,
-            produit_id:          updated.produit_id,
-            variante_produit_id: updated.variante_produit_id ?? null,
-          }
-        : {
-            texte_libre:         (updated.product || '').trim() || null,
-            quantite:            updated.qty ?? 1,
-            format_selectionne:  updated.format || null,
-            produit_id:          null,
-            variante_produit_id: null,
-          };
-      const { error } = await supabase.from('liste_courses').update(payload).eq('id', updated.id);
-      if (error) throw error;
-      await chargerListe();
-    } catch(e) {
+      const { data, error } = await supabase.from('liste_courses').update(payload).eq('id', updated.id).select('id').single();
+      if (error || !data?.id) {
+        throw error || new Error("Mise à jour sans id retourné");
+      }
+    } catch (e) {
       console.error("Erreur modification liste :", e);
       if (previous) setItems(prev => prev.map(i => i.id === updated.id ? previous : i));
       showAppToast("⚠️ Sauvegarde échouée, vérifie ta connexion", false);
+      return false;
+    }
+
+    // Phase 2 : rechargement — un échec ici n'annule pas l'écriture déjà réussie.
+    try {
+      await chargerListe();
+      return true;
+    } catch (e) {
+      console.error("Erreur rechargement après modification :", e);
+      showAppToast("⚠️ Modification enregistrée, mais la liste n'a pas pu être actualisée.", false);
+      return true;
     }
   };
 
