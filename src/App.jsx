@@ -2715,44 +2715,117 @@ function EditItemSheet({ item, onClose, onSave }) {
   const [brandFixed, setBrandFixed] = useState(!!item.brand);
   const [qty,        setQty]        = useState(item.qty);
 
-  // Branche article Core — sélecteur de variantes
+  // Branche article Core — produit (modifiable via recherche) + sélecteur de variantes
+  const [produitId,        setProduitId]        = useState(item.produit_id || null);
+  const [produitNom,       setProduitNom]       = useState(item.product);
+  const [changingProduct,  setChangingProduct]  = useState(false);
+  const [searchQuery,      setSearchQuery]      = useState("");
+  const [suggestions,      setSuggestions]      = useState([]);
   const [variantes,        setVariantes]        = useState([]);
   const [varianteId,       setVarianteId]       = useState(item.variante_produit_id || null);
   const [variantesLoading, setVariantesLoading] = useState(isCore);
   const [varianteError,    setVarianteError]    = useState(null);
   const [submitting,       setSubmitting]       = useState(false);
   const [submitError,      setSubmitError]      = useState(null);
+  const variantSeq = useRef(0);
+  const searchSeq  = useRef(0);
 
-  const loadVariantes = async () => {
+  // Protège tous les setState (succès, erreur, finally) contre une réponse
+  // obsolète — même garde que dans AddItemSheet.
+  const loadVariantesFor = async (pid, preserveVarianteId) => {
+    const mySeq = ++variantSeq.current;
     setVarianteError(null);
     setVariantesLoading(true);
     try {
-      const data = await chargerVariantes(item.produit_id);
+      const data = await chargerVariantes(pid);
+      if (mySeq !== variantSeq.current) return; // réponse obsolète, ignorée
       setVariantes(data);
       if (data.length === 0) {
         setVarianteId('any');
-      } else if (item.variante_produit_id && data.some(v => v.id === item.variante_produit_id)) {
-        setVarianteId(item.variante_produit_id);
+      } else if (preserveVarianteId && data.some(v => v.id === preserveVarianteId)) {
+        setVarianteId(preserveVarianteId);
       } else {
         setVarianteId(null);
       }
     } catch (e) {
+      if (mySeq !== variantSeq.current) return;
       console.error("Erreur chargement variantes :", e);
       setVariantes([]);
       setVarianteId(null); // jamais 'any' sur erreur : on ne sait pas si le produit a des variantes
       setVarianteError("Impossible de charger les formats.");
     } finally {
-      setVariantesLoading(false);
+      if (mySeq === variantSeq.current) {
+        setVariantesLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    if (isCore) loadVariantes();
+    if (isCore) loadVariantesFor(item.produit_id, item.variante_produit_id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Protège tous les setState (succès, erreur résolue, exception) contre une
+  // réponse obsolète, sur le même principe que loadVariantesFor.
+  const searchProducts = async val => {
+    if (val.length < 2) {
+      searchSeq.current++; // invalide toute recherche en cours
+      setSuggestions([]);
+      return;
+    }
+    const mySeq = ++searchSeq.current;
+    try {
+      const { data, error } = await supabase
+        .from('alias_produits')
+        .select('libelle_alias, produit_id, produits(nom_reference)')
+        .ilike('libelle_alias', `%${val}%`)
+        .eq('statut', 'actif')
+        .limit(8);
+      if (mySeq !== searchSeq.current) return; // réponse obsolète, ignorée
+      if (error) { console.error("Erreur recherche produits :", error); setSuggestions([]); return; }
+      const seen = new Set();
+      const deduped = (data || []).filter(r => {
+        const key = r.produit_id;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      setSuggestions(deduped);
+    } catch (e) {
+      if (mySeq !== searchSeq.current) return;
+      console.error("Erreur recherche produits :", e);
+      setSuggestions([]);
+    }
+  };
+
+  // Sélection d'un nouveau produit : réinitialise variante/erreur de façon
+  // synchrone avant de lancer le chargement du nouveau produit — jamais de
+  // variante de l'ancien produit affichée pendant le chargement.
+  const pickSuggestion = s => {
+    const nom = s.produits?.nom_reference || s.libelle_alias;
+    const pid = s.produit_id || null;
+    if (!pid) return;
+    searchSeq.current++; // invalide toute recherche encore en cours
+    setSuggestions([]);
+    setProduitId(pid);
+    setProduitNom(nom);
+    setChangingProduct(false);
+    setSearchQuery("");
+    setVariantes([]);
+    setVarianteId(null);
+    setVarianteError(null);
+    loadVariantesFor(pid, null);
+  };
+
+  const cancelChangeProduct = () => {
+    searchSeq.current++; // invalide toute recherche encore en cours
+    setSuggestions([]);
+    setChangingProduct(false);
+    setSearchQuery("");
+  };
+
   const canSubmit = isCore
-    ? (!variantesLoading && !varianteError && varianteId !== null)
+    ? (!changingProduct && !variantesLoading && !varianteError && varianteId !== null)
     : (product.trim() && format.trim());
 
   const submit = async () => {
@@ -2770,10 +2843,12 @@ function EditItemSheet({ item, onClose, onSave }) {
             return {
               ...item,
               qty,
-              variante_produit_id: varianteObj?.id ?? null,
-              variante:            varianteObj ?? null,
-              format:              '',
-              formatDisplay:       varianteObj ? formatVariante(varianteObj) : 'Format indifférent',
+              produit_id:           produitId,
+              product:              produitNom,
+              variante_produit_id:  varianteObj?.id ?? null,
+              variante:             varianteObj ?? null,
+              format:               '',
+              formatDisplay:        varianteObj ? formatVariante(varianteObj) : 'Format indifférent',
             };
           })()
         : { ...item, product: product.trim(), format: format.trim(), brand: brandFixed ? brand.trim() : "", qty };
@@ -2813,9 +2888,43 @@ function EditItemSheet({ item, onClose, onSave }) {
             <>
               <div style={{ marginBottom:14 }}>
                 <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Produit</div>
-                <div style={{ padding:"13px 16px", borderRadius:10, background:C.grayLight, fontFamily:"'Nunito',sans-serif", fontSize:15, fontWeight:700, color:C.text }}>
-                  {item.product}
-                </div>
+                {!changingProduct ? (
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <div style={{ flex:1, padding:"13px 16px", borderRadius:10, background:C.grayLight, fontFamily:"'Nunito',sans-serif", fontSize:15, fontWeight:700, color:C.text }}>
+                      {produitNom}
+                    </div>
+                    <button onClick={()=>setChangingProduct(true)} style={{ background:"none", border:"none", color:C.blue, fontWeight:700, cursor:"pointer", fontSize:13, textDecoration:"underline", whiteSpace:"nowrap" }}>
+                      Changer
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ position:"relative" }}>
+                    <input
+                      value={searchQuery}
+                      onChange={e=>{ const val = e.target.value; setSearchQuery(val); searchProducts(val); }}
+                      onBlur={()=>setTimeout(()=>setSuggestions([]), 150)}
+                      placeholder="Chercher un nouveau produit..."
+                      autoFocus
+                      style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${C.blue}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:15, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }}
+                    />
+                    {suggestions.length > 0 && (
+                      <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0, right:0, background:C.white, border:`1px solid ${C.grayLight}`, borderRadius:10, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", zIndex:300, overflow:"hidden" }}>
+                        {suggestions.map((s, i) => (
+                          <button
+                            key={i}
+                            onClick={()=>pickSuggestion(s)}
+                            style={{ display:"block", width:"100%", padding:"11px 16px", background:"transparent", border:"none", borderBottom:i<suggestions.length-1?`1px solid ${C.grayLight}`:"none", fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:14, color:C.text, cursor:"pointer", textAlign:"left" }}
+                          >
+                            {s.produits?.nom_reference || s.libelle_alias}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <button onClick={cancelChangeProduct} style={{ marginTop:8, background:"none", border:"none", color:C.gray, fontWeight:700, cursor:"pointer", fontSize:13, textDecoration:"underline" }}>
+                      Annuler
+                    </button>
+                  </div>
+                )}
               </div>
               <div style={{ marginBottom:14 }}>
                 <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Format</div>
@@ -2825,7 +2934,7 @@ function EditItemSheet({ item, onClose, onSave }) {
                 {varianteError && !variantesLoading && (
                   <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
                     <span style={{ fontSize:13, color:C.red }}>⚠️ {varianteError}</span>
-                    <button onClick={loadVariantes} style={{ background:'none', border:'none', color:C.blue, fontWeight:700, cursor:'pointer', fontSize:13, textDecoration:'underline' }}>Réessayer</button>
+                    <button onClick={()=>loadVariantesFor(produitId, varianteId)} style={{ background:'none', border:'none', color:C.blue, fontWeight:700, cursor:'pointer', fontSize:13, textDecoration:'underline' }}>Réessayer</button>
                   </div>
                 )}
                 {!variantesLoading && !varianteError && (
