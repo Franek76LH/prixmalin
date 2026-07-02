@@ -920,6 +920,11 @@ function AddItemSheet({ onClose, onAdd }) {
     const pid = s.produit_id || null;
     setProduitId(pid);
     setFormat('');
+    // Une sélection de suggestion Core n'a pas de notion de marque : on efface
+    // toute valeur résiduelle laissée par une saisie libre précédente, pour ne
+    // jamais faire cohabiter produit_id et une marque non vide.
+    setBrand('');
+    setBrandFixed(false);
     // Vide immédiatement l'ancien état (synchrone), avant même de lancer le
     // chargement du nouveau produit — jamais de variante d'un autre produit affichée.
     setVariantes([]);
@@ -4787,7 +4792,7 @@ export default function App() {
           supabase.from('price_db').select('*'),
           supabase.from('archives').select('*').order('date'),
           supabase.from('favorites').select('id, items').order('id').limit(1),
-          supabase.from('produits_ref').select('produit_generique, sous_categorie, formats_courants, marques_nationales, marques_distributeurs').order('id'),
+          supabase.from('produits_ref').select('produit_generique, sous_categorie').order('id'),
           supabase.from('circles').select('*'),
           supabase.from('profiles').select('pseudo, cgu_accepted_at').eq('id', session.user.id).maybeSingle(),
         ]);
