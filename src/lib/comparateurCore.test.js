@@ -12,6 +12,7 @@ import {
   regrouperParMagasin,
   calculerTotauxMagasins,
   classerMagasins,
+  comparerResultatsLegacyEtCore,
 } from './comparateurCore';
 
 function cibleBase(overrides) {
@@ -41,6 +42,7 @@ function prixBase(overrides) {
     latitude: 48.8566,
     longitude: 2.3522,
     nom_enseigne: 'Carrefour',
+    nom_magasin: 'Carrefour Rueil',
     ...overrides,
   };
 }
@@ -312,5 +314,197 @@ describe('classerMagasins', () => {
       m2: { total: 20, found: 2, articlesTrouves: [], articlesManquants: [] },
     };
     expect(classerMagasins(totaux).map(m => m.magasinId)).toEqual(['m2']);
+  });
+});
+
+describe('comparerResultatsLegacyEtCore', () => {
+  const legacyCarrefour = { best: { id: 'carrefour', name: 'Carrefour', total: 20, found: 2 } };
+  const metaBase = { totalItems: 5 };
+  const sansExclusions = { legacyOnly: [], produitIdSansFormat: [] };
+  const coreVide = { correspondancesBrutes: [], correspondancesFraiches: [], classement: [] };
+
+  it('rapport vide quand ni legacy ni Core ne trouvent rien', () => {
+    const rapport = comparerResultatsLegacyEtCore({ best: null }, coreVide, sansExclusions, { totalItems: 0 });
+    expect(rapport).toEqual({
+      nbArticlesTotal: 0,
+      nbArticlesEligiblesCore: 0,
+      nbArticlesTrouves: 0,
+      nbArticlesManquants: 0,
+      nbExclusSansProduitId: 0,
+      nbExclusSansFormat: 0,
+      nbMagasinsCandidatsCore: 0,
+      meilleurLegacy: null,
+      meilleurCore: null,
+      totalLegacy: null,
+      totalCore: null,
+      differenceTotale: null,
+      raisons: {
+        articleNonEligible: 0,
+        formatImpossibleAVerifier: 0,
+        donneeCoreAbsente: 0,
+        prixTropAncien: 0,
+        differenceRegroupementEnseigneMagasin: false,
+        ecartPrixReel: null,
+      },
+    });
+  });
+
+  it('compte un article legacy_only (sans produit_id) dans articleNonEligible', () => {
+    const rapport = comparerResultatsLegacyEtCore(
+      legacyCarrefour,
+      coreVide,
+      { legacyOnly: [{ id: 1, product: 'Pain (texte libre)' }], produitIdSansFormat: [] },
+      metaBase,
+    );
+    expect(rapport.nbExclusSansProduitId).toBe(1);
+    expect(rapport.raisons.articleNonEligible).toBe(1);
+  });
+
+  it('compte un article sans format démontrable dans formatImpossibleAVerifier', () => {
+    const rapport = comparerResultatsLegacyEtCore(
+      legacyCarrefour,
+      coreVide,
+      { legacyOnly: [], produitIdSansFormat: [{ id: 2, produit_id: 'p2' }] },
+      metaBase,
+    );
+    expect(rapport.nbExclusSansFormat).toBe(1);
+    expect(rapport.raisons.formatImpossibleAVerifier).toBe(1);
+  });
+
+  it('détecte une donnée Core totalement absente (0 correspondance brute) pour un article éligible', () => {
+    const core = {
+      correspondancesBrutes: [{ itemId: 3, produit_id: 'p3', correspondances: [] }],
+      correspondancesFraiches: [{ itemId: 3, produit_id: 'p3', correspondances: [] }],
+      classement: [],
+    };
+    const rapport = comparerResultatsLegacyEtCore(legacyCarrefour, core, sansExclusions, metaBase);
+    expect(rapport.nbArticlesEligiblesCore).toBe(1);
+    expect(rapport.nbArticlesTrouves).toBe(0);
+    expect(rapport.nbArticlesManquants).toBe(1);
+    expect(rapport.raisons.donneeCoreAbsente).toBe(1);
+    expect(rapport.raisons.prixTropAncien).toBe(0);
+  });
+
+  it('détecte un prix Core trop ancien (correspondance brute existante mais filtrée par la fraîcheur)', () => {
+    const core = {
+      correspondancesBrutes: [{ itemId: 4, produit_id: 'p4', correspondances: [prixBase({ prix_id: 'ancien' }), prixBase({ prix_id: 'ancien2' })] }],
+      correspondancesFraiches: [{ itemId: 4, produit_id: 'p4', correspondances: [] }],
+      classement: [],
+    };
+    const rapport = comparerResultatsLegacyEtCore(legacyCarrefour, core, sansExclusions, metaBase);
+    expect(rapport.raisons.prixTropAncien).toBe(1);
+    expect(rapport.raisons.donneeCoreAbsente).toBe(0);
+  });
+
+  it('reconnaît un article Core trouvé (correspondance brute et fraîche présentes)', () => {
+    const core = {
+      correspondancesBrutes: [{ itemId: 5, produit_id: 'p5', correspondances: [prixBase({ prix_id: 'a' }), prixBase({ prix_id: 'b' })] }],
+      correspondancesFraiches: [{ itemId: 5, produit_id: 'p5', correspondances: [prixBase({ prix_id: 'b' })] }],
+      classement: [],
+    };
+    const rapport = comparerResultatsLegacyEtCore(legacyCarrefour, core, sansExclusions, metaBase);
+    expect(rapport.nbArticlesTrouves).toBe(1);
+    expect(rapport.nbArticlesManquants).toBe(0);
+  });
+
+  it('résout le nom du magasin/enseigne depuis le prix imbriqué et attribue un écart de total (enseignes différentes) à un écart de prix réel', () => {
+    const core = {
+      correspondancesBrutes: [],
+      correspondancesFraiches: [],
+      classement: [{
+        magasinId: 'm1', total: 18, found: 2,
+        articlesTrouves: [{ itemId: 5, produit_id: 'p5', prix: prixBase({ nom_enseigne: 'Auchan', nom_magasin: 'Auchan Rueil', prix_total: 9 }) }],
+        articlesManquants: [],
+      }],
+    };
+    const rapport = comparerResultatsLegacyEtCore(legacyCarrefour, core, sansExclusions, metaBase);
+    expect(rapport.meilleurCore).toEqual({ id: 'm1', nom: 'Auchan Rueil', total: 18 });
+    expect(rapport.differenceTotale).toBe(-2);
+    expect(rapport.raisons.ecartPrixReel).toBe(-2);
+    expect(rapport.raisons.differenceRegroupementEnseigneMagasin).toBe(false);
+  });
+
+  it('attribue un écart de total (même enseigne) au regroupement enseigne vs magasin réel', () => {
+    const core = {
+      correspondancesBrutes: [],
+      correspondancesFraiches: [],
+      classement: [{
+        magasinId: 'm2', total: 22, found: 2,
+        articlesTrouves: [{ itemId: 5, produit_id: 'p5', prix: prixBase({ nom_enseigne: 'Carrefour', nom_magasin: 'Carrefour Nanterre' }) }],
+        articlesManquants: [],
+      }],
+    };
+    const rapport = comparerResultatsLegacyEtCore(legacyCarrefour, core, sansExclusions, metaBase);
+    expect(rapport.differenceTotale).toBe(2);
+    expect(rapport.raisons.differenceRegroupementEnseigneMagasin).toBe(true);
+    expect(rapport.raisons.ecartPrixReel).toBeNull();
+  });
+
+  it('résout le nom du magasin/enseigne via le dictionnaire de référence meta.magasinsRef quand rien n’est imbriqué', () => {
+    const core = {
+      correspondancesBrutes: [],
+      correspondancesFraiches: [],
+      classement: [{ magasinId: 'm3', total: 15, found: 1, articlesTrouves: [], articlesManquants: [] }],
+    };
+    const magasinsRef = { m3: { nom: 'Lidl Colombes', enseigne: 'Lidl' } };
+    const rapport = comparerResultatsLegacyEtCore(legacyCarrefour, core, sansExclusions, { ...metaBase, magasinsRef });
+    expect(rapport.meilleurCore).toEqual({ id: 'm3', nom: 'Lidl Colombes', total: 15 });
+    expect(rapport.raisons.differenceRegroupementEnseigneMagasin).toBe(false);
+    expect(rapport.raisons.ecartPrixReel).toBe(-5);
+  });
+
+  it('expose toutes les métriques imposées dans un scénario complet', () => {
+    const core = {
+      correspondancesBrutes: [
+        { itemId: 5, produit_id: 'p5', correspondances: [prixBase({ prix_id: 'a' }), prixBase({ prix_id: 'b' })] },
+        { itemId: 3, produit_id: 'p3', correspondances: [] },
+        { itemId: 4, produit_id: 'p4', correspondances: [prixBase({ prix_id: 'ancien' })] },
+      ],
+      correspondancesFraiches: [
+        { itemId: 5, produit_id: 'p5', correspondances: [prixBase({ prix_id: 'b' })] },
+        { itemId: 3, produit_id: 'p3', correspondances: [] },
+        { itemId: 4, produit_id: 'p4', correspondances: [] },
+      ],
+      classement: [
+        {
+          magasinId: 'm1', total: 22, found: 2,
+          articlesTrouves: [{ itemId: 5, produit_id: 'p5', prix: prixBase({ nom_enseigne: 'Carrefour', nom_magasin: 'Carrefour Rueil' }) }],
+          articlesManquants: [],
+        },
+        {
+          magasinId: 'm2', total: 25, found: 1,
+          articlesTrouves: [{ itemId: 5, produit_id: 'p5', prix: prixBase({ nom_enseigne: 'Lidl', nom_magasin: 'Lidl Nanterre' }) }],
+          articlesManquants: [],
+        },
+      ],
+    };
+    const exclusions = { legacyOnly: [{ id: 1 }], produitIdSansFormat: [{ id: 2, produit_id: 'p2' }] };
+    const rapport = comparerResultatsLegacyEtCore(legacyCarrefour, core, exclusions, { totalItems: 6 });
+
+    expect(Object.keys(rapport).sort()).toEqual([
+      'differenceTotale', 'meilleurCore', 'meilleurLegacy', 'nbArticlesEligiblesCore',
+      'nbArticlesManquants', 'nbArticlesTotal', 'nbArticlesTrouves', 'nbExclusSansFormat',
+      'nbExclusSansProduitId', 'nbMagasinsCandidatsCore', 'raisons', 'totalCore', 'totalLegacy',
+    ].sort());
+    expect(Object.keys(rapport.raisons).sort()).toEqual([
+      'articleNonEligible', 'differenceRegroupementEnseigneMagasin', 'donneeCoreAbsente',
+      'ecartPrixReel', 'formatImpossibleAVerifier', 'prixTropAncien',
+    ].sort());
+
+    expect(rapport.nbArticlesTotal).toBe(6);
+    expect(rapport.nbArticlesEligiblesCore).toBe(3);
+    expect(rapport.nbArticlesTrouves).toBe(1);
+    expect(rapport.nbArticlesManquants).toBe(2);
+    expect(rapport.nbExclusSansProduitId).toBe(1);
+    expect(rapport.nbExclusSansFormat).toBe(1);
+    expect(rapport.nbMagasinsCandidatsCore).toBe(2);
+    expect(rapport.meilleurLegacy).toEqual({ enseigne: 'Carrefour', total: 20 });
+    expect(rapport.meilleurCore).toEqual({ id: 'm1', nom: 'Carrefour Rueil', total: 22 });
+    expect(rapport.totalLegacy).toBe(20);
+    expect(rapport.totalCore).toBe(22);
+    expect(rapport.differenceTotale).toBe(2);
+    expect(rapport.raisons.differenceRegroupementEnseigneMagasin).toBe(true);
+    expect(rapport.raisons.donneeCoreAbsente).toBe(1);
+    expect(rapport.raisons.prixTropAncien).toBe(1);
   });
 });

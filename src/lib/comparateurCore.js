@@ -197,3 +197,123 @@ export function classerMagasins(totauxParMagasin) {
     .filter(m => m.found > 0)
     .sort((a, b) => (b.found !== a.found ? b.found - a.found : a.total - b.total));
 }
+
+function trouverCorrespondances(itemId, resultatsFaireCorrespondrePrix) {
+  return (resultatsFaireCorrespondrePrix || []).find(r => r.itemId === itemId)?.correspondances || [];
+}
+
+// Le nom n'est jamais déduit du seul id : il est lu dans le prix Core déjà
+// résolu par le pipeline (prix_comparables porte nom_magasin/nom_enseigne),
+// avec un repli optionnel sur un dictionnaire de référence fourni par l'appelant.
+function resoudreNomMagasin(entreeClassement, magasinsRef) {
+  return entreeClassement?.nomMagasin
+    ?? entreeClassement?.articlesTrouves?.[0]?.prix?.nom_magasin
+    ?? magasinsRef?.[entreeClassement?.magasinId]?.nom
+    ?? null;
+}
+
+function resoudreNomEnseigne(entreeClassement, magasinsRef) {
+  return entreeClassement?.nomEnseigne
+    ?? entreeClassement?.articlesTrouves?.[0]?.prix?.nom_enseigne
+    ?? magasinsRef?.[entreeClassement?.magasinId]?.enseigne
+    ?? null;
+}
+
+function normEnseigne(nom) {
+  return String(nom || '').trim().toLowerCase();
+}
+
+/**
+ * Compare le meilleur résultat du moteur legacy (regroupé par enseigne) et du
+ * moteur Core (regroupé par magasin réel), et produit un rapport d'écarts
+ * réservé au développement. Fonction pure, diagnostic uniquement — n'affecte
+ * jamais l'affichage, le classement ou les économies visibles.
+ *
+ * N'effectue AUCUNE requête Supabase et ne refait AUCUNE logique de matching :
+ * elle agrège uniquement ce que le pipeline #56.1 a déjà produit.
+ *
+ * @param {{ best: { id, name, total, found } | null }} legacy
+ *   Reprend la forme de `best` dans CompareTab (id/name = enseigne).
+ * @param {{
+ *   correspondancesBrutes: ReturnType<typeof faireCorrespondrePrix>,
+ *   correspondancesFraiches: ReturnType<typeof faireCorrespondrePrix>,
+ *   classement: ReturnType<typeof classerMagasins>,
+ * }} core
+ *   `correspondancesBrutes` = faireCorrespondrePrix SANS staleCutoffISO (pour
+ *   distinguer « donnée absente » de « trop ancienne ») ; `correspondancesFraiches`
+ *   = faireCorrespondrePrix AVEC le cutoff réellement utilisé ; `classement` =
+ *   sortie brute de classerMagasins (les noms sont résolus depuis les prix
+ *   imbriqués dans articlesTrouves, ou depuis meta.magasinsRef si absents).
+ * @param {{ legacyOnly: array, produitIdSansFormat: array }} exclusions
+ *   Sortie de construireCiblesComparaison().exclusions.
+ * @param {{ totalItems: number, magasinsRef?: Record<string, {nom, enseigne}> }} meta
+ */
+export function comparerResultatsLegacyEtCore(legacy, core, exclusions, meta) {
+  const correspondancesBrutes = core?.correspondancesBrutes || [];
+  const correspondancesFraiches = core?.correspondancesFraiches || [];
+  const classement = core?.classement || [];
+  const legacyOnly = exclusions?.legacyOnly || [];
+  const produitIdSansFormat = exclusions?.produitIdSansFormat || [];
+  const magasinsRef = meta?.magasinsRef;
+
+  const meilleurLegacyEntree = legacy?.best ?? null;
+  const meilleurCoreEntree = classement[0] ?? null;
+
+  let nbArticlesTrouves = 0;
+  let nbDonneeCoreAbsente = 0;
+  let nbPrixTropAncien = 0;
+
+  for (const cible of correspondancesFraiches) {
+    const nbBrutes = trouverCorrespondances(cible.itemId, correspondancesBrutes).length;
+    const nbFraiches = (cible.correspondances || []).length;
+
+    if (nbBrutes === 0) nbDonneeCoreAbsente += 1;
+    else if (nbFraiches === 0) nbPrixTropAncien += 1;
+    else nbArticlesTrouves += 1;
+  }
+
+  const nbArticlesEligiblesCore = correspondancesFraiches.length;
+  const nbArticlesManquants = nbArticlesEligiblesCore - nbArticlesTrouves;
+
+  const totalLegacy = meilleurLegacyEntree ? meilleurLegacyEntree.total : null;
+  const totalCore = meilleurCoreEntree ? meilleurCoreEntree.total : null;
+  const differenceTotale = (totalLegacy != null && totalCore != null) ? totalCore - totalLegacy : null;
+
+  // Si le meilleur magasin Core appartient à la même enseigne que le meilleur
+  // legacy, l'écart vient probablement du regroupement (legacy = toute
+  // l'enseigne, Core = un magasin réel), pas nécessairement d'un vrai écart
+  // de prix. Sinon, l'écart est attribué à un écart de prix réel.
+  const enseigneCore = meilleurCoreEntree ? resoudreNomEnseigne(meilleurCoreEntree, magasinsRef) : null;
+  const memeEnseigne = !!meilleurLegacyEntree && !!enseigneCore
+    && normEnseigne(meilleurLegacyEntree.name) === normEnseigne(enseigneCore);
+
+  const differenceRegroupementEnseigneMagasin = memeEnseigne && differenceTotale !== 0;
+  const ecartPrixReel = (differenceTotale != null && !memeEnseigne) ? differenceTotale : null;
+
+  return {
+    nbArticlesTotal: meta?.totalItems ?? 0,
+    nbArticlesEligiblesCore,
+    nbArticlesTrouves,
+    nbArticlesManquants,
+    nbExclusSansProduitId: legacyOnly.length,
+    nbExclusSansFormat: produitIdSansFormat.length,
+    nbMagasinsCandidatsCore: classement.length,
+    meilleurLegacy: meilleurLegacyEntree
+      ? { enseigne: meilleurLegacyEntree.name, total: meilleurLegacyEntree.total }
+      : null,
+    meilleurCore: meilleurCoreEntree
+      ? { id: meilleurCoreEntree.magasinId, nom: resoudreNomMagasin(meilleurCoreEntree, magasinsRef), total: meilleurCoreEntree.total }
+      : null,
+    totalLegacy,
+    totalCore,
+    differenceTotale,
+    raisons: {
+      articleNonEligible: legacyOnly.length,
+      formatImpossibleAVerifier: produitIdSansFormat.length,
+      donneeCoreAbsente: nbDonneeCoreAbsente,
+      prixTropAncien: nbPrixTropAncien,
+      differenceRegroupementEnseigneMagasin,
+      ecartPrixReel,
+    },
+  };
+}
