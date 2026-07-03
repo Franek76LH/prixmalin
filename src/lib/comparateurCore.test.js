@@ -14,6 +14,7 @@ import {
   classerMagasins,
   comparerResultatsLegacyEtCore,
 } from './comparateurCore';
+import { faireCorrespondrePrixFormatIndifferent } from './comparateurCore';
 
 function cibleBase(overrides) {
   return {
@@ -506,5 +507,111 @@ describe('comparerResultatsLegacyEtCore', () => {
     expect(rapport.raisons.differenceRegroupementEnseigneMagasin).toBe(true);
     expect(rapport.raisons.donneeCoreAbsente).toBe(1);
     expect(rapport.raisons.prixTropAncien).toBe(1);
+  });
+});
+
+describe('faireCorrespondrePrixFormatIndifferent', () => {
+  function itemDemontrable(overrides) {
+    return {
+      id: 1,
+      produit_id: 'p1',
+      variante_produit_id: 'v1',
+      variante: { quantite_nette: 500, unite_quantite: 'g', nombre_unites: 1 },
+      ...overrides,
+    };
+  }
+
+  it('retient une correspondance entre formats différents de même famille (500 g vs 1 kg)', () => {
+    const cible = cibleBase({ item: itemDemontrable() });
+    const prix = prixBase({ quantite_nette: 1, unite_quantite: 'kg', type_unite: 'poids' });
+    const [resultat] = faireCorrespondrePrixFormatIndifferent([cible], [prix]);
+    expect(resultat.correspondances).toEqual([prix]);
+  });
+
+  it("TEST DE NON-RÉGRESSION : faireCorrespondrePrix (mode même format, non modifiée) retourne toujours [] sur le même jeu 500 g vs 1 kg", () => {
+    const cible = cibleBase({ item: itemDemontrable() });
+    const prix = prixBase({ quantite_nette: 1, unite_quantite: 'kg', type_unite: 'poids' });
+    const [resultat] = faireCorrespondrePrix([cible], [prix]);
+    expect(resultat.correspondances).toEqual([]);
+  });
+
+  it('exclut un produit_id différent, même avec un format compatible', () => {
+    const cible = cibleBase({ produit_id: 'p1', item: itemDemontrable() });
+    const prix = prixBase({ produit_id: 'p2', quantite_nette: 1, unite_quantite: 'kg', type_unite: 'poids' });
+    const [resultat] = faireCorrespondrePrixFormatIndifferent([cible], [prix]);
+    expect(resultat.correspondances).toEqual([]);
+  });
+
+  it('ne convertit jamais entre poids et volume (g vs L)', () => {
+    const cible = cibleBase({ unite_quantite: 'g', quantite_nette: 500, item: itemDemontrable() });
+    const prix = prixBase({ unite_quantite: 'l', quantite_nette: 1, type_unite: 'poids' });
+    const [resultat] = faireCorrespondrePrixFormatIndifferent([cible], [prix]);
+    expect(resultat.correspondances).toEqual([]);
+  });
+
+  it('ne compare jamais la famille pièce à poids ou volume', () => {
+    const cible = cibleBase({
+      unite_quantite: 'piece', quantite_nette: 1, nombre_unites: 6,
+      item: itemDemontrable({ variante: { quantite_nette: 1, unite_quantite: 'piece', nombre_unites: 6 } }),
+    });
+    const prix = prixBase({ unite_quantite: 'g', quantite_nette: 500, type_unite: 'poids' });
+    const [resultat] = faireCorrespondrePrixFormatIndifferent([cible], [prix]);
+    expect(resultat.correspondances).toEqual([]);
+  });
+
+  it('exclut une unité inconnue côté cible, jamais un coefficient par défaut', () => {
+    const cible = cibleBase({
+      unite_quantite: 'xyz',
+      item: itemDemontrable({ variante: { quantite_nette: 500, unite_quantite: 'xyz', nombre_unites: 1 } }),
+    });
+    const prix = prixBase({ quantite_nette: 1, unite_quantite: 'kg', type_unite: 'poids' });
+    const [resultat] = faireCorrespondrePrixFormatIndifferent([cible], [prix]);
+    expect(resultat.correspondances).toEqual([]);
+  });
+
+  it('exclut une unité inconnue côté prix', () => {
+    const cible = cibleBase({ item: itemDemontrable() });
+    const prix = prixBase({ unite_quantite: 'xyz', type_unite: 'poids' });
+    const [resultat] = faireCorrespondrePrixFormatIndifferent([cible], [prix]);
+    expect(resultat.correspondances).toEqual([]);
+  });
+
+  it("exclut une incohérence type_unite/unité (produit 'volume' avec un prix en g)", () => {
+    const cible = cibleBase({
+      unite_quantite: 'l', quantite_nette: 1,
+      item: itemDemontrable({ variante: { quantite_nette: 1, unite_quantite: 'l', nombre_unites: 1 } }),
+    });
+    const prix = prixBase({ unite_quantite: 'g', quantite_nette: 500, type_unite: 'volume' });
+    const [resultat] = faireCorrespondrePrixFormatIndifferent([cible], [prix]);
+    expect(resultat.correspondances).toEqual([]);
+  });
+
+  it("exclut un prix sans variante_produit_id (format non démontrable), même produit_id identique", () => {
+    const cible = cibleBase({ item: itemDemontrable() });
+    const prix = prixBase({ variante_produit_id: null, quantite_nette: 1, unite_quantite: 'kg', type_unite: 'poids' });
+    const [resultat] = faireCorrespondrePrixFormatIndifferent([cible], [prix]);
+    expect(resultat.correspondances).toEqual([]);
+  });
+
+  it('exclut une cible sans variante démontrable (item sans variante_produit_id)', () => {
+    const cible = cibleBase({ item: { produit_id: 'p1', variante_produit_id: null, variante: null } });
+    const prix = prixBase({ quantite_nette: 1, unite_quantite: 'kg', type_unite: 'poids' });
+    const [resultat] = faireCorrespondrePrixFormatIndifferent([cible], [prix]);
+    expect(resultat.correspondances).toEqual([]);
+  });
+
+  it('retient un lot 4 × 125 g face à un prix affiché en 500 g (même famille, quantités différentes)', () => {
+    const cible = cibleBase({
+      quantite_nette: 125, nombre_unites: 4, unite_quantite: 'g',
+      item: itemDemontrable({ variante: { quantite_nette: 125, unite_quantite: 'g', nombre_unites: 4 } }),
+    });
+    const prix = prixBase({ quantite_nette: 500, nombre_unites: 1, unite_quantite: 'g', type_unite: 'poids' });
+    const [resultat] = faireCorrespondrePrixFormatIndifferent([cible], [prix]);
+    expect(resultat.correspondances).toEqual([prix]);
+  });
+
+  it('gère une liste de cibles ou de prix vide/undefined', () => {
+    expect(faireCorrespondrePrixFormatIndifferent([], [])).toEqual([]);
+    expect(faireCorrespondrePrixFormatIndifferent(undefined, undefined)).toEqual([]);
   });
 });

@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { resoudreFamilleEtCoefficient, familleDepuisTypeUnite } from './unitesCore';
 
 // #56.1 — module isolé, lecture seule, non importé ailleurs pour l'instant (shadow).
 
@@ -316,4 +317,62 @@ export function comparerResultatsLegacyEtCore(legacy, core, exclusions, meta) {
       ecartPrixReel,
     },
   };
+}
+
+// #58.1.A — comparaison format-indifférent (prix unitaire kg/L/pièce), mode
+// shadow. Contrairement à faireCorrespondrePrix (formats strictement
+// identiques, aucune conversion), cette fonction retient aussi les prix Core
+// exprimés dans une unité différente mais de la même famille physique
+// (ex. cible 500 g vs prix observé 1 kg). Ne modifie rien à
+// faireCorrespondrePrix ni aux fonctions existantes.
+//
+// Critères d'éligibilité stricts, exclusion silencieuse dès qu'un critère
+// échoue :
+//   - même produit_id (jamais élargi) ;
+//   - format démontrable des deux côtés (réutilise formatDemontrable et
+//     formatDemontrablePrix, sans dupliquer leur logique) ;
+//   - unité reconnue par la table de coefficients (unitesCore) des deux
+//     côtés — une unité inconnue exclut, jamais un coefficient par défaut ;
+//   - même famille physique (poids/volume/pièce jamais mélangées entre
+//     elles) et famille cohérente avec le type_unite du produit (lu depuis
+//     la ligne de prix Core, qui porte déjà type_unite via la vue
+//     prix_comparables — même produit_id des deux côtés, donc même produit).
+//
+// N'appelle jamais calculerPrixReference et n'attache aucune valeur €/kg,
+// €/L ou €/pièce aux correspondances : cette brique construit uniquement
+// l'ensemble des prix éligibles. Le calcul du prix de référence, son
+// enrichissement sur les correspondances, leur classement et leur affichage
+// sont laissés à #58.1.B.
+//
+// Ne filtre ni sur la fraîcheur (observe_le) ni sur le rayon de recherche :
+// cette brique se limite à l'éligibilité par format, comme faireCorrespondrePrix
+// laisse déjà ces filtres à la charge de l'appelant.
+export function faireCorrespondrePrixFormatIndifferent(cibles, prixComparables) {
+  const prix = Array.isArray(prixComparables) ? prixComparables : [];
+
+  return (cibles || []).map(cible => {
+    if (!formatDemontrable(cible.item)) {
+      return { ...cible, correspondances: [] };
+    }
+
+    const resolutionCible = resoudreFamilleEtCoefficient(cible.unite_quantite);
+    if (resolutionCible.exclusion) {
+      return { ...cible, correspondances: [] };
+    }
+
+    const correspondances = prix.filter(p => {
+      if (p.produit_id !== cible.produit_id) return false;
+      if (!formatDemontrablePrix(p)) return false;
+
+      const resolutionPrix = resoudreFamilleEtCoefficient(p.unite_quantite);
+      if (resolutionPrix.exclusion) return false;
+      if (resolutionPrix.famille !== resolutionCible.famille) return false;
+
+      if (familleDepuisTypeUnite(p.type_unite) !== resolutionCible.famille) return false;
+
+      return true;
+    });
+
+    return { ...cible, correspondances };
+  });
 }
