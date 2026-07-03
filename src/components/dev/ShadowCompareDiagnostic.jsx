@@ -10,6 +10,8 @@ import {
   classerMagasins,
   comparerResultatsLegacyEtCore,
 } from '../../lib/comparateurCore';
+import { faireCorrespondrePrixFormatIndifferent, enrichirEtClasserPrixUnitaire } from '../../lib/comparateurCore';
+import { formatVariante } from '../../lib/catalogueCore';
 
 // PANNEAU DE DIAGNOSTIC DEV UNIQUEMENT — aucune logique métier ici.
 // Ne monte JAMAIS ce composant hors de import.meta.env.DEV (voir App.jsx).
@@ -98,9 +100,22 @@ function Row({ label, value }) {
   );
 }
 
+// Affichage uniquement — aucune logique métier. Reformate 1.69 en "1,69 €".
+function formatEuro(n) {
+  return `${Number(n).toFixed(2).replace('.', ',')} €`;
+}
+
+// Regroupe les motifs d'exclusion pour un résumé lisible : "unite_inconnue (2), lot (1)".
+function resumerExclusions(exclusions) {
+  const parMotif = {};
+  for (const e of exclusions || []) parMotif[e.motif] = (parMotif[e.motif] || 0) + 1;
+  return Object.entries(parMotif).map(([motif, n]) => `${motif} (${n})`).join(', ');
+}
+
 export default function ShadowCompareDiagnostic({ items, priceDB, searchRadius, userPos }) {
   const [storesGeo, setStoresGeo] = useState([]);
   const [rapport, setRapport] = useState(null);
+  const [prixUnitaire, setPrixUnitaire] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
@@ -133,6 +148,13 @@ export default function ShadowCompareDiagnostic({ items, priceDB, searchRadius, 
         const prixBruts = await chargerPrixComparables(produitIds, {});
         if (cancelled) return;
 
+        // #58.1.B — comparaison format-indifférent + prix unitaire, indépendante
+        // du pipeline même-format ci-dessous (mêmes cibles/prixBruts, aucune
+        // requête Supabase supplémentaire).
+        const correspondancesFormatIndifferent = faireCorrespondrePrixFormatIndifferent(cibles, prixBruts);
+        const prixUnitaireCalcule = enrichirEtClasserPrixUnitaire(correspondancesFormatIndifferent);
+        if (!cancelled) setPrixUnitaire(prixUnitaireCalcule);
+
         const correspondancesBrutes = faireCorrespondrePrix(cibles, prixBruts, { userPos, searchRadius });
         const correspondancesFraiches = faireCorrespondrePrix(cibles, prixBruts, { userPos, searchRadius, staleCutoffISO: cutoffISO });
 
@@ -150,7 +172,7 @@ export default function ShadowCompareDiagnostic({ items, priceDB, searchRadius, 
         if (!cancelled) setRapport(rapportCalcule);
       } catch (err) {
         console.error('[ShadowCompareDiagnostic] échec du calcul shadow (aucun impact utilisateur) :', err);
-        if (!cancelled) { setError(err?.message || 'Erreur inconnue'); setRapport(null); }
+        if (!cancelled) { setError(err?.message || 'Erreur inconnue'); setRapport(null); setPrixUnitaire([]); }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -189,6 +211,34 @@ export default function ShadowCompareDiagnostic({ items, priceDB, searchRadius, 
                 <pre style={{ whiteSpace: 'pre-wrap', maxHeight: 300, overflow: 'auto' }}>{JSON.stringify(rapport, null, 2)}</pre>
               </details>
             </>
+          )}
+          {!error && prixUnitaire.length > 0 && (
+            <div style={{ marginTop: 12, borderTop: '1px solid #333', paddingTop: 8 }}>
+              <div style={{ opacity: 0.7, marginBottom: 4 }}>Prix unitaire (kg/L/pièce) — format indifférent, #58.1.B</div>
+              {prixUnitaire.map(cible => (
+                <div key={cible.itemId} style={{ marginBottom: 8 }}>
+                  <div>
+                    <span style={{ fontWeight: 700 }}>
+                      {cible.correspondancesEnrichies[0]?.nom_produit ?? cible.produit_id}
+                    </span>
+                    {cible.nbExclusions > 0 && (
+                      <span style={{ opacity: 0.6 }}> — {cible.nbExclusions} exclusion(s) : {resumerExclusions(cible.exclusions)}</span>
+                    )}
+                  </div>
+                  {cible.correspondancesEnrichies.length === 0 ? (
+                    <div style={{ opacity: 0.5 }}>Aucun prix comparable au format indifférent.</div>
+                  ) : (
+                    cible.correspondancesEnrichies.map((prix, i) => (
+                      <div key={prix.prix_id ?? i}>
+                        {prix.nom_produit} — {formatVariante({ quantite_nette: prix.quantite_nette, unite_quantite: prix.unite_quantite, nombre_unites: prix.nombre_unites, libelle: prix.libelle_variante })}
+                        {' '}à {formatEuro(prix.prix_total)} → {formatEuro(prix.prix_reference)}/{prix.unite_reference}
+                        {' '}— {prix.nom_magasin ?? prix.nom_enseigne ?? '—'}
+                      </div>
+                    ))
+                  )}
+                </div>
+              ))}
+            </div>
           )}
         </div>
       )}

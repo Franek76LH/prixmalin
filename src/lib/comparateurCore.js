@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { resoudreFamilleEtCoefficient, familleDepuisTypeUnite } from './unitesCore';
+import { resoudreFamilleEtCoefficient, familleDepuisTypeUnite, calculerPrixReference } from './unitesCore';
 
 // #56.1 — module isolé, lecture seule, non importé ailleurs pour l'instant (shadow).
 
@@ -374,5 +374,51 @@ export function faireCorrespondrePrixFormatIndifferent(cibles, prixComparables) 
     });
 
     return { ...cible, correspondances };
+  });
+}
+
+// #58.1.B — enrichissement et classement par prix unitaire (€/kg, €/L, €/pièce),
+// mode shadow. Branche calculerPrixReference (unitesCore) sur les
+// correspondances déjà jugées éligibles par faireCorrespondrePrixFormatIndifferent
+// (#58.1.A) — ne refait aucune logique d'éligibilité, ne modifie rien à cette
+// fonction ni aux autres fonctions existantes.
+//
+// Pour chaque correspondance :
+//   - calculerPrixReference est appelée avec les champs bruts du prix Core
+//     (prix_total, quantite_nette, unite_quantite, nombre_unites, type_unite) ;
+//   - en cas de succès, le prix Core est conservé avec deux champs ajoutés :
+//     prix_reference (nombre) et unite_reference ('kg' | 'L' | 'piece') ;
+//   - en cas d'exclusion (unité inconnue, type_unite 'lot', incohérence
+//     poids/volume/pièce, quantité invalide...), la correspondance est
+//     RETIRÉE — jamais de prix_reference par défaut — et tracée dans
+//     `exclusions` (motif conservé pour le diagnostic).
+//
+// Les correspondances retenues sont triées par prix_reference croissant
+// (le moins cher en tête). Le tri natif est stable (spec ES2019+).
+export function enrichirEtClasserPrixUnitaire(correspondancesFormatIndifferent) {
+  return (correspondancesFormatIndifferent || []).map(cible => {
+    const correspondancesEnrichies = [];
+    const exclusions = [];
+
+    for (const prix of cible.correspondances || []) {
+      const reference = calculerPrixReference({
+        prix_total: prix.prix_total,
+        quantite_nette: prix.quantite_nette,
+        unite_quantite: prix.unite_quantite,
+        nombre_unites: prix.nombre_unites,
+        type_unite: prix.type_unite,
+      });
+
+      if (reference.exclusion) {
+        exclusions.push({ prix, motif: reference.exclusion });
+        continue;
+      }
+
+      correspondancesEnrichies.push({ ...prix, prix_reference: reference.prix_reference, unite_reference: reference.unite });
+    }
+
+    correspondancesEnrichies.sort((a, b) => a.prix_reference - b.prix_reference);
+
+    return { ...cible, correspondancesEnrichies, exclusions, nbExclusions: exclusions.length };
   });
 }

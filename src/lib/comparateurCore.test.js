@@ -15,6 +15,7 @@ import {
   comparerResultatsLegacyEtCore,
 } from './comparateurCore';
 import { faireCorrespondrePrixFormatIndifferent } from './comparateurCore';
+import { enrichirEtClasserPrixUnitaire } from './comparateurCore';
 
 function cibleBase(overrides) {
   return {
@@ -613,5 +614,54 @@ describe('faireCorrespondrePrixFormatIndifferent', () => {
   it('gère une liste de cibles ou de prix vide/undefined', () => {
     expect(faireCorrespondrePrixFormatIndifferent([], [])).toEqual([]);
     expect(faireCorrespondrePrixFormatIndifferent(undefined, undefined)).toEqual([]);
+  });
+});
+
+describe('enrichirEtClasserPrixUnitaire', () => {
+  it('calcule le prix unitaire de chaque correspondance et trie du moins cher au plus cher', () => {
+    const entree = [{
+      itemId: 1, produit_id: 'p1',
+      correspondances: [
+        prixBase({ prix_id: 'a', prix_total: 2, quantite_nette: 500, unite_quantite: 'g', nombre_unites: 1, type_unite: 'poids' }), // 4 €/kg
+        prixBase({ prix_id: 'b', prix_total: 3, quantite_nette: 1, unite_quantite: 'kg', nombre_unites: 1, type_unite: 'poids' }), // 3 €/kg
+        prixBase({ prix_id: 'c', prix_total: 1.5, quantite_nette: 250, unite_quantite: 'g', nombre_unites: 1, type_unite: 'poids' }), // 6 €/kg
+      ],
+    }];
+
+    const [resultat] = enrichirEtClasserPrixUnitaire(entree);
+
+    expect(resultat.correspondancesEnrichies.map(c => c.prix_id)).toEqual(['b', 'a', 'c']);
+    expect(resultat.correspondancesEnrichies.map(c => c.prix_reference)).toEqual([3, 4, 6]);
+    expect(resultat.correspondancesEnrichies.every(c => c.unite_reference === 'kg')).toBe(true);
+    expect(resultat.nbExclusions).toBe(0);
+  });
+
+  it("exclut proprement une unité inconnue, un type_unite 'lot' et une incohérence de famille, sans planter", () => {
+    const entree = [{
+      itemId: 2, produit_id: 'p2',
+      correspondances: [
+        prixBase({ prix_id: 'inconnue', unite_quantite: 'xyz', type_unite: 'poids' }),
+        prixBase({ prix_id: 'lot', quantite_nette: 1, unite_quantite: 'piece', type_unite: 'lot' }),
+        prixBase({ prix_id: 'incoherent', quantite_nette: 500, unite_quantite: 'g', type_unite: 'volume' }),
+        prixBase({ prix_id: 'valide', quantite_nette: 500, unite_quantite: 'g', prix_total: 2, type_unite: 'poids' }),
+      ],
+    }];
+
+    const [resultat] = enrichirEtClasserPrixUnitaire(entree);
+
+    expect(resultat.correspondancesEnrichies.map(c => c.prix_id)).toEqual(['valide']);
+    expect(resultat.nbExclusions).toBe(3);
+    expect(resultat.exclusions.map(e => e.motif).sort()).toEqual(['type_unite_incoherent', 'type_unite_non_supporte', 'unite_inconnue'].sort());
+  });
+
+  it('gère une entrée vide ou undefined sans planter', () => {
+    expect(enrichirEtClasserPrixUnitaire([])).toEqual([]);
+    expect(enrichirEtClasserPrixUnitaire(undefined)).toEqual([]);
+  });
+
+  it('gère une cible sans aucune correspondance', () => {
+    const [resultat] = enrichirEtClasserPrixUnitaire([{ itemId: 3, produit_id: 'p3', correspondances: [] }]);
+    expect(resultat.correspondancesEnrichies).toEqual([]);
+    expect(resultat.nbExclusions).toBe(0);
   });
 });
