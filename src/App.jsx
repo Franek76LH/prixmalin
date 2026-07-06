@@ -5,7 +5,7 @@ import { supabase } from "./lib/supabase";
 import { formatVariante, mapperLigneListeCourses, chargerVariantes, getCategoryPresentation } from "./lib/catalogueCore";
 import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
 import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
-import { classerMagasinsPourPanier } from "./lib/classementPanierCore";
+import { classerMagasinsPourPanier, calculerEconomiePotentielle } from "./lib/classementPanierCore";
 import ClassementPanierShadow from "./components/dev/ClassementPanierShadow";
 
 const C = {
@@ -3777,26 +3777,48 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos }) {
       };
     };
 
-    const construireMapsUrlShadow = (magasinId, magasinNom) => {
+    // Adresse du magasin physique — même source que le bouton "Y aller" :
+    // l'adresse la plus récente parmi les lignes de prix rattachées à ce
+    // magasin (detailParMagasin), null si aucune n'en porte.
+    const trouverAdresseMagasin = (magasinId) => {
       const entries = Array.from(detailParMagasin.get(magasinId)?.values() ?? []);
       const adresseEntree = entries
         .filter(p => p?.store_address?.trim())
         .sort((a, b) => new Date(b.date) - new Date(a.date))[0];
-      const query = `${magasinNom}${adresseEntree ? ' ' + adresseEntree.store_address : ''}`;
+      return adresseEntree ? adresseEntree.store_address : null;
+    };
+
+    const construireMapsUrlShadow = (magasinNom, adresse) => {
+      const query = `${magasinNom}${adresse ? ' ' + adresse : ''}`;
       return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
     };
 
+    // #58.2.D — économie potentielle, décomposée par magasin : coût du
+    // panier au prix moyen de la zone (déjà filtrée par estDansRayonShadow
+    // ci-dessus, en amont de `magasins`) moins le coût réel de chaque
+    // magasin retenu. Fonction pure, aucune logique de matching/filtre
+    // réévaluée ici.
+    const { economieTotale, economiePrincipal, economieAppoint } = calculerEconomiePotentielle(panier, magasins, classement);
+
+    const adressePrincipal = classement.principal ? trouverAdresseMagasin(classement.principal.magasinId) : null;
+    const adresseAppoint = classement.appoint ? trouverAdresseMagasin(classement.appoint.magasinId) : null;
+
     return {
       totalArticles: items.length,
+      economieTotale,
+      economiePrincipal,
+      economieAppoint,
       principal: classement.principal ? {
         ...classement.principal,
         lignes: classement.principal.articlesTrouves.map(id => construireLigne(classement.principal.magasinId, id)),
-        mapsUrl: construireMapsUrlShadow(classement.principal.magasinId, classement.principal.magasinNom),
+        adresse: adressePrincipal,
+        mapsUrl: construireMapsUrlShadow(classement.principal.magasinNom, adressePrincipal),
       } : null,
       appoint: classement.appoint ? {
         ...classement.appoint,
         lignes: classement.appoint.articlesTrouves.map(id => construireLigne(classement.appoint.magasinId, id)),
-        mapsUrl: construireMapsUrlShadow(classement.appoint.magasinId, classement.appoint.magasinNom),
+        adresse: adresseAppoint,
+        mapsUrl: construireMapsUrlShadow(classement.appoint.magasinNom, adresseAppoint),
       } : null,
       nonTrouves: classement.nonTrouves,
     };

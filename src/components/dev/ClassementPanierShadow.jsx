@@ -28,11 +28,32 @@ function LigneArticle({ ligne, dernier }) {
   );
 }
 
-function CarteMagasin({ badge, background, magasin, compteurLabel }) {
+function formaterMontant(n) {
+  return Number(n).toFixed(2).replace('.', ',');
+}
+
+function BandeauEconomie({ economieTotale, economiePrincipal, nomPrincipal, economieAppoint, nomAppoint }) {
+  if (!economieTotale || economieTotale <= 0) return null;
+  return (
+    <div style={{ background:"rgba(255,255,255,0.22)", padding:"10px 18px", textAlign:"center" }}>
+      <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:"#fff" }}>
+        Jusqu'à {formaterMontant(economieTotale)} € d'économies potentielles
+      </div>
+      <div style={{ fontFamily:F, fontWeight:600, fontSize:11, color:"rgba(255,255,255,0.75)", marginTop:2 }}>
+        {formaterMontant(economiePrincipal)} € chez {nomPrincipal}
+        {nomAppoint ? ` · ${formaterMontant(economieAppoint)} € chez ${nomAppoint}` : ''}
+      </div>
+    </div>
+  );
+}
+
+function CarteMagasin({ badge, background, magasin, compteurLabel, bandeauEconomie }) {
   if (!magasin) return null;
 
   return (
     <div style={{ background, borderRadius:18, overflow:"hidden", marginBottom:16, boxShadow:"0 8px 24px rgba(0,0,0,0.22)" }}>
+      {bandeauEconomie != null && <BandeauEconomie {...bandeauEconomie} />}
+
       <div style={{ padding:"16px 18px 0", display:"flex", alignItems:"flex-start", justifyContent:"space-between" }}>
         <div style={{ background:"rgba(255,255,255,0.25)", borderRadius:8, padding:"4px 12px", fontFamily:F, fontWeight:900, fontSize:11, color:"#fff", letterSpacing:"0.04em" }}>
           {badge}
@@ -42,7 +63,10 @@ function CarteMagasin({ badge, background, magasin, compteurLabel }) {
 
       <div style={{ padding:"8px 18px 14px" }}>
         <div style={{ fontFamily:F, fontWeight:900, fontSize:18, color:"#fff" }}>{magasin.magasinNom}</div>
-        <div style={{ fontFamily:F, fontSize:12, color:"rgba(255,255,255,0.75)", marginTop:2 }}>{compteurLabel}</div>
+        {magasin.adresse && (
+          <div style={{ fontFamily:F, fontSize:11, color:"rgba(255,255,255,0.6)", marginTop:1 }}>{magasin.adresse}</div>
+        )}
+        <div style={{ fontFamily:F, fontSize:12, color:"rgba(255,255,255,0.75)", marginTop:4 }}>{compteurLabel}</div>
       </div>
 
       <div style={{ background:"rgba(0,0,0,0.15)" }}>
@@ -64,7 +88,7 @@ function CarteMagasin({ badge, background, magasin, compteurLabel }) {
 }
 
 export default function ClassementPanierShadow({ resultat }) {
-  const { principal, appoint, nonTrouves, totalArticles } = resultat;
+  const { principal, appoint, nonTrouves, totalArticles, economieTotale, economiePrincipal, economieAppoint } = resultat;
 
   return (
     <div>
@@ -83,6 +107,10 @@ export default function ClassementPanierShadow({ resultat }) {
         background="linear-gradient(145deg,#00963A,#00D14F)"
         magasin={principal}
         compteurLabel={principal ? `${principal.nbTrouves} article${principal.nbTrouves > 1 ? "s" : ""} sur ${totalArticles}` : ""}
+        bandeauEconomie={principal ? {
+          economieTotale, economiePrincipal, nomPrincipal: principal.magasinNom,
+          economieAppoint, nomAppoint: appoint?.magasinNom ?? null,
+        } : null}
       />
 
       <CarteMagasin
