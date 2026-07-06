@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resoudreFamilleEtCoefficient, familleDepuisTypeUnite, calculerPrixReference } from './unitesCore';
+import { resoudreFamilleEtCoefficient, familleDepuisTypeUnite, calculerPrixReference, classerParPrixUnitaire } from './unitesCore';
 
 describe('resoudreFamilleEtCoefficient', () => {
   it('résout les unités de poids vers kg', () => {
@@ -129,5 +129,85 @@ describe('calculerPrixReference', () => {
   it('exclut un prix_total nul, négatif ou non numérique', () => {
     expect(calculerPrixReference({ prix_total: 0, quantite_nette: 500, unite_quantite: 'g', nombre_unites: 1, type_unite: 'poids' })).toEqual({ exclusion: 'prix_total_invalide' });
     expect(calculerPrixReference({ prix_total: -1, quantite_nette: 500, unite_quantite: 'g', nombre_unites: 1, type_unite: 'poids' })).toEqual({ exclusion: 'prix_total_invalide' });
+  });
+});
+
+describe('classerParPrixUnitaire', () => {
+  it('cas nominal : classe 3 magasins par prixUnitaire croissant, avec rang et badge sur le rang 1', () => {
+    const entrees = [
+      { magasinId: 'carrefour', magasinNom: 'Carrefour', prixBrut: 3, prixUnitaire: 2, unite: '€/kg' },
+      { magasinId: 'leclerc', magasinNom: 'Leclerc', prixBrut: 2.5, prixUnitaire: 1.5, unite: '€/kg' },
+      { magasinId: 'auchan', magasinNom: 'Auchan', prixBrut: 4, prixUnitaire: 3, unite: '€/kg' },
+    ];
+
+    const { classes, nonComparables } = classerParPrixUnitaire(entrees);
+
+    expect(nonComparables).toEqual([]);
+    expect(classes.map((e) => e.magasinId)).toEqual(['leclerc', 'carrefour', 'auchan']);
+    expect(classes.map((e) => e.rang)).toEqual([1, 2, 3]);
+    expect(classes.map((e) => e.estMoinsCher)).toEqual([true, false, false]);
+  });
+
+  it('place les entrées sans prixUnitaire dans nonComparables, jamais dans classes', () => {
+    const entrees = [
+      { magasinId: 'carrefour', magasinNom: 'Carrefour', prixBrut: 3, prixUnitaire: 2, unite: '€/kg' },
+      { magasinId: 'leclerc', magasinNom: 'Leclerc', prixBrut: 2.5, prixUnitaire: null, unite: null },
+      { magasinId: 'auchan', magasinNom: 'Auchan', prixBrut: 1, prixUnitaire: null, unite: null },
+    ];
+
+    const { classes, nonComparables } = classerParPrixUnitaire(entrees);
+
+    expect(classes.map((e) => e.magasinId)).toEqual(['carrefour']);
+    expect(classes[0].rang).toBe(1);
+    expect(classes[0].estMoinsCher).toBe(true);
+    // triées par prixBrut croissant, sans rang ni badge
+    expect(nonComparables.map((e) => e.magasinId)).toEqual(['auchan', 'leclerc']);
+    nonComparables.forEach((e) => {
+      expect(e).not.toHaveProperty('rang');
+      expect(e).not.toHaveProperty('estMoinsCher');
+    });
+  });
+
+  it('égalité de prixUnitaire : même rang pour les ex æquo, badge sur tous, saut de rang ensuite', () => {
+    const entrees = [
+      { magasinId: 'a', magasinNom: 'A', prixBrut: 2, prixUnitaire: 2, unite: '€/kg' },
+      { magasinId: 'b', magasinNom: 'B', prixBrut: 2, prixUnitaire: 2, unite: '€/kg' },
+      { magasinId: 'c', magasinNom: 'C', prixBrut: 3, prixUnitaire: 3, unite: '€/kg' },
+    ];
+
+    const { classes } = classerParPrixUnitaire(entrees);
+
+    expect(classes.map((e) => e.magasinId)).toEqual(['a', 'b', 'c']); // ordre d'entrée conservé entre ex æquo
+    expect(classes.map((e) => e.rang)).toEqual([1, 1, 3]);
+    expect(classes.map((e) => e.estMoinsCher)).toEqual([true, true, false]);
+  });
+
+  it('toutes les entrées non comparables : classes vide, nonComparables rempli', () => {
+    const entrees = [
+      { magasinId: 'a', magasinNom: 'A', prixBrut: 5, prixUnitaire: null, unite: null },
+      { magasinId: 'b', magasinNom: 'B', prixBrut: 1, prixUnitaire: null, unite: null },
+    ];
+
+    const { classes, nonComparables } = classerParPrixUnitaire(entrees);
+
+    expect(classes).toEqual([]);
+    expect(nonComparables.map((e) => e.magasinId)).toEqual(['b', 'a']);
+  });
+
+  it('tableau vide en entrée', () => {
+    expect(classerParPrixUnitaire([])).toEqual({ classes: [], nonComparables: [] });
+  });
+
+  it('ne mute jamais le tableau ni les objets d’entrée', () => {
+    const entree = { magasinId: 'a', magasinNom: 'A', prixBrut: 3, prixUnitaire: 2, unite: '€/kg' };
+    const entrees = [entree];
+    const copieAvant = { ...entree };
+
+    classerParPrixUnitaire(entrees);
+
+    expect(entree).toEqual(copieAvant);
+    expect(entree).not.toHaveProperty('rang');
+    expect(entree).not.toHaveProperty('estMoinsCher');
+    expect(entrees).toHaveLength(1);
   });
 });
