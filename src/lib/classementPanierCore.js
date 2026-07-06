@@ -98,12 +98,20 @@ export function classerMagasinsPourPanier(panier, magasins) {
   return { principal, appoint, nonTrouves };
 }
 
-// #58.2.D — économie potentielle : compare le coût réel du panier (principal
-// + appoint, issus de classerMagasinsPourPanier) au coût du même panier si
-// chaque article était payé au prix MOYEN de la zone (moyenne de ses prix
-// chez tous les magasins de `magasins`, jamais la médiane ni le moins cher).
-// Un article sans aucun prix dans `magasins` est exclu du calcul (ni compté
-// dans coutMoyenPanier, ni dans nbArticlesChiffres). Ne mute rien.
+// #58.2.D — économie potentielle, décomposée par magasin : compare le coût
+// réel du panier (principal + appoint, issus de classerMagasinsPourPanier)
+// au coût du même panier si chaque article était payé au prix MOYEN de la
+// zone (moyenne de ses prix chez tous les magasins de `magasins`, jamais la
+// médiane ni le moins cher). Un article sans aucun prix dans `magasins` est
+// exclu du calcul global (ni compté dans coutMoyenPanier, ni dans
+// nbArticlesChiffres).
+//
+// L'économie de chaque magasin ne porte que sur les articles qu'IL fournit
+// dans le classement retenu (principal.articlesTrouves / appoint.articlesTrouves) :
+// c'est la somme, sur ces seuls articles, de (moyenne de zone − prix chez ce
+// magasin), plancher à 0. economieTotale = economiePrincipal + economieAppoint
+// (les deux magasins portent toujours sur des articles disjoints, jamais de
+// double comptage). Ne mute rien.
 export function calculerEconomiePotentielle(panier, magasins, classement) {
   const articlesPanier = Array.isArray(panier) ? panier : [];
   const listeMagasins = Array.isArray(magasins) ? magasins : [];
@@ -116,20 +124,45 @@ export function calculerEconomiePotentielle(panier, magasins, classement) {
     }
   }
 
+  const moyenneZone = (articleId) => {
+    const prix = prixParArticle.get(articleId);
+    if (!prix || prix.length === 0) return null;
+    return prix.reduce((somme, p) => somme + p, 0) / prix.length;
+  };
+
   let coutMoyenPanier = 0;
   let nbArticlesChiffres = 0;
-
   for (const article of articlesPanier) {
-    const prix = prixParArticle.get(article.articleId);
-    if (!prix || prix.length === 0) continue;
-
-    const moyenne = prix.reduce((somme, p) => somme + p, 0) / prix.length;
+    const moyenne = moyenneZone(article.articleId);
+    if (moyenne == null) continue;
     coutMoyenPanier += moyenne;
     nbArticlesChiffres += 1;
   }
 
-  const coutReel = (classement?.principal?.total || 0) + (classement?.appoint?.total || 0);
-  const economie = Math.max(0, coutMoyenPanier - coutReel);
+  const magasinParId = new Map(listeMagasins.map(m => [m.magasinId, m]));
 
-  return { economie, coutMoyenPanier, coutReel, nbArticlesChiffres };
+  const economieDuMagasin = (entreeClassement) => {
+    if (!entreeClassement) return 0;
+    const magasin = magasinParId.get(entreeClassement.magasinId);
+    if (!magasin) return 0;
+
+    const prixParArticleDuMagasin = new Map((magasin.prix || []).map(p => [p.articleId, Number(p.prix)]));
+
+    let somme = 0;
+    for (const articleId of entreeClassement.articlesTrouves || []) {
+      const moyenne = moyenneZone(articleId);
+      const prixMagasin = prixParArticleDuMagasin.get(articleId);
+      if (moyenne == null || prixMagasin == null) continue;
+      somme += moyenne - prixMagasin;
+    }
+    return Math.max(0, somme);
+  };
+
+  const economiePrincipal = economieDuMagasin(classement?.principal);
+  const economieAppoint = economieDuMagasin(classement?.appoint);
+  const economieTotale = economiePrincipal + economieAppoint;
+
+  const coutReel = (classement?.principal?.total || 0) + (classement?.appoint?.total || 0);
+
+  return { economieTotale, economiePrincipal, economieAppoint, coutMoyenPanier, coutReel, nbArticlesChiffres };
 }
