@@ -1140,7 +1140,7 @@ function AddItemSheet({ onClose, onAdd }) {
 }
 
 // ── IMPORT TICKET SHEET ───────────────────────────────────────────────────────
-function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera = false, onManualEntry, initialResult = null }) {
+function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera = false, autoOpenGallery = false, onManualEntry, initialResult = null }) {
   const [jsonText, setJsonText] = useState("");
   const [status,   setStatus]   = useState(directCamera ? "camera" : "idle");
   const [error,    setError]    = useState("");
@@ -1170,6 +1170,14 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   const [savedGpsCoords,    setSavedGpsCoords]    = useState(null);
   const fileInputRef    = useRef(null);
   const galleryInputRef = useRef(null);
+
+  // Additif — #61bis : ouvre directement le sélecteur de galerie au montage,
+  // sans changer le comportement par défaut (status reste "idle" comme sans
+  // ce prop). Réutilise l'input existant (galleryInputRef), n'en recrée aucun.
+  useEffect(() => {
+    if (!autoOpenGallery) return;
+    galleryInputRef.current?.click();
+  }, []);
 
   useEffect(() => {
     if (!initialResult) return;
@@ -4545,7 +4553,7 @@ function MultiPhotoSheet({ onClose, refProducts, onSuccess }) {
 }
 
 // ── SCAN CHOIX SHEET ─────────────────────────────────────────────────────────
-function ScanChoixSheet({ onClose, onUnePhoto, onPlusieursPhotos }) {
+function ScanChoixSheet({ onClose, onUnePhoto, onPlusieursPhotos, onAutresOptions }) {
   const F = "'Nunito',sans-serif";
   return (
     <div
@@ -4602,9 +4610,56 @@ function ScanChoixSheet({ onClose, onUnePhoto, onPlusieursPhotos }) {
           </div>
 
           <div style={{ fontFamily:F, fontSize:12, color:C.textLight,
-                        textAlign:"center", lineHeight:1.6, padding:"0 8px" }}>
+                        textAlign:"center", lineHeight:1.6, padding:"0 8px", marginBottom:16 }}>
             💡 Commence toujours par l'en-tête du ticket — nom et adresse du magasin
           </div>
+
+          <button onClick={onAutresOptions}
+            style={{ width:"100%", padding:"10px", border:"none", background:"none",
+                     fontFamily:F, fontWeight:700, fontSize:13, color:"#4A90D9", cursor:"pointer" }}>
+            Autres options
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── AUTRES OPTIONS SHEET ─────────────────────────────────────────────────────
+// Écran dédié ouvert depuis ScanChoixSheet ("Autres options"). Ne recrée
+// aucun mécanisme : "Saisie manuelle" rebranche sur le même PriceEntrySheet
+// que celui déjà utilisé ailleurs dans l'app (voir handleSavePrice), et
+// "Importer une photo" rebranche sur ImportTicketSheet via le prop additif
+// autoOpenGallery (voir plus haut) — même input galerie, aucune duplication.
+function AutresOptionsSheet({ onClose, onBack, onGalleryImport, onManualEntry }) {
+  const F = "'Nunito',sans-serif";
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", zIndex:200, animation:"fadeIn 0.2s ease" }} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{ background:C.white, borderRadius:"20px 20px 0 0", width:"100%", animation:"slideUp 0.3s ease", overflow:"hidden" }}>
+        <div style={{ background:C.orange, padding:"16px 20px", display:"flex", alignItems:"center", gap:12 }}>
+          <button onClick={onBack} style={{ background:"rgba(0,0,0,0.12)", border:"none", borderRadius:99, width:28, height:28, fontSize:16, cursor:"pointer", color:"#111" }}>←</button>
+          <div style={{ fontFamily:F, fontWeight:900, fontSize:17, color:"#111", flex:1 }}>Autres options</div>
+          <button onClick={onClose} style={{ background:"rgba(0,0,0,0.12)", border:"none", borderRadius:99, width:28, height:28, fontSize:14, cursor:"pointer", color:"#111" }}>✕</button>
+        </div>
+
+        <div style={{ padding:"20px 20px 44px", display:"flex", flexDirection:"column", gap:12 }}>
+          <button onClick={onGalleryImport}
+            style={{ width:"100%", padding:"16px", border:"none", borderRadius:14, background:"#4A90D9", fontFamily:F, cursor:"pointer", display:"flex", alignItems:"center", gap:14, textAlign:"left" }}>
+            <span style={{ fontSize:26 }}>🖼️</span>
+            <div>
+              <div style={{ fontWeight:900, fontSize:15, color:"#fff" }}>Importer une photo</div>
+              <div style={{ fontSize:12, color:"rgba(255,255,255,0.85)", marginTop:2 }}>Depuis ta pellicule</div>
+            </div>
+          </button>
+
+          <button onClick={onManualEntry}
+            style={{ width:"100%", padding:"16px", border:"none", borderRadius:14, background:C.orange, fontFamily:F, cursor:"pointer", display:"flex", alignItems:"center", gap:14, textAlign:"left" }}>
+            <span style={{ fontSize:26 }}>✏️</span>
+            <div>
+              <div style={{ fontWeight:900, fontSize:15, color:"#fff" }}>Saisie manuelle</div>
+              <div style={{ fontSize:12, color:"rgba(255,255,255,0.85)", marginTop:2 }}>Sans ticket, tu tapes le prix</div>
+            </div>
+          </button>
         </div>
       </div>
     </div>
@@ -4668,7 +4723,7 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash
       </div>
 
       {/* ── Barre du haut ── */}
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"18px 20px 0", position:"relative", zIndex:9999 }}>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"18px 20px 0", position:"relative", zIndex:20 }}>
 
         {/* Bouton Moi — haut gauche avec dropdown */}
         <div ref={menuProfilRef} style={{ position:"relative" }}>
@@ -4676,7 +4731,7 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash
             {pseudo ? pseudo.substring(0, 6) : "Moi"}
           </div>
           {showMenuProfil && (
-            <div style={{ position:"absolute", top:60, left:0, width:220, background:"#fff", borderRadius:14, boxShadow:"0 6px 24px rgba(0,0,0,0.16)", zIndex:9999, overflow:"hidden" }}>
+            <div style={{ position:"absolute", top:60, left:0, width:220, background:"#fff", borderRadius:14, boxShadow:"0 6px 24px rgba(0,0,0,0.16)", zIndex:20, overflow:"hidden" }}>
               {[
                 { img:"/menu-cercle.png",     label:"Mon Cercle",          action: () => { setShowMenuProfil(false); onCircle(); } },
                 { img:"/menu-stats.png",       label:"Mes Statistiques",    action: () => { setShowMenuProfil(false); onStats?.(); } },
@@ -4873,6 +4928,9 @@ export default function App() {
   const [autoOpenCamera, setAutoOpenCamera] = useState(false);
   const [showScanChoix, setShowScanChoix]  = useState(false);
   const [showMultiPhoto, setShowMultiPhoto] = useState(false);
+  const [showAutresOptions, setShowAutresOptions] = useState(false);
+  const [showManualEntryFromScan, setShowManualEntryFromScan] = useState(false);
+  const [showGalleryImportFromScan, setShowGalleryImportFromScan] = useState(false);
   const [autoImportResult, setAutoImportResult] = useState(null);
   const handleFlash = () => setShowScanChoix(true);
   const handleFlashConfirmed = () => { setShowScanChoix(false); setAutoOpenCamera(true); setTab("prices"); };
@@ -5518,6 +5576,7 @@ export default function App() {
             onClose={() => setShowScanChoix(false)}
             onUnePhoto={handleFlashConfirmed}
             onPlusieursPhotos={() => { setShowScanChoix(false); setShowMultiPhoto(true); }}
+            onAutresOptions={() => { setShowScanChoix(false); setShowAutresOptions(true); }}
           />
         )}
         {showMultiPhoto && (
@@ -5525,6 +5584,28 @@ export default function App() {
             onClose={() => setShowMultiPhoto(false)}
             refProducts={produitsRef.map(p => ({ nom: p.produit_generique, categorie: p.sous_categorie }))}
             onSuccess={(result) => { setShowMultiPhoto(false); setAutoImportResult(result); setTab("prices"); }}
+          />
+        )}
+        {showAutresOptions && (
+          <AutresOptionsSheet
+            onClose={() => setShowAutresOptions(false)}
+            onBack={() => { setShowAutresOptions(false); setShowScanChoix(true); }}
+            onGalleryImport={() => { setShowAutresOptions(false); setShowGalleryImportFromScan(true); }}
+            onManualEntry={() => { setShowAutresOptions(false); setShowManualEntryFromScan(true); }}
+          />
+        )}
+        {showManualEntryFromScan && (
+          <PriceEntrySheet
+            onClose={() => setShowManualEntryFromScan(false)}
+            onSave={handleSavePrice}
+          />
+        )}
+        {showGalleryImportFromScan && (
+          <ImportTicketSheet
+            onClose={() => setShowGalleryImportFromScan(false)}
+            onImport={handleImportPrices}
+            refProducts={produitsRef.map(p => ({ nom: p.produit_generique, categorie: p.sous_categorie }))}
+            autoOpenGallery
           />
         )}
         {loaded && pseudo === null && <PseudoModal onSave={savePseudo}/>}
