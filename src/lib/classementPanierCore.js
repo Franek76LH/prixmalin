@@ -97,3 +97,39 @@ export function classerMagasinsPourPanier(panier, magasins) {
 
   return { principal, appoint, nonTrouves };
 }
+
+// #58.2.D — économie potentielle : compare le coût réel du panier (principal
+// + appoint, issus de classerMagasinsPourPanier) au coût du même panier si
+// chaque article était payé au prix MOYEN de la zone (moyenne de ses prix
+// chez tous les magasins de `magasins`, jamais la médiane ni le moins cher).
+// Un article sans aucun prix dans `magasins` est exclu du calcul (ni compté
+// dans coutMoyenPanier, ni dans nbArticlesChiffres). Ne mute rien.
+export function calculerEconomiePotentielle(panier, magasins, classement) {
+  const articlesPanier = Array.isArray(panier) ? panier : [];
+  const listeMagasins = Array.isArray(magasins) ? magasins : [];
+
+  const prixParArticle = new Map();
+  for (const magasin of listeMagasins) {
+    for (const ligne of magasin?.prix || []) {
+      if (!prixParArticle.has(ligne.articleId)) prixParArticle.set(ligne.articleId, []);
+      prixParArticle.get(ligne.articleId).push(Number(ligne.prix));
+    }
+  }
+
+  let coutMoyenPanier = 0;
+  let nbArticlesChiffres = 0;
+
+  for (const article of articlesPanier) {
+    const prix = prixParArticle.get(article.articleId);
+    if (!prix || prix.length === 0) continue;
+
+    const moyenne = prix.reduce((somme, p) => somme + p, 0) / prix.length;
+    coutMoyenPanier += moyenne;
+    nbArticlesChiffres += 1;
+  }
+
+  const coutReel = (classement?.principal?.total || 0) + (classement?.appoint?.total || 0);
+  const economie = Math.max(0, coutMoyenPanier - coutReel);
+
+  return { economie, coutMoyenPanier, coutReel, nbArticlesChiffres };
+}
