@@ -40,7 +40,7 @@ export function mapperLigneListeCourses(row) {
 
   return {
     id:                  row.id,
-    product:             row.produit?.nom_reference ?? row.texte_libre ?? 'Produit sans nom',
+    product:             row.libelle_saisi ?? row.produit?.nom_reference ?? row.texte_libre ?? 'Produit sans nom',
     qty:                 Number(row.quantite) || 1,
     format:              formatMatch,
     formatDisplay,

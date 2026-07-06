@@ -4925,7 +4925,7 @@ export default function App() {
           // LEGACY - shopping_list conservé temporairement
           // supabase.from('shopping_list').select('id, items').order('id').limit(1),
           supabase.from('liste_courses')
-            .select(`id, texte_libre, quantite, format_selectionne, statut, produit_id, variante_produit_id,
+            .select(`id, texte_libre, libelle_saisi, quantite, format_selectionne, statut, produit_id, variante_produit_id,
               produit:produits(id, nom_reference),
               variante:variantes_produit(id, libelle, quantite_nette, unite_quantite, nombre_unites)`)
             .eq('utilisateur_id', session?.user?.id)
@@ -5011,7 +5011,7 @@ export default function App() {
 
   const chargerListe = async () => {
     const { data, error } = await supabase.from('liste_courses')
-      .select(`id, texte_libre, quantite, format_selectionne, statut, produit_id, variante_produit_id,
+      .select(`id, texte_libre, libelle_saisi, quantite, format_selectionne, statut, produit_id, variante_produit_id,
         produit:produits(id, nom_reference),
         variante:variantes_produit(id, libelle, quantite_nette, unite_quantite, nombre_unites)`)
       .eq('utilisateur_id', session?.user?.id)
@@ -5031,6 +5031,10 @@ export default function App() {
     // Rapprochement automatique via alias_produits (correspondance exacte uniquement)
     let produit_id = item.produit_id ?? null;
     let texte_libre = item.produit_id ? null : item.product;
+    // Conserve le texte tapé par l'utilisateur quand la reconnaissance d'alias
+    // résout un produit_id à sa place (jamais quand produit_id venait déjà du
+    // catalogue) — pour l'afficher tel quel plutôt que le nom_reference.
+    let libelle_saisi = null;
     if (!produit_id && item.product?.trim()) {
       const { data: aliases } = await supabase
         .from('alias_produits')
@@ -5040,6 +5044,7 @@ export default function App() {
       if (aliases && aliases.length === 1) {
         produit_id = aliases[0].produit_id;
         texte_libre = null; // contrainte liste_courses_produit_ou_texte
+        libelle_saisi = item.product.trim();
       }
     }
 
@@ -5051,6 +5056,7 @@ export default function App() {
       statut:              'a_acheter',
       produit_id:          produit_id,
       variante_produit_id: item.variante_produit_id ?? null,
+      libelle_saisi:       libelle_saisi,
     };
 
     // Phase 1 : insertion — seule cette phase déclenche un rollback de l'optimiste.
@@ -5062,6 +5068,9 @@ export default function App() {
       }
       insertedId = data.id;
     } catch (e) {
+      console.error("Erreur ajout liste — détail complet :", {
+        message: e?.message, code: e?.code, details: e?.details, hint: e?.hint,
+      });
       console.error("Erreur ajout liste :", e);
       setItems(prev => prev.filter(i => i.id !== optimistic.id));
       showAppToast("⚠️ Sauvegarde échouée, vérifie ta connexion", false);
