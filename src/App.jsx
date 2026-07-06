@@ -4,6 +4,9 @@ import { STORES, CATEGORY_META, PRODUCT_SUGGESTIONS, STALE_DAYS, JOURS_MOYENNE }
 import { supabase } from "./lib/supabase";
 import { formatVariante, mapperLigneListeCourses, chargerVariantes, getCategoryPresentation } from "./lib/catalogueCore";
 import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
+import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
+import { classerMagasinsPourPanier } from "./lib/classementPanierCore";
+import ClassementPanierShadow from "./components/dev/ClassementPanierShadow";
 
 const C = {
   blue:      "#CC0000",   blueLight:  "#FFF0F0",
@@ -3710,6 +3713,95 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos }) {
       .then(({data})=> setStoresGeo(data || []));
   }, []);
 
+  // #58.2.B étape 2 — interrupteur dev uniquement (défaut : vue actuelle,
+  // inchangée). N'existe pas en prod : voir le rendu du toggle plus bas,
+  // gardé par import.meta.env.DEV.
+  const [vueDev, setVueDev] = useState('actuelle');
+
+  // Calcul shadow : uniquement en DEV, et uniquement quand la nouvelle vue
+  // est effectivement affichée (pas de calcul superflu sur "Vue actuelle").
+  // Ne réimplémente ni le matching produit/prix, ni le filtre de fraîcheur,
+  // ni le filtre de distance : réutilise itemMatchesPrice et reproduit à
+  // l'identique les conditions déjà inline dans `analysis` ci-dessous (même
+  // STALE_DAYS, même distanceKm) — même principe que ShadowCompareDiagnostic.
+  const shadowPanier = useMemo(() => {
+    if (!import.meta.env.DEV || vueDev !== 'nouvelle') return null;
+
+    const storeMap = Object.fromEntries(storesGeo.map(s => [s.id, s]));
+    const cutoff = Date.now() - STALE_DAYS * 86400000;
+    const estRecentShadow = (prix) => new Date(prix.date).getTime() >= cutoff;
+    const estDansRayonShadow = (prix, geo) => {
+      if (!userPos || !prix.store_id) return true;
+      if (!geo?.latitude || !geo?.longitude) return true;
+      return distanceKm(userPos.lat, userPos.lng, geo.latitude, geo.longitude) <= searchRadius;
+    };
+
+    const { panier, magasins } = construirePanierEtMagasins({
+      items, priceDB, magasinsGeo: storesGeo,
+      itemMatchesPrice, estRecent: estRecentShadow, estDansRayon: estDansRayonShadow,
+    });
+    const classement = classerMagasinsPourPanier(panier, magasins);
+
+    // Détail brut (prix, format) par magasin physique et par article, pour
+    // l'affichage ligne à ligne uniquement (nom/prix/ratio) — le classement
+    // ci-dessus ne porte que des agrégats. Réutilise resoudreIdentiteMagasin
+    // et les mêmes prédicats injectés : ne réévalue aucune règle de matching,
+    // de fraîcheur ou de distance, se contente de les rejouer pour lire le
+    // détail que classerMagasinsPourPanier n'expose pas.
+    const detailParMagasin = new Map();
+    items.forEach(item => {
+      priceDB.forEach(prix => {
+        if (!itemMatchesPrice(item, prix)) return;
+        if (!estRecentShadow(prix)) return;
+        const geo = prix.store_id != null ? storeMap[prix.store_id] : undefined;
+        if (!estDansRayonShadow(prix, geo)) return;
+        const identite = resoudreIdentiteMagasin(prix, geo);
+        if (!identite) return;
+        if (!detailParMagasin.has(identite.magasinId)) detailParMagasin.set(identite.magasinId, new Map());
+        const parArticle = detailParMagasin.get(identite.magasinId);
+        const existant = parArticle.get(item.id);
+        if (!existant || prix.price < existant.price) parArticle.set(item.id, prix);
+      });
+    });
+
+    const construireLigne = (magasinId, articleId) => {
+      const item = items.find(i => i.id === articleId);
+      const rawEntry = detailParMagasin.get(magasinId)?.get(articleId);
+      const libelle = panier.find(a => a.articleId === articleId)?.libelle ?? item?.product ?? '';
+      const qty = Number(item?.qty) || 1;
+      return {
+        articleId,
+        libelle,
+        total: rawEntry ? rawEntry.price * qty : null,
+        ratioLabel: rawEntry ? fmtUnitPrice(rawEntry.price, item?.format) : null,
+      };
+    };
+
+    const construireMapsUrlShadow = (magasinId, magasinNom) => {
+      const entries = Array.from(detailParMagasin.get(magasinId)?.values() ?? []);
+      const adresseEntree = entries
+        .filter(p => p?.store_address?.trim())
+        .sort((a, b) => new Date(b.date) - new Date(a.date))[0];
+      const query = `${magasinNom}${adresseEntree ? ' ' + adresseEntree.store_address : ''}`;
+      return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+    };
+
+    return {
+      totalArticles: items.length,
+      principal: classement.principal ? {
+        ...classement.principal,
+        lignes: classement.principal.articlesTrouves.map(id => construireLigne(classement.principal.magasinId, id)),
+        mapsUrl: construireMapsUrlShadow(classement.principal.magasinId, classement.principal.magasinNom),
+      } : null,
+      appoint: classement.appoint ? {
+        ...classement.appoint,
+        lignes: classement.appoint.articlesTrouves.map(id => construireLigne(classement.appoint.magasinId, id)),
+        mapsUrl: construireMapsUrlShadow(classement.appoint.magasinId, classement.appoint.magasinNom),
+      } : null,
+      nonTrouves: classement.nonTrouves,
+    };
+  }, [items, priceDB, storesGeo, userPos, searchRadius, vueDev]);
+
   if(items.length===0) return (
     <div style={{ padding:"40px 20px 100px", textAlign:"center" }}>
       <div style={{ fontSize:60, marginBottom:14 }}>🏪</div>
@@ -3817,6 +3909,26 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos }) {
         </div>
       </div>
 
+      {/* #58.2.B étape 2 — interrupteur dev uniquement, n'existe pas en prod */}
+      {import.meta.env.DEV && (
+        <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+          <button
+            onClick={()=>setVueDev('actuelle')}
+            style={{ flex:1, padding:"8px 10px", borderRadius:10, border:`2px solid ${vueDev==='actuelle'?C.blue:C.grayLight}`, background:vueDev==='actuelle'?C.blue:"#fff", fontFamily:F, fontWeight:800, fontSize:12, color:vueDev==='actuelle'?C.white:C.textLight, cursor:"pointer" }}
+          >
+            Vue actuelle
+          </button>
+          <button
+            onClick={()=>setVueDev('nouvelle')}
+            style={{ flex:1, padding:"8px 10px", borderRadius:10, border:`2px solid ${vueDev==='nouvelle'?C.green:C.grayLight}`, background:vueDev==='nouvelle'?C.green:"#fff", fontFamily:F, fontWeight:800, fontSize:12, color:vueDev==='nouvelle'?C.white:C.textLight, cursor:"pointer" }}
+          >
+            🧪 Nouvelle vue (classement)
+          </button>
+        </div>
+      )}
+
+      {vueDev === 'actuelle' && (
+        <>
       {/* Aucun prix */}
       {ranked.length===0 && (
         <div style={{ background:C.orangeLight, borderRadius:14, padding:"24px 20px", textAlign:"center", border:`2px dashed ${C.orange}` }}>
@@ -3960,6 +4072,12 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos }) {
           </div>
 
         </>
+      )}
+        </>
+      )}
+
+      {import.meta.env.DEV && vueDev === 'nouvelle' && shadowPanier && (
+        <ClassementPanierShadow resultat={shadowPanier} />
       )}
     </div>
   );

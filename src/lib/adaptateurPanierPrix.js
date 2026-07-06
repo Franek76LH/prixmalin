@@ -27,7 +27,11 @@ function normaliserCle(texte) {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
-function resoudreIdentiteMagasin(prix, geo) {
+// Exportée pour être réutilisée telle quelle par l'affichage (#58.2.B étape 2)
+// quand il a besoin de retrouver, pour un magasin déjà identifié par
+// construirePanierEtMagasins, les lignes de prix brutes qui lui appartiennent
+// — sans dupliquer cette règle d'identité ailleurs.
+export function resoudreIdentiteMagasin(prix, geo) {
   if (prix.store_id != null) {
     return {
       magasinId: `store_id:${prix.store_id}`,
