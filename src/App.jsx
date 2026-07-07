@@ -8,6 +8,8 @@ import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adapt
 import { classerMagasinsPourPanier, calculerEconomiePotentielle } from "./lib/classementPanierCore";
 import ClassementPanierShadow from "./components/dev/ClassementPanierShadow";
 import AdminRejetsCorePanel from "./components/admin/AdminRejetsCorePanel";
+// #56.5.A — double écriture Core, fire-and-forget, invisible pour l'utilisateur
+import { envoyerTicketCore, envoyerPrixManuelCore } from "./lib/doubleEcritureCore";
 // #56.4 — vrai moteur Core (produits/prix/magasins via la vue prix_comparables),
 // pour le mode debug admin de CompareTab. Distinct du pipeline #58.2
 // (adaptateurPanierPrix/classementPanierCore, lui basé sur price_db legacy),
@@ -1287,6 +1289,13 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
       date:         result?.date?new Date(result.date).toISOString():new Date().toISOString(),
       share:        idsToShare.has(p.id),
     }));
+    // #56.5.A — double écriture Core, fire-and-forget : n'affecte jamais le
+    // flux legacy (pas de await, jamais d'erreur remontée ni affichée).
+    void envoyerTicketCore(toImport, {
+      storeLegacyId: resolvedStoreId || null,
+      magasinTexte:  storeNameEdit.trim() || result?.store || null,
+      dateTicket:    result?.date || null,
+    });
     onImport(toImport);
     onClose();
   };
@@ -1907,7 +1916,7 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
       localStorage.setItem(`prixmalin_lastStore_${selectedStore}`, resolvedStoreId);
     }
     const storeRecord = knownStores.find(s => s.id === resolvedStoreId);
-    onSave({
+    const entry = {
       brand:         brand.trim(),
       product:       product.trim(),
       format:        (() => {
@@ -1927,7 +1936,17 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
       store_id:      resolvedStoreId,
       price:         parseFloat(price),
       date:          new Date().toISOString(),
-    });
+    };
+    // #56.5.A — double écriture Core, uniquement pour une création (jamais
+    // pour une modification via existingPrice, qui créerait un doublon côté
+    // Core puisque la RPC ne fait qu'un INSERT, jamais une correction).
+    if (existingPrice == null) {
+      void envoyerPrixManuelCore(entry, {
+        storeLegacyId: resolvedStoreId || null,
+        magasinTexte:  storeNameEdit.trim() || null,
+      });
+    }
+    onSave(entry);
     onClose();
   };
 
