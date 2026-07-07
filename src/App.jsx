@@ -7,6 +7,7 @@ import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
 import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
 import { classerMagasinsPourPanier, calculerEconomiePotentielle } from "./lib/classementPanierCore";
 import ClassementPanierShadow from "./components/dev/ClassementPanierShadow";
+import AdminRejetsCorePanel from "./components/admin/AdminRejetsCorePanel";
 
 const C = {
   blue:      "#CC0000",   blueLight:  "#FFF0F0",
@@ -731,7 +732,7 @@ function MesPrixSheet({ priceDB, setPriceDB, archives, updateArchive, onTicketVa
 // ── HEADER ────────────────────────────────────────────────────────────────────
 function Header({ tab, itemCount, userEmail, displayName, onLogout, pendingCount, onCircle }) {
   const F = "'Nunito',sans-serif";
-  const titles = { list:"Ma liste", catalog:"Catalogue", compare:"Comparer", prices:"Mes prix", archive:"Historique", economies:"Mes économies" };
+  const titles = { list:"Ma liste", catalog:"Catalogue", compare:"Comparer", prices:"Mes prix", archive:"Historique", economies:"Mes économies", rejets:"Rejets" };
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef(null);
   useEffect(() => {
@@ -794,11 +795,13 @@ function Header({ tab, itemCount, userEmail, displayName, onLogout, pendingCount
 }
 
 // ── TAB BAR ───────────────────────────────────────────────────────────────────
-function TabBar({ tab, setTab }) {
+function TabBar({ tab, setTab, isAdmin }) {
   const tabs = [
     { id:"home",      icon:"🏠", label:"Accueil"   },
     { id:"archive",   icon:"📦", label:"Historique"},
     { id:"economies", icon:"💰", label:"Économies" },
+    // #56.3b — onglet admin uniquement, jamais rendu pour un utilisateur non-admin.
+    ...(isAdmin ? [{ id:"rejets", icon:"🛠️", label:"Rejets" }] : []),
   ];
   return (
     <div style={{ position:"fixed", bottom:16, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:430, display:"flex", justifyContent:"space-evenly", alignItems:"center", zIndex:50, pointerEvents:"none" }}>
@@ -4910,6 +4913,10 @@ function CguRattrapageScreen({ onAccept }) {
 export default function App() {
   const [session,   setSession]   = useState(null);
   const [authReady, setAuthReady] = useState(false);
+  // #56.3b — statut admin, dérivé de la session (jamais true par défaut ni
+  // par accident : false pendant le chargement, false sans session, false
+  // sur toute erreur RPC).
+  const [isAdmin, setIsAdmin] = useState(false);
   const [tab, setTab]           = useState("home");
   const [items, setItems]       = useState([]);
   const [priceDB, setPriceDB]     = useState([]);
@@ -4963,6 +4970,19 @@ export default function App() {
     });
     return () => subscription.unsubscribe();
   }, []);
+
+  // #56.3b — recalculé à chaque changement de session (login/logout/switch
+  // de compte), jamais une seule fois au montage : sans quoi une bascule de
+  // compte dans le même onglet garderait le statut admin du compte précédent.
+  useEffect(() => {
+    if (!session) { setIsAdmin(false); return; }
+    let annule = false;
+    supabase.rpc('est_administrateur').then(({ data, error }) => {
+      if (annule) return;
+      setIsAdmin(!error && data === true);
+    });
+    return () => { annule = true; };
+  }, [session]);
 
   const fetchStoreRatings = useCallback(async () => {
     const { data } = await supabase.rpc('get_store_ratings');
@@ -5564,8 +5584,10 @@ export default function App() {
             showAppToast(`✓ ${arcItem.product} ajouté à ta liste`);
           }}/>}
           {loaded && tab==="economies" && <EconomiesTab priceDB={priceDB} archives={archives} items={items} setTab={setTab}/>}
+          {/* #56.3b — jamais rendu pour un non-admin, même si tab="rejets" traîne en state */}
+          {loaded && isAdmin && tab==="rejets" && <AdminRejetsCorePanel/>}
         </div>
-        <TabBar tab={tab} setTab={setTab}/>
+        <TabBar tab={tab} setTab={setTab} isAdmin={isAdmin}/>
         {appToast && <Toast msg={appToast.msg} ok={appToast.ok}/>}
         {showCircleSheet  && <CircleSheet  circles={circles} userId={session.user.id} userEmail={session.user.email} profileMap={profileMap} pseudo={pseudo} archives={archives} onClose={()=>setShowCircleSheet(false)} onInvite={inviteByPseudo} onUpdateStatus={updateCircleStatus}/>}
         {showStatsSheet   && <StatsSheet   userId={session.user.id} archives={archives} onClose={()=>setShowStatsSheet(false)}/>}
