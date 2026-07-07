@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
 import { scanTicketWithClaude, imageFileToJpegBase64, scanMultipleTicketsWithClaude } from "./scanTicket";
 import { STORES, CATEGORY_META, PRODUCT_SUGGESTIONS, STALE_DAYS, JOURS_MOYENNE } from "./constants";
 import { supabase } from "./lib/supabase";
@@ -809,7 +809,142 @@ function Header({ tab, itemCount, userEmail, displayName, onLogout, pendingCount
 }
 
 // ── TAB BAR ───────────────────────────────────────────────────────────────────
+// Couleurs par identité d'onglet (id), jamais par index/position — pack
+// d'animations "Fou furieux". home/economies réutilisent C.blue/C.green ;
+// archive/rejets reprennent des teintes déjà présentes ailleurs dans l'app
+// (bleu de AutresOptionsSheet/MultiPhotoSheet, violet du mode debug Core #56.4)
+// plutôt que d'inventer une palette nouvelle.
+const TAB_COLORS = {
+  home:      C.blue,
+  archive:   "#4A90D9",
+  economies: C.green,
+  rejets:    "#8E44AD",
+};
+
+function runTabBounce(el) {
+  if (!el?.animate) return;
+  el.animate([
+    { transform:"scale(0.7) rotate(0deg)",   offset:0 },
+    { transform:"scale(1.55) rotate(4deg)",  offset:0.4 },
+    { transform:"scale(1.22) rotate(-2deg)", offset:0.7 },
+    { transform:"scale(1.3) rotate(0deg)",   offset:1 },
+  ], { duration:550, easing:"cubic-bezier(.34,1.56,.64,1)" });
+}
+
+function runTabParticles(layer, el, color) {
+  if (!layer || !el?.animate) return;
+  const layerRect = layer.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  const cx = r.left + r.width/2 - layerRect.left;
+  const cy = r.top  + r.height/2 - layerRect.top;
+  const N = 12;
+  for (let i=0; i<N; i++) {
+    const angle = (i/N) * Math.PI * 2;
+    const dist  = 30 + Math.random()*12;
+    const dx = Math.cos(angle)*dist, dy = Math.sin(angle)*dist;
+    const size = 6 + Math.random()*2;
+    const white = i % 4 === 0;
+    const p = document.createElement("div");
+    p.style.cssText = `position:absolute;width:${size}px;height:${size}px;border-radius:50%;left:${cx-size/2}px;top:${cy-size/2}px;background:${white?"#fff":color};pointer-events:none;`;
+    layer.appendChild(p);
+    p.animate([
+      { transform:"translate(0,0) scale(1)", opacity:1 },
+      { transform:`translate(${dx}px,${dy}px) scale(0.2)`, opacity:0 },
+    ], { duration:600, easing:"cubic-bezier(.2,.7,.3,1)" }).onfinish = () => p.remove();
+  }
+}
+
+function runTabComet(layer, fromEl, toEl, color, onArrive) {
+  if (!layer || !fromEl?.animate || !toEl) return;
+  const layerRect = layer.getBoundingClientRect();
+  const a = fromEl.getBoundingClientRect();
+  const b = toEl.getBoundingClientRect();
+  const ax = a.left + a.width/2 - layerRect.left, ay = a.top + a.height/2 - layerRect.top;
+  const bx = b.left + b.width/2 - layerRect.left, by = b.top + b.height/2 - layerRect.top;
+  const dx = bx - ax, dy = by - ay;
+
+  const comet = document.createElement("div");
+  comet.style.cssText = `position:absolute;width:16px;height:16px;border-radius:50%;left:${ax-8}px;top:${ay-8}px;background:radial-gradient(circle,#fff 0%,${color} 70%);box-shadow:0 0 10px 3px ${color},0 0 4px 2px #fff;pointer-events:none;`;
+  layer.appendChild(comet);
+
+  let step = 0;
+  const totalSteps = 6;
+  const trailTimer = setInterval(() => {
+    step += 1;
+    if (step >= totalSteps) { clearInterval(trailTimer); return; }
+    const t = step / totalSteps;
+    const sx = ax + dx*t, sy = ay + dy*t;
+    // Poussière d'étoiles : taille aléatoire 4-10px, retombe doucement
+    // (10-20px de descente) en rétrécissant/s'estompant, avec un
+    // scintillement (opacity qui varie) pendant la chute — durée de vie
+    // volontairement longue (~1-1,2s) pour rester visible derrière la comète.
+    const size = 4 + Math.random()*6;
+    const fall = 10 + Math.random()*10;
+    const spark = document.createElement("div");
+    spark.style.cssText = `position:absolute;width:${size}px;height:${size}px;border-radius:50%;left:${sx-size/2}px;top:${sy-size/2}px;background:${color};pointer-events:none;`;
+    layer.appendChild(spark);
+    spark.animate([
+      { opacity:0.9,  transform:"translateY(0) scale(1)",                     offset:0    },
+      { opacity:0.45, transform:`translateY(${fall*0.4}px) scale(0.85)`,      offset:0.35 },
+      { opacity:0.8,  transform:`translateY(${fall*0.6}px) scale(0.7)`,       offset:0.55 },
+      { opacity:0.25, transform:`translateY(${fall*0.85}px) scale(0.45)`,     offset:0.8  },
+      { opacity:0,    transform:`translateY(${fall}px) scale(0.15)`,          offset:1    },
+    ], { duration:1000 + Math.random()*200, easing:"ease-out" }).onfinish = () => spark.remove();
+  }, 500/totalSteps);
+
+  const cometAnim = comet.animate([
+    { transform:"translate(0,0)",                     offset:0   },
+    { transform:`translate(${dx*0.5}px,${dy*0.5}px)`, offset:0.5 },
+    { transform:`translate(${dx}px,${dy}px)`,         offset:1   },
+  ], { duration:500, easing:"ease-in" });
+
+  cometAnim.onfinish = () => {
+    clearInterval(trailTimer);
+    comet.remove();
+
+    // Éclat d'impact — deux couches : flash central + onde de choc (anneau
+    // net qui s'étend en s'affinant), plus quelques éclats blancs projetés.
+    // Diamètre de référence pris sur le cercle d'arrivée déjà rendu (donc
+    // déjà à sa taille "actif" éventuelle) pour calibrer l'expansion en 1,5-2x.
+    const diam = b.width;
+    const flashMax = diam * 1.8;
+
+    const flash = document.createElement("div");
+    flash.style.cssText = `position:absolute;width:${diam*0.5}px;height:${diam*0.5}px;border-radius:50%;left:${bx-diam*0.25}px;top:${by-diam*0.25}px;background:radial-gradient(circle,#fff 0%,${color} 60%,transparent 75%);pointer-events:none;`;
+    layer.appendChild(flash);
+    flash.animate([
+      { opacity:1, transform:"scale(1)" },
+      { opacity:0, transform:`scale(${flashMax/(diam*0.5)})` },
+    ], { duration:650, easing:"ease-out" }).onfinish = () => flash.remove();
+
+    const ring = document.createElement("div");
+    ring.style.cssText = `position:absolute;width:${diam}px;height:${diam}px;border-radius:50%;left:${bx-diam/2}px;top:${by-diam/2}px;border:3px solid #fff;background:transparent;pointer-events:none;`;
+    layer.appendChild(ring);
+    ring.animate([
+      { opacity:0.9, transform:"scale(1)",                 borderWidth:"3px" },
+      { opacity:0,   transform:`scale(${flashMax/diam})`,  borderWidth:"0px" },
+    ], { duration:650, easing:"ease-out" }).onfinish = () => ring.remove();
+
+    const nbEclats = 4 + Math.floor(Math.random()*3);
+    for (let i=0; i<nbEclats; i++) {
+      const angle = Math.random()*Math.PI*2;
+      const dist = diam*0.5 + Math.random()*diam*0.4;
+      const ex = Math.cos(angle)*dist, ey = Math.sin(angle)*dist;
+      const eclat = document.createElement("div");
+      eclat.style.cssText = `position:absolute;width:5px;height:5px;border-radius:50%;left:${bx-2.5}px;top:${by-2.5}px;background:#fff;pointer-events:none;`;
+      layer.appendChild(eclat);
+      eclat.animate([
+        { transform:"translate(0,0) scale(1)", opacity:1 },
+        { transform:`translate(${ex}px,${ey}px) scale(0.2)`, opacity:0 },
+      ], { duration:500, easing:"ease-out" }).onfinish = () => eclat.remove();
+    }
+
+    onArrive?.();
+  };
+}
+
 function TabBar({ tab, setTab, isAdmin }) {
+  const F = "'Nunito',sans-serif";
   const tabs = [
     { id:"home",      icon:"🏠", label:"Accueil"   },
     { id:"archive",   icon:"📦", label:"Historique"},
@@ -817,21 +952,81 @@ function TabBar({ tab, setTab, isAdmin }) {
     // #56.3b — onglet admin uniquement, jamais rendu pour un utilisateur non-admin.
     ...(isAdmin ? [{ id:"rejets", icon:"🛠️", label:"Rejets" }] : []),
   ];
+
+  const btnRefs = useRef({});
+  const fxLayerRef = useRef(null);
+  const prevTabRef = useRef(null);
+  const [reducedMotion, setReducedMotion] = useState(
+    () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+  );
+
+  useEffect(() => {
+    const mql = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    if (!mql) return;
+    const onChange = () => setReducedMotion(mql.matches);
+    mql.addEventListener?.("change", onChange);
+    return () => mql.removeEventListener?.("change", onChange);
+  }, []);
+
+  // Rebond + particules + comète : uniquement au CHANGEMENT d'onglet, jamais
+  // au montage initial (prevTabRef démarre à null pour distinguer les deux).
+  // useLayoutEffect (pas useEffect) pour démarrer l'animation avant peinture
+  // et éviter un flash "scale(1.3) statique" avant le rebond.
+  useLayoutEffect(() => {
+    if (prevTabRef.current === null) { prevTabRef.current = tab; return; }
+    const prevId = prevTabRef.current;
+    prevTabRef.current = tab;
+    if (prevId === tab || reducedMotion) return;
+
+    const layer = fxLayerRef.current;
+    const toEl = btnRefs.current[tab];
+    const fromEl = btnRefs.current[prevId];
+    if (!layer || !toEl) return;
+
+    const color = TAB_COLORS[tab] || C.text;
+    const arrivee = () => { runTabBounce(toEl); runTabParticles(layer, toEl, color); };
+    if (fromEl) runTabComet(layer, fromEl, toEl, color, arrivee);
+    else arrivee();
+  }, [tab, reducedMotion]);
+
   return (
-    <div style={{ position:"fixed", bottom:16, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:430, display:"flex", justifyContent:"space-evenly", alignItems:"center", zIndex:50, pointerEvents:"none" }}>
-      {tabs.map(t=>(
-        <button key={t.id} onClick={()=>setTab(t.id)} style={{ border:"none", background:"none", cursor:"pointer", padding:0, display:"flex", flexDirection:"column", alignItems:"center", pointerEvents:"all" }}>
-          <div style={{
-            width:48, height:48, borderRadius:"50%",
-            background: tab===t.id ? C.blueLight : "#fff",
-            display:"flex", alignItems:"center", justifyContent:"center",
-            boxShadow:"0 4px 12px rgba(0,0,0,0.15)",
-            border: tab===t.id ? `2.5px solid ${C.orange}` : "2.5px solid transparent",
-          }}>
-            <span style={{ fontSize:24, filter:tab===t.id?"none":"grayscale(1) opacity(0.4)" }}>{t.icon}</span>
-          </div>
-        </button>
-      ))}
+    <div className="tabBarRoot" style={{ position:"fixed", bottom:16, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:430, display:"flex", justifyContent:"space-evenly", alignItems:"center", zIndex:50, pointerEvents:"none" }}>
+      {tabs.map(t=>{
+        const active = tab===t.id;
+        const color = TAB_COLORS[t.id] || C.text;
+        return (
+          <button key={t.id} onClick={()=>setTab(t.id)} onTouchStart={()=>{}} style={{ border:"none", background:"none", cursor:"pointer", padding:0, display:"flex", flexDirection:"column", alignItems:"center", pointerEvents:"all" }}>
+            <div
+              ref={el => { btnRefs.current[t.id] = el; }}
+              className="tabCircleBtn"
+              style={{
+                width:48, height:48, borderRadius:"50%", boxSizing:"border-box",
+                background: color,
+                border: active ? "5px solid #fff" : "3px solid #fff",
+                display:"flex", alignItems:"center", justifyContent:"center",
+                transform: active ? "scale(1.3)" : "scale(1)",
+                transition: "transform 0.2s ease",
+                // Anneau blanc net via border (couche intermédiaire) ; le néon
+                // (box-shadow) démarre par nature au bord externe du border,
+                // donc toujours à l'extérieur de l'anneau, jamais par-dessus.
+                boxShadow: active
+                  ? (reducedMotion
+                      ? `0 4px 12px rgba(0,0,0,0.15), 0 0 8px 2px ${color}88`
+                      : `0 4px 12px rgba(0,0,0,0.15), 0 0 10px 2px ${color}`)
+                  : "0 4px 12px rgba(0,0,0,0.15)",
+                animation: active && !reducedMotion ? "tabNeonPulse 1.2s ease-in-out infinite" : "none",
+                "--tab-glow": color,
+              }}
+            >
+              <span style={{ fontSize:24 }}>{t.icon}</span>
+            </div>
+            <span style={{ marginTop:4, fontFamily:F, fontSize:10, fontWeight: active?900:700, color: active?color:C.textLight }}>
+              {t.label}
+            </span>
+          </button>
+        );
+      })}
+      <div ref={fxLayerRef} style={{ position:"absolute", inset:0, pointerEvents:"none", overflow:"visible" }} />
     </div>
   );
 }
@@ -5682,6 +5877,9 @@ export default function App() {
       @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
       @keyframes spin   {to{transform:rotate(360deg)}}
       @keyframes popIn  {0%{opacity:0;transform:scale(0.85)}60%{transform:scale(1.04)}100%{opacity:1;transform:scale(1)}}
+      @keyframes tabNeonPulse {0%,100%{box-shadow:0 4px 12px rgba(0,0,0,0.15), 0 0 10px 2px var(--tab-glow)}50%{box-shadow:0 4px 12px rgba(0,0,0,0.15), 0 0 32px 8px var(--tab-glow), 0 0 14px 3px var(--tab-glow)}}
+      .tabCircleBtn:active{transform:scale(0.9) !important;transition:transform 0.1s ease !important;}
+      .tabBarRoot,.tabBarRoot *{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation;}
       input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;}
       textarea:focus,input:focus{outline:none;}
     `}</style>
