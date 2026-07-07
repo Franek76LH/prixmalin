@@ -8,6 +8,18 @@ import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adapt
 import { classerMagasinsPourPanier, calculerEconomiePotentielle } from "./lib/classementPanierCore";
 import ClassementPanierShadow from "./components/dev/ClassementPanierShadow";
 import AdminRejetsCorePanel from "./components/admin/AdminRejetsCorePanel";
+// #56.4 — vrai moteur Core (produits/prix/magasins via la vue prix_comparables),
+// pour le mode debug admin de CompareTab. Distinct du pipeline #58.2
+// (adaptateurPanierPrix/classementPanierCore, lui basé sur price_db legacy),
+// qui n'est ni touché ni réutilisé ici.
+import {
+  construireCiblesComparaison,
+  chargerPrixComparables,
+  faireCorrespondrePrix,
+  regrouperParMagasin,
+  calculerTotauxMagasins,
+  classerMagasins,
+} from "./lib/comparateurCore";
 
 const C = {
   blue:      "#CC0000",   blueLight:  "#FFF0F0",
@@ -3713,11 +3725,15 @@ function distanceKm(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.asin(Math.sqrt(a));
 }
 
-function CompareTab({ items, priceDB, onValidate, searchRadius, userPos }) {
+function CompareTab({ items, priceDB, onValidate, searchRadius, userPos, isAdmin, modeCoreActif }) {
   const F = "'Nunito',sans-serif";
 
   const [gpsError, setGpsError] = useState(false);
   const [storesGeo, setStoresGeo] = useState([]);
+
+  // #56.4 — mode debug Core, admin uniquement. isAdmin est réutilisé tel
+  // quel depuis App.jsx (#56.3b) : aucune nouvelle détection admin ici.
+  const utiliserCoreDebug = isAdmin === true && modeCoreActif === true;
 
   useEffect(()=>{
     supabase.from('stores').select('id, name, enseigne, latitude, longitude')
@@ -3835,6 +3851,93 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos }) {
     };
   }, [items, priceDB, storesGeo, userPos, searchRadius, vueDev]);
 
+  // #56.4 — vrai pipeline Core (produits/prix/magasins via prix_comparables),
+  // uniquement quand utiliserCoreDebug est vrai. Séquence reprise à l'identique
+  // de ShadowCompareDiagnostic.jsx (mêmes fonctions, même ordre, même garde
+  // d'annulation) : on ne réinvente aucune logique de matching/agrégation.
+  const [coreResultat,   setCoreResultat]   = useState(null);
+  const [coreChargement, setCoreChargement] = useState(false);
+  const [coreErreur,     setCoreErreur]     = useState(null);
+
+  useEffect(() => {
+    if (!utiliserCoreDebug) { setCoreResultat(null); setCoreErreur(null); return; }
+    let annule = false;
+    (async () => {
+      try {
+        setCoreChargement(true);
+        setCoreErreur(null);
+        const { cibles, exclusions } = construireCiblesComparaison(items);
+        const produitIds = [...new Set(cibles.map(c => c.produit_id))];
+        const cutoffISO = new Date(Date.now() - STALE_DAYS * 86400000).toISOString();
+        const prixBruts = await chargerPrixComparables(produitIds, {});
+        if (annule) return;
+        const correspondancesFraiches = faireCorrespondrePrix(cibles, prixBruts, { userPos, searchRadius, staleCutoffISO: cutoffISO });
+        const regroupement = regrouperParMagasin(correspondancesFraiches);
+        const totauxParMagasin = calculerTotauxMagasins(regroupement, cibles);
+        const classement = classerMagasins(totauxParMagasin);
+        if (!annule) setCoreResultat({ classement, regroupement, exclusions, cibles });
+      } catch (err) {
+        if (!annule) { setCoreErreur(err?.message || 'Erreur inconnue'); setCoreResultat(null); }
+      } finally {
+        if (!annule) setCoreChargement(false);
+      }
+    })();
+    return () => { annule = true; };
+  }, [utiliserCoreDebug, items, userPos, searchRadius]);
+
+  // Adaptateur — résultat comparateurCore.js → même forme que analysis/ranked
+  // legacy (ci-dessous), pour alimenter les cartes existantes sans les
+  // modifier. N'invente jamais de prix : un magasin sans correspondance
+  // n'apparaît simplement pas dans byStore pour cet article (identique au
+  // comportement legacy quand priceDB n'a rien).
+  const coreAdapte = useMemo(() => {
+    if (!utiliserCoreDebug || !coreResultat) return null;
+    const { classement, regroupement, exclusions, cibles } = coreResultat;
+
+    const parItemMagasin = new Map();
+    Object.entries(regroupement).forEach(([magasinId, lignes]) => {
+      lignes.forEach(ligne => {
+        if (!parItemMagasin.has(ligne.itemId)) parItemMagasin.set(ligne.itemId, {});
+        const prixLigne = ligne.prix;
+        parItemMagasin.get(ligne.itemId)[magasinId] = {
+          ...prixLigne,
+          price: prixLigne.prix_total,
+          date: prixLigne.observe_le,
+          store_address: prixLigne.adresse_magasin || '',
+        };
+      });
+    });
+
+    const analysisCore = items.map(item => ({
+      item,
+      byStore: parItemMagasin.get(item.id) || {},
+    }));
+
+    const rankedCore = classement.map(entree => {
+      const premierPrix = entree.articlesTrouves[0]?.prix;
+      return {
+        id: entree.magasinId,
+        name: premierPrix?.nom_magasin || 'Magasin',
+        logo: STORES.find(s => s.id === premierPrix?.slug_enseigne)?.logo || '🏪',
+        total: entree.total,
+        found: entree.found,
+        missing: entree.articlesManquants.map(c => c.item.product),
+      };
+    });
+
+    // "Manquant partout" en mode Core : exclu du pipeline (alias/format non
+    // démontrable) OU cible reconnue mais 0 correspondance dans aucun magasin.
+    const idsAvecCorrespondance = new Set();
+    Object.values(regroupement).forEach(lignes => lignes.forEach(l => idsAvecCorrespondance.add(l.itemId)));
+    const missingGlobalCore = items.filter(item => {
+      const cible = cibles.find(c => c.itemId === item.id);
+      if (!cible) return true;
+      return !idsAvecCorrespondance.has(item.id);
+    });
+
+    return { analysis: analysisCore, ranked: rankedCore, missingGlobal: missingGlobalCore, exclusions };
+  }, [utiliserCoreDebug, coreResultat, items]);
+
   if(items.length===0) return (
     <div style={{ padding:"40px 20px 100px", textAlign:"center" }}>
       <div style={{ fontSize:60, marginBottom:14 }}>🏪</div>
@@ -3907,12 +4010,33 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos }) {
   const totalItems   = items.reduce((a,i)=>a+i.qty,0);
   const missingGlobal= items.filter(item=>!priceDB.some(p=>itemMatchesPrice(item,p)));
 
+  // #56.4 — variables "Affichée" : legacy par défaut, Core uniquement si
+  // utiliserCoreDebug. Tout ce qui précède (analysis, ranked, best,
+  // secondBest, missingGlobal...) reste inchangé et continue d'exister —
+  // utiliserCoreDebug===false garde donc un comportement identique à avant.
+  const analysisAffichee       = utiliserCoreDebug ? (coreAdapte?.analysis ?? []) : analysis;
+  const rankedAffiche          = utiliserCoreDebug ? (coreAdapte?.ranked ?? []) : ranked;
+  const bestAffiche            = rankedAffiche[0];
+  const secondBestAffiche      = rankedAffiche[1] ?? null;
+  const worstTotalAffiche      = rankedAffiche.length > 1 ? rankedAffiche[rankedAffiche.length - 1].total : 0;
+  const savingsVsSecondAffiche = (bestAffiche && secondBestAffiche) ? secondBestAffiche.total - bestAffiche.total : 0;
+  const bestStoreEntryAffiche  = bestAffiche
+    ? analysisAffichee
+        .map(({ byStore }) => byStore[bestAffiche.id])
+        .filter(p => p?.store_address?.trim())
+        .sort((a, b) => new Date(b.date) - new Date(a.date))[0] ?? null
+    : null;
+  const mapsQueryAffichee   = bestAffiche ? `${bestAffiche.name}${bestStoreEntryAffiche ? ' ' + bestStoreEntryAffiche.store_address : ''}` : '';
+  const mapsUrlAffiche      = bestAffiche ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapsQueryAffichee)}` : '#';
+  const maxSavingsAffiche   = bestAffiche ? worstTotalAffiche - bestAffiche.total : 0;
+  const missingGlobalAffiche = utiliserCoreDebug ? (coreAdapte?.missingGlobal ?? []) : missingGlobal;
+
   const [lastVerified, setLastVerified] = useState(null);
   useEffect(() => {
-    if (!best) { setLastVerified(null); return; }
+    if (!bestAffiche) { setLastVerified(null); return; }
     let mostRecent = null;
-    analysis.forEach(({ byStore }) => {
-      const p = byStore[best.id];
+    analysisAffichee.forEach(({ byStore }) => {
+      const p = byStore[bestAffiche.id];
       if (p && (!mostRecent || new Date(p.date) > new Date(mostRecent.date))) mostRecent = p;
     });
     if (!mostRecent?.user_id) { setLastVerified(null); return; }
@@ -3922,7 +4046,7 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos }) {
         const dateLabel = days === 0 ? "aujourd'hui" : days === 1 ? "hier" : `il y a ${days} jours`;
         setLastVerified({ dateLabel, pseudo: data?.pseudo || 'un utilisateur' });
       });
-  }, [best?.id]);
+  }, [bestAffiche?.id]);
 
   return (
     <div style={{ padding:"16px 16px 110px" }}>
@@ -3934,13 +4058,28 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos }) {
           <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:C.white }}>
             {items.length} produit{items.length>1?"s":""} · {totalItems} article{totalItems>1?"s":""}
           </div>
-          {maxSavings>0.05 && (
+          {maxSavingsAffiche>0.05 && (
             <div style={{ fontFamily:F, fontSize:12, color:"rgba(255,255,255,0.75)", marginTop:2 }}>
-              Jusqu'à <strong style={{ color:"#FFD700" }}>{maxSavings.toFixed(2)} €</strong> d'écart entre magasins
+              Jusqu'à <strong style={{ color:"#FFD700" }}>{maxSavingsAffiche.toFixed(2)} €</strong> d'écart entre magasins
             </div>
           )}
         </div>
       </div>
+
+      {/* #56.4 — badge visible uniquement si isAdmin ET modeCoreActif, jamais sinon */}
+      {utiliserCoreDebug && (
+        <div style={{ background:"#8E44AD", borderRadius:10, padding:"8px 14px", marginBottom:14, textAlign:"center", fontFamily:F, fontWeight:800, fontSize:12, color:"#fff", letterSpacing:"0.03em" }}>
+          🔧 MODE CORE — debug
+        </div>
+      )}
+      {utiliserCoreDebug && coreChargement && (
+        <div style={{ textAlign:"center", padding:"20px", fontFamily:F, fontSize:13, color:C.textLight }}>Chargement du moteur Core…</div>
+      )}
+      {utiliserCoreDebug && coreErreur && (
+        <div style={{ background:"#FEE", borderRadius:12, padding:"14px", marginBottom:14, fontFamily:F, fontSize:13, color:C.red, fontWeight:700 }}>
+          ⚠️ Erreur moteur Core : {coreErreur}
+        </div>
+      )}
 
       {/* #58.2.B étape 2 — interrupteur dev uniquement, n'existe pas en prod */}
       {import.meta.env.DEV && (
@@ -3960,10 +4099,10 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos }) {
         </div>
       )}
 
-      {vueDev === 'actuelle' && (
+      {vueDev === 'actuelle' && !(utiliserCoreDebug && coreChargement) && (
         <>
       {/* Aucun prix */}
-      {ranked.length===0 && (
+      {rankedAffiche.length===0 && (
         <div style={{ background:C.orangeLight, borderRadius:14, padding:"24px 20px", textAlign:"center", border:`2px dashed ${C.orange}` }}>
           <div style={{ fontSize:40, marginBottom:10 }}>💰</div>
           <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:C.orange, marginBottom:6 }}>Aucun prix correspondant</div>
@@ -3972,11 +4111,11 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos }) {
       )}
 
       {/* Produits sans aucun prix */}
-      {missingGlobal.length>0 && ranked.length>0 && (
+      {missingGlobalAffiche.length>0 && rankedAffiche.length>0 && (
         <div style={{ background:"#FFF8E6", borderRadius:12, padding:"12px 14px", marginBottom:14, border:`1px solid ${C.yellow}` }}>
           <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:"#7A6000", marginBottom:6 }}>⚠️ Aucun prix enregistré pour :</div>
           <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-            {missingGlobal.map(item=>(
+            {missingGlobalAffiche.map(item=>(
               <span key={item.id} style={{ background:C.yellow, borderRadius:99, padding:"3px 10px", fontFamily:F, fontSize:12, fontWeight:700, color:C.text }}>
                 {item.brand?`${item.brand} · `:""}{item.product} {item.format}
               </span>
@@ -3985,7 +4124,7 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos }) {
         </div>
       )}
 
-      {ranked.length>0 && (
+      {rankedAffiche.length>0 && (
         <>
           {/* ── MEILLEUR MAGASIN (grand) ── */}
           <div style={{ background:"linear-gradient(145deg,#CC0000,#E00000)", borderRadius:18, overflow:"hidden", marginBottom:16, boxShadow:"0 10px 32px rgba(204,0,0,0.45)", animation:"slideIn 0.3s ease both" }}>
@@ -3993,28 +4132,28 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos }) {
             {/* Badge + Prix total */}
             <div style={{ padding:"18px 18px 0", display:"flex", alignItems:"flex-start", justifyContent:"space-between" }}>
               <div style={{ background:C.orange, borderRadius:8, padding:"4px 12px", fontFamily:F, fontWeight:900, fontSize:11, color:C.white, letterSpacing:"0.04em" }}>
-                🥇 {best.missing.length > 0 ? "MEILLEUR PRIX PARTIEL" : "MEILLEUR PRIX"}
+                🥇 {bestAffiche.missing.length > 0 ? "MEILLEUR PRIX PARTIEL" : "MEILLEUR PRIX"}
               </div>
               <div style={{ textAlign:"right" }}>
-                <div style={{ fontFamily:F, fontWeight:900, fontSize:34, color:C.white, lineHeight:1 }}>{best.total.toFixed(2)} €</div>
-                {best.missing.length > 0 && (
+                <div style={{ fontFamily:F, fontWeight:900, fontSize:34, color:C.white, lineHeight:1 }}>{bestAffiche.total.toFixed(2)} €</div>
+                {bestAffiche.missing.length > 0 && (
                   <div style={{ fontFamily:F, fontSize:11, color:"#FFD700", fontWeight:700, marginTop:4 }}>
-                    Prix pour {best.found} article{best.found>1?"s":""} sur {items.length} — panier incomplet
+                    Prix pour {bestAffiche.found} article{bestAffiche.found>1?"s":""} sur {items.length} — panier incomplet
                   </div>
                 )}
-                {maxSavings>0.05 && <div style={{ fontFamily:F, fontSize:11, color:"rgba(255,255,255,0.6)", marginTop:2 }}>−{maxSavings.toFixed(2)} € vs le + cher</div>}
+                {maxSavingsAffiche>0.05 && <div style={{ fontFamily:F, fontSize:11, color:"rgba(255,255,255,0.6)", marginTop:2 }}>−{maxSavingsAffiche.toFixed(2)} € vs le + cher</div>}
               </div>
             </div>
 
             {/* Nom magasin */}
             <div style={{ padding:"10px 18px 14px" }}>
               <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
-                <span style={{ fontSize:26 }}>{best.logo}</span>
+                <span style={{ fontSize:26 }}>{bestAffiche.logo}</span>
                 <div>
-                  <div style={{ fontFamily:F, fontWeight:900, fontSize:20, color:C.white }}>{best.name}</div>
+                  <div style={{ fontFamily:F, fontWeight:900, fontSize:20, color:C.white }}>{bestAffiche.name}</div>
                   <div style={{ fontFamily:F, fontSize:12, color:"rgba(255,255,255,0.6)" }}>
-                    {best.found}/{items.length} produit{items.length>1?"s":""} trouvé{best.found>1?"s":""}
-                    {best.missing.length>0 && <span style={{ color:"#FFD700" }}> · {best.missing.length} manquant{best.missing.length>1?"s":""}</span>}
+                    {bestAffiche.found}/{items.length} produit{items.length>1?"s":""} trouvé{bestAffiche.found>1?"s":""}
+                    {bestAffiche.missing.length>0 && <span style={{ color:"#FFD700" }}> · {bestAffiche.missing.length} manquant{bestAffiche.missing.length>1?"s":""}</span>}
                   </div>
                   {lastVerified && (
                     <div style={{ fontFamily:F, fontSize:11, color:"rgba(255,255,255,0.85)", fontWeight:500, marginTop:3 }}>
@@ -4023,7 +4162,7 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos }) {
                   )}
                 </div>
               </div>
-              <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
+              <a href={mapsUrlAffiche} target="_blank" rel="noopener noreferrer"
                 style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, background:"#fff", border:"2px solid #D32F2F", borderRadius:20, padding:"10px 18px", fontFamily:F, fontWeight:700, fontSize:14, color:"#D32F2F", textDecoration:"none", boxShadow:"0 2px 6px rgba(0,0,0,0.15)" }}>
                 📍 Y aller
               </a>
@@ -4031,8 +4170,8 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos }) {
 
             {/* Liste des articles */}
             <div style={{ background:"rgba(0,0,0,0.18)", marginBottom:12 }}>
-              {analysis.map(({item,byStore})=>{
-                const p     = byStore[best.id];
+              {analysisAffichee.map(({item,byStore})=>{
+                const p     = byStore[bestAffiche.id];
                 const total = p ? p.price*item.qty : null;
                 return (
                   <div key={item.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 18px", borderBottom:"1px solid rgba(255,255,255,0.07)" }}>
@@ -4062,26 +4201,26 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos }) {
 
             {/* Bouton valider */}
             <div style={{ padding:"0 12px 16px" }}>
-              <button onClick={()=>onValidate(best, savingsVsSecond)} style={{ width:"100%", padding:"15px", border:"none", borderRadius:12, background:C.orange, fontFamily:F, fontWeight:900, fontSize:16, color:"#111", cursor:"pointer", boxShadow:"0 4px 16px rgba(0,0,0,0.25)" }}>
-                ✅ Je fais mes courses chez {best.name}
+              <button onClick={()=>onValidate(bestAffiche, savingsVsSecondAffiche)} style={{ width:"100%", padding:"15px", border:"none", borderRadius:12, background:C.orange, fontFamily:F, fontWeight:900, fontSize:16, color:"#111", cursor:"pointer", boxShadow:"0 4px 16px rgba(0,0,0,0.25)" }}>
+                ✅ Je fais mes courses chez {bestAffiche.name}
               </button>
 
-              {secondBest && savingsVsSecond > 0 && (
+              {secondBestAffiche && savingsVsSecondAffiche > 0 && (
                 <div style={{ fontFamily:F, fontSize:12, color:"rgba(255,255,255,0.75)", textAlign:"center", marginTop:10 }}>
-                  Avec cette liste de courses, aujourd'hui <strong style={{ color:"#FFD700" }}>{best.name}</strong> est le plus malin · tu économises <strong style={{ color:"#FFD700" }}>{savingsVsSecond.toFixed(2)} €</strong>
+                  Avec cette liste de courses, aujourd'hui <strong style={{ color:"#FFD700" }}>{bestAffiche.name}</strong> est le plus malin · tu économises <strong style={{ color:"#FFD700" }}>{savingsVsSecondAffiche.toFixed(2)} €</strong>
                 </div>
               )}
 
             </div>
 
             {/* Suggestions pour produits manquants — après le bouton */}
-            {analysis.some(({byStore})=>!byStore[best.id]&&Object.keys(byStore).length>0) && (
+            {analysisAffichee.some(({byStore})=>!byStore[bestAffiche.id]&&Object.keys(byStore).length>0) && (
               <div style={{ padding:"0 12px 16px", display:"flex", flexDirection:"column", gap:6 }}>
-                {analysis
-                  .filter(({byStore})=>!byStore[best.id]&&Object.keys(byStore).length>0)
+                {analysisAffichee
+                  .filter(({byStore})=>!byStore[bestAffiche.id]&&Object.keys(byStore).length>0)
                   .map(({item,byStore})=>{
                     const alt = Object.entries(byStore)
-                      .map(([sid,pr])=>({ store:STORES.find(s=>s.id===sid), pr }))
+                      .map(([sid,pr])=>({ store: utiliserCoreDebug ? { logo:'🏪', name: pr?.nom_magasin || 'Magasin' } : STORES.find(s=>s.id===sid), pr }))
                       .sort((a,b)=>a.pr.price-b.pr.price)[0];
                     return (
                       <div key={item.id} style={{ background:"rgba(255,255,255,0.1)", borderRadius:8, padding:"8px 12px", display:"flex", alignItems:"center", gap:8 }}>
@@ -4917,6 +5056,11 @@ export default function App() {
   // par accident : false pendant le chargement, false sans session, false
   // sur toute erreur RPC).
   const [isAdmin, setIsAdmin] = useState(false);
+  // #56.4 — mode debug Comparer sur le moteur Core, admin uniquement, jamais
+  // persisté (aucun localStorage, aucun paramètre URL) : repasse à false à
+  // chaque rechargement de page. N'a d'effet que combiné à isAdmin===true,
+  // vérifié dans CompareTab (utiliserCoreDebug), jamais ici.
+  const [modeCoreActif, setModeCoreActif] = useState(false);
   const [tab, setTab]           = useState("home");
   const [items, setItems]       = useState([]);
   const [priceDB, setPriceDB]     = useState([]);
@@ -5566,7 +5710,7 @@ export default function App() {
           {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout}/>}
           {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} setTab={setTab}/>}
-          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius} userPos={userPos}/>}
+          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius} userPos={userPos} isAdmin={isAdmin} modeCoreActif={modeCoreActif}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
           {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;
@@ -5585,7 +5729,7 @@ export default function App() {
           }}/>}
           {loaded && tab==="economies" && <EconomiesTab priceDB={priceDB} archives={archives} items={items} setTab={setTab}/>}
           {/* #56.3b — jamais rendu pour un non-admin, même si tab="rejets" traîne en state */}
-          {loaded && isAdmin && tab==="rejets" && <AdminRejetsCorePanel/>}
+          {loaded && isAdmin && tab==="rejets" && <AdminRejetsCorePanel modeCoreActif={modeCoreActif} onToggleModeCore={setModeCoreActif}/>}
         </div>
         <TabBar tab={tab} setTab={setTab} isAdmin={isAdmin}/>
         {appToast && <Toast msg={appToast.msg} ok={appToast.ok}/>}

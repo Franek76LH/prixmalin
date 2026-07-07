@@ -44,7 +44,7 @@ function detailPourMotif(rejet) {
   return '—';
 }
 
-export default function AdminRejetsCorePanel() {
+export default function AdminRejetsCorePanel({ modeCoreActif, onToggleModeCore }) {
   const [afficherTraites, setAfficherTraites] = useState(false);
   const [rejets, setRejets] = useState([]);
   const [chargement, setChargement] = useState(true);
@@ -87,6 +87,13 @@ export default function AdminRejetsCorePanel() {
       <div style={{ fontFamily: F, fontSize: 12, color: '#777', marginBottom: 16 }}>
         Panneau admin — #56.3a
       </div>
+
+      {/* #56.4 — état porté par App.jsx (modeCoreActif), pas un state local :
+          c'est ce qui permet à cette case d'influencer l'écran Comparer. */}
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontFamily: F, fontSize: 13, fontWeight: 700, color: '#8E44AD', cursor: 'pointer' }}>
+        <input type="checkbox" checked={!!modeCoreActif} onChange={e => onToggleModeCore(e.target.checked)} />
+        🔧 Voir le comparateur en mode Core (debug)
+      </label>
 
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, fontFamily: F, fontSize: 13, color: '#333', cursor: 'pointer' }}>
         <input type="checkbox" checked={afficherTraites} onChange={e => setAfficherTraites(e.target.checked)} />
