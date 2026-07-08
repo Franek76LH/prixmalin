@@ -12,8 +12,20 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
+import { chargerEtCalculerEconomiesConfirmeesCore } from '../../lib/economiesCoreConfirmees';
 
 const F = "'Nunito',sans-serif";
+
+// #56.5.B complément — jeu de lignes fictif pour le bouton dev "Simuler
+// tickets Core". Mix volontaire : une ligne moins chère que le marché, une
+// plus chère, une quasi neutre — le total n'est pas artificiellement positif.
+// Format identique à celui produit par chargerEtCalculerEconomiesConfirmeesCore
+// après lecture Supabase : aucune logique parallèle nécessaire côté calcul.
+const LIGNES_SIMULEES_DEV = [
+  { ligneTicketId: 'sim-1', produitId: 'sim-lait',  magasinId: 'sim-magasin', prixPaye: 0.95, prixReferenceMarche: 1.15 },
+  { ligneTicketId: 'sim-2', produitId: 'sim-cafe',  magasinId: 'sim-magasin', prixPaye: 4.80, prixReferenceMarche: 4.20 },
+  { ligneTicketId: 'sim-3', produitId: 'sim-pates', magasinId: 'sim-magasin', prixPaye: 1.10, prixReferenceMarche: 1.12 },
+];
 
 const COULEUR_MOTIF = {
   magasin_non_resolu: '#CC0000',
@@ -49,6 +61,22 @@ export default function AdminRejetsCorePanel({ modeCoreActif, onToggleModeCore }
   const [rejets, setRejets] = useState([]);
   const [chargement, setChargement] = useState(true);
   const [erreur, setErreur] = useState(null);
+
+  // #56.5.B — économies Core confirmées. lignesInjectees===null => données
+  // réelles Supabase ; sinon => simulation dev, aucune requête Supabase.
+  const [economies, setEconomies] = useState(null);
+  const [chargementEconomies, setChargementEconomies] = useState(false);
+  const [lignesInjectees, setLignesInjectees] = useState(null);
+
+  useEffect(() => {
+    if (!modeCoreActif) return;
+    let annule = false;
+    setChargementEconomies(true);
+    chargerEtCalculerEconomiesConfirmeesCore(lignesInjectees ? { lignesInjectees } : {})
+      .then(resultat => { if (!annule) setEconomies(resultat); })
+      .finally(() => { if (!annule) setChargementEconomies(false); });
+    return () => { annule = true; };
+  }, [modeCoreActif, lignesInjectees]);
 
   useEffect(() => {
     let annule = false;
@@ -94,6 +122,66 @@ export default function AdminRejetsCorePanel({ modeCoreActif, onToggleModeCore }
         <input type="checkbox" checked={!!modeCoreActif} onChange={e => onToggleModeCore(e.target.checked)} />
         🔧 Voir le comparateur en mode Core (debug)
       </label>
+
+      {/* #56.5.B — économies Core confirmées, réutilise le toggle ci-dessus */}
+      {modeCoreActif && (
+        <div style={{ background: '#F6F0FA', border: '1px solid #E0D0EE', borderRadius: 10, padding: '12px 14px', marginBottom: 16 }}>
+          <div style={{ fontFamily: F, fontWeight: 800, fontSize: 13, color: '#8E44AD', marginBottom: 8 }}>
+            💶 Économies Core confirmées (debug)
+          </div>
+
+          {chargementEconomies && (
+            <div style={{ fontFamily: F, fontSize: 12, color: '#777' }}>Calcul en cours…</div>
+          )}
+
+          {!chargementEconomies && economies && (
+            <>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+                <span style={{ fontFamily: F, fontWeight: 900, fontSize: 20, color: economies.total >= 0 ? '#00B341' : '#CC0000' }}>
+                  {economies.total >= 0 ? '+' : ''}{economies.total.toFixed(2)} €
+                </span>
+                {economies.simule && (
+                  <span style={{ fontFamily: F, fontSize: 11, fontStyle: 'italic', color: '#8E44AD' }}>(données simulées)</span>
+                )}
+              </div>
+
+              {economies.lignes.length === 0 && (
+                <div style={{ fontFamily: F, fontSize: 12, color: '#777', marginBottom: 8 }}>
+                  Aucune ligne confirmée (source='ticket') en base pour l'instant.
+                </div>
+              )}
+
+              {economies.lignes.map(ligne => (
+                <div key={ligne.ligneTicketId} style={{ display: 'flex', justifyContent: 'space-between', fontFamily: F, fontSize: 12, color: '#333', padding: '4px 0', borderBottom: '1px solid #EBDCF5' }}>
+                  <span>{ligne.produitId} — payé {ligne.prixPaye.toFixed(2)} € / marché {ligne.prixReferenceMarche != null ? ligne.prixReferenceMarche.toFixed(2) + ' €' : '—'}</span>
+                  <span style={{ fontWeight: 800, color: ligne.economie == null ? '#999' : ligne.economie >= 0 ? '#00B341' : '#CC0000' }}>
+                    {ligne.economie == null ? '—' : `${ligne.economie >= 0 ? '+' : ''}${ligne.economie.toFixed(2)} €`}
+                  </span>
+                </div>
+              ))}
+            </>
+          )}
+
+          {import.meta.env.DEV && (
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <button
+                onClick={() => setLignesInjectees(LIGNES_SIMULEES_DEV)}
+                style={{ flex: 1, padding: '8px 10px', borderRadius: 8, border: 'none', background: '#8E44AD', color: '#fff', fontFamily: F, fontWeight: 800, fontSize: 12, cursor: 'pointer' }}
+              >
+                🧪 Simuler tickets Core
+              </button>
+              {lignesInjectees && (
+                <button
+                  onClick={() => setLignesInjectees(null)}
+                  style={{ flex: 1, padding: '8px 10px', borderRadius: 8, border: '1px solid #8E44AD', background: '#fff', color: '#8E44AD', fontFamily: F, fontWeight: 800, fontSize: 12, cursor: 'pointer' }}
+                >
+                  Revenir aux données réelles
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, fontFamily: F, fontSize: 13, color: '#333', cursor: 'pointer' }}>
         <input type="checkbox" checked={afficherTraites} onChange={e => setAfficherTraites(e.target.checked)} />
