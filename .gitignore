@@ -26,3 +26,6 @@ dist-ssr
 
 # Supabase
 supabase/.temp/
+
+# #66 — script d'import contient une clé service_role, jamais commitée
+scripts/.env
