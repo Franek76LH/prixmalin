@@ -8,6 +8,8 @@ import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adapt
 import { classerMagasinsPourPanier, calculerEconomiePotentielle } from "./lib/classementPanierCore";
 import ClassementPanierShadow from "./components/dev/ClassementPanierShadow";
 import AdminRejetsCorePanel from "./components/admin/AdminRejetsCorePanel";
+// #65 — bandeau de mise à jour PWA (pont vers registerSW dans main.jsx)
+import { onNeedRefresh, applyUpdate } from "./lib/swUpdate";
 // #56.5.A — double écriture Core, fire-and-forget, invisible pour l'utilisateur
 import { envoyerTicketCore, envoyerPrixManuelCore } from "./lib/doubleEcritureCore";
 // #56.4 — vrai moteur Core (produits/prix/magasins via la vue prix_comparables),
@@ -5237,6 +5239,10 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash
                 <img src="/menu-deconnexion.png" alt="" width={32} height={32} style={{ borderRadius:6, flexShrink:0 }} />
                 <span style={{ fontFamily:F, fontWeight:700, fontSize:14, color:"#CC0000" }}>Se Déconnecter</span>
               </div>
+              {/* #66 — version SemVer, source unique package.json via __APP_VERSION__ (vite.config.js), jamais en dur ici */}
+              <div style={{ textAlign:"center", padding:"8px 0 10px" }}>
+                <span style={{ fontFamily:F, fontSize:10, color:C.gray }}>PrixMalin v{__APP_VERSION__}</span>
+              </div>
             </div>
           )}
         </div>
@@ -5408,6 +5414,12 @@ export default function App() {
   // chaque rechargement de page. N'a d'effet que combiné à isAdmin===true,
   // vérifié dans CompareTab (utiliserCoreDebug), jamais ici.
   const [modeCoreActif, setModeCoreActif] = useState(false);
+
+  // #65 — bandeau de mise à jour. needRefresh vient de registerSW (main.jsx,
+  // hors arbre React) via le pont swUpdate.js ; jamais mis à jour tout seul.
+  const [needRefresh, setNeedRefresh] = useState(false);
+  useEffect(() => onNeedRefresh(() => setNeedRefresh(true)), []);
+
   const [tab, setTab]           = useState("home");
   const [items, setItems]       = useState([]);
   const [priceDB, setPriceDB]     = useState([]);
@@ -6107,6 +6119,16 @@ export default function App() {
   return (
     <>
       {globalStyle}
+      {/* #65 — bandeau non bloquant, jamais au-dessus de la TabBar (bottom)
+          ni du bouton Flasher (centre HomeTab) : ancré en haut du viewport. */}
+      {needRefresh && (
+        <div style={{ position:"fixed", top:0, left:0, right:0, zIndex:600, display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, padding:"10px 16px", background:C.blue, boxShadow:"0 2px 10px rgba(0,0,0,0.25)" }}>
+          <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:"#fff" }}>🔄 Nouvelle version disponible</span>
+          <button onClick={() => applyUpdate()} style={{ padding:"6px 14px", borderRadius:20, border:"none", background:"#fff", color:C.blue, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:12, cursor:"pointer", flexShrink:0 }}>
+            Mettre à jour
+          </button>
+        </div>
+      )}
       <div style={{ minHeight:"100vh", background:C.bg, maxWidth:430, margin:"0 auto" }}>
         {tab !== "home" && (
           <Header tab={tab} itemCount={items.length} userEmail={session.user.email} displayName={pseudo} onLogout={handleLogout}
