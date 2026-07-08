@@ -5023,7 +5023,49 @@ function AutresOptionsSheet({ onClose, onBack, onGalleryImport, onManualEntry })
 }
 
 // ── HOME TAB ─────────────────────────────────────────────────────────────────
-function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash, archives = [], pseudo, onStats, onMesPrix, onFaq, onSignOut }) {
+// #64.1 — animation pure d'affichage, aucun calcul d'économie touché ici.
+// Roulement d'un montant vers un autre, easing décéléré (rapide→doux).
+function animateAmountRoll(from, to, duration, onFrame, onDone) {
+  const start = performance.now();
+  const ease = t => 1 - Math.pow(1 - t, 3);
+  function step(now) {
+    const t = Math.min(1, (now - start) / duration);
+    onFrame(from + (to - from) * ease(t));
+    if (t < 1) requestAnimationFrame(step);
+    else onDone?.();
+  }
+  requestAnimationFrame(step);
+}
+
+function runConfettiRain(layer, onDone) {
+  if (!layer) { onDone?.(); return; }
+  const COLORS = ["#fff", "#F5C200", "#FF7A00", "#4A90D9", "#FF4FA3", "#00B341", "#E5181B"];
+  const N = 160;
+  const vw = window.innerWidth, vh = window.innerHeight;
+  for (let i = 0; i < N; i++) {
+    setTimeout(() => {
+      const size   = 8 + Math.random()*14;
+      const isRect = Math.random() < 0.5;
+      const color  = COLORS[Math.floor(Math.random()*COLORS.length)];
+      const startX = Math.random()*vw;
+      const drift  = (Math.random()-0.5)*220;
+      const fallMs = 1600 + Math.random()*1400;
+      const rot0   = Math.random()*360;
+      const rot1   = rot0 + (Math.random()<0.5?1:-1)*(360+Math.random()*360);
+      const el = document.createElement("div");
+      el.style.cssText = `position:absolute;left:${startX}px;top:-20px;width:${size}px;height:${isRect?size*0.5:size}px;background:${color};${isRect?"":"border-radius:50%;"}pointer-events:none;`;
+      layer.appendChild(el);
+      el.animate([
+        { transform:`translate(0,0) rotate(${rot0}deg)`,                 opacity:1, offset:0    },
+        { transform:`translate(${drift}px,${vh+40}px) rotate(${rot1}deg)`, opacity:1, offset:0.85 },
+        { transform:`translate(${drift}px,${vh+40}px) rotate(${rot1}deg)`, opacity:0, offset:1    },
+      ], { duration:fallMs, easing:"cubic-bezier(.4,0,.6,1)" }).onfinish = () => el.remove();
+    }, Math.random()*500);
+  }
+  setTimeout(() => onDone?.(), 3600);
+}
+
+function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash, archives = [], pseudo, onStats, onMesPrix, onFaq, onSignOut, pendingCagnotte, onConsumeCagnotteCelebration, pendingPotential, onConsumePotentialCelebration }) {
   const F = "'Nunito',sans-serif";
   const unchecked = items.filter(i => !i.checked).length;
   const members   = circles.filter(c => c.status === 'accepted');
@@ -5031,6 +5073,93 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash
   const scannedArchives = archives.filter(a => a.ticket_scanned && a.realized_saving != null);
   const cagnotteTotal   = scannedArchives.reduce((a, arc) => a + (arc.realized_saving || 0), 0);
   const potentialTotal  = archives.reduce((a, arc) => a + (arc.potential_saving || 0), 0);
+
+  // #64.1 — célébration purement visuelle. La détection du CHANGEMENT vit
+  // maintenant au niveau racine (pendingCagnotte/pendingPotential, props :
+  // survit aux montages/démontages de HomeTab quand on change d'onglet).
+  // HomeTab se contente de JOUER la célébration en attente si elle existe
+  // (au montage, ou en direct si elle arrive pendant qu'il est déjà affiché),
+  // puis prévient la racine pour qu'elle l'efface (jouée une seule fois).
+  // N'observe/ne modifie aucun calcul d'économie.
+  const [displayCagnotte, setDisplayCagnotte]   = useState(() => pendingCagnotte ? pendingCagnotte.from : cagnotteTotal);
+  const [displayPotential, setDisplayPotential] = useState(() => pendingPotential ? pendingPotential.from : potentialTotal);
+  const [hideRealCagnotte, setHideRealCagnotte] = useState(false);
+  const cagnotteRealRef  = useRef(null);
+  const estimeesRef      = useRef(null);
+  const fxLayerRef       = useRef(null);
+  const confettiBusyRef  = useRef(false);
+  const [reducedMotion, setReducedMotion] = useState(
+    () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+  );
+
+  useEffect(() => {
+    const mql = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    if (!mql) return;
+    const onChange = () => setReducedMotion(mql.matches);
+    mql.addEventListener?.("change", onChange);
+    return () => mql.removeEventListener?.("change", onChange);
+  }, []);
+
+  // "Confirmées" — roulement + pop géant (échappe à overflow:hidden via clone
+  // fixed) + pluie de confettis plein écran. Se joue dès qu'une célébration
+  // en attente existe (au montage si elle s'est accumulée pendant que
+  // HomeTab n'était pas affiché, ou immédiatement si on est déjà dessus).
+  useEffect(() => {
+    if (!pendingCagnotte) return;
+    const { from, to } = pendingCagnotte;
+    if (from === to) { onConsumeCagnotteCelebration?.(); return; }
+    if (reducedMotion) { setDisplayCagnotte(to); onConsumeCagnotteCelebration?.(); return; }
+
+    const rect = cagnotteRealRef.current?.getBoundingClientRect();
+    let popEl = null;
+    if (rect && fxLayerRef.current) {
+      const cx = rect.left + rect.width/2, cy = rect.top + rect.height/2;
+      setHideRealCagnotte(true);
+      popEl = document.createElement("div");
+      popEl.style.cssText = `position:fixed;left:${cx}px;top:${cy}px;transform:translate(-50%,-50%) scale(1);font-family:'Nunito',sans-serif;font-weight:900;font-size:18px;color:#fff;white-space:nowrap;pointer-events:none;z-index:9998;text-shadow:0 2px 8px rgba(0,0,0,0.25);`;
+      popEl.textContent = `${from>=0?"+":""}${from.toFixed(2)} €`;
+      fxLayerRef.current.appendChild(popEl);
+      popEl.animate([
+        { transform:"translate(-50%,-50%) scale(1)",   offset:0    },
+        { transform:"translate(-50%,-50%) scale(2.6)", offset:0.35 },
+        { transform:"translate(-50%,-50%) scale(2.6)", offset:0.8  },
+        { transform:"translate(-50%,-50%) scale(1)",   offset:1    },
+      ], { duration:1300, easing:"cubic-bezier(.34,1.56,.64,1)" }).onfinish = () => {
+        popEl.remove();
+        setHideRealCagnotte(false);
+      };
+    }
+
+    animateAmountRoll(from, to, 1300, v => {
+      setDisplayCagnotte(v);
+      if (popEl) popEl.textContent = `${v>=0?"+":""}${v.toFixed(2)} €`;
+    });
+
+    if (!confettiBusyRef.current) {
+      confettiBusyRef.current = true;
+      runConfettiRain(fxLayerRef.current, () => { confettiBusyRef.current = false; });
+    }
+
+    onConsumeCagnotteCelebration?.();
+  }, [pendingCagnotte, reducedMotion]);
+
+  // "Estimées" — roulement + pop léger uniquement, jamais de confettis.
+  useEffect(() => {
+    if (!pendingPotential) return;
+    const { from, to } = pendingPotential;
+    if (from === to) { onConsumePotentialCelebration?.(); return; }
+    if (reducedMotion) { setDisplayPotential(to); onConsumePotentialCelebration?.(); return; }
+
+    estimeesRef.current?.animate([
+      { transform:"scale(1)",    offset:0    },
+      { transform:"scale(1.25)", offset:0.35 },
+      { transform:"scale(1.25)", offset:0.8  },
+      { transform:"scale(1)",    offset:1    },
+    ], { duration:1300, easing:"cubic-bezier(.34,1.56,.64,1)" });
+
+    animateAmountRoll(from, to, 1300, v => setDisplayPotential(v));
+    onConsumePotentialCelebration?.();
+  }, [pendingPotential, reducedMotion]);
 
   const [showMenuProfil, setShowMenuProfil] = useState(false);
   const menuProfilRef = useRef(null);
@@ -5129,14 +5258,18 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash
       <div style={{margin:'10px 40px', padding:'8px 16px', background:'rgba(0,140,60,0.58)', borderRadius:12, display:'flex', justifyContent:'space-around', alignItems:'center', position:'relative', zIndex:10}}>
         <div style={{display:'flex', alignItems:'center', gap:6}}>
           <span style={{fontSize:'14px', color:'rgba(255,255,255,0.85)'}}>💰 Estimées</span>
-          <span style={{fontSize:'18px', fontWeight:'bold', color:'white'}}>{potentialTotal >= 0 ? "+" : ""}{potentialTotal.toFixed(2)} €</span>
+          <span ref={estimeesRef} style={{fontSize:'18px', fontWeight:'bold', color:'white', display:'inline-block'}}>{displayPotential >= 0 ? "+" : ""}{displayPotential.toFixed(2)} €</span>
         </div>
         <div style={{width:1, height:20, background:'rgba(255,255,255,0.3)'}}/>
         <div style={{display:'flex', alignItems:'center', gap:6}}>
           <span style={{fontSize:'14px', color:'rgba(255,255,255,0.85)'}}>✅ Confirmées</span>
-          <span style={{fontSize:'18px', fontWeight:'bold', color:'white'}}>{cagnotteTotal >= 0 ? "+" : ""}{cagnotteTotal.toFixed(2)} €</span>
+          <span ref={cagnotteRealRef} style={{fontSize:'18px', fontWeight:'bold', color:'white', display:'inline-block', opacity: hideRealCagnotte ? 0 : 1}}>{displayCagnotte >= 0 ? "+" : ""}{displayCagnotte.toFixed(2)} €</span>
         </div>
       </div>
+
+      {/* #64.1 — calque plein écran pour le pop géant (clone échappant à
+          l'overflow:hidden du conteneur racine) et la pluie de confettis */}
+      <div ref={fxLayerRef} style={{position:'fixed', inset:0, pointerEvents:'none', zIndex:9999, overflow:'visible'}} />
 
       {/* ── Navigation circulaire ── */}
       <div style={{ flex:1, display:"flex", alignItems:"flex-start", justifyContent:"center", position:"relative", zIndex:10, paddingTop:8 }}>
@@ -5281,11 +5414,83 @@ export default function App() {
   const [searchRadius, setSearchRadius] = useState(10);
   const [userPos, setUserPos] = useState(null);
   const [archives, setArchives]   = useState([]);
+  const [loaded, setLoaded]       = useState(false);
+
+  // #64.1 — mémoire de "célébration en attente" pour la bannière Accueil.
+  // Vit ici (racine), pas dans HomeTab, car HomeTab démonte/remonte à chaque
+  // changement d'onglet ({loaded && tab==="home" && <HomeTab/>}) : une
+  // confirmation d'économie a lieu pendant le scan, donc typiquement pendant
+  // que HomeTab n'est PAS monté. Uniquement en mémoire vive (aucun
+  // localStorage/DB) : un rechargement de page perd toute célébration en
+  // attente, conformément à la règle "jamais d'animation au chargement".
+  // N'observe QUE cagnotteTotal/potentialTotal, recalculés ici avec
+  // exactement la même formule que dans HomeTab — aucun nouveau calcul
+  // d'économie, aucune donnée modifiée.
+  const prevCagnotteRootRef  = useRef(null);
+  const prevPotentialRootRef = useRef(null);
+  const [pendingCagnotte, setPendingCagnotte]   = useState(null);
+  const [pendingPotential, setPendingPotential] = useState(null);
+
+  // Réarme une référence neuve à chaque nouveau cycle de chargement (login,
+  // reconnexion, changement de session) : sans ça, les totaux d'une session
+  // précédente resteraient comparés à ceux de la nouvelle après un logout/login.
+  useEffect(() => {
+    if (loaded) return;
+    prevCagnotteRootRef.current  = null;
+    prevPotentialRootRef.current = null;
+    setPendingCagnotte(null);
+    setPendingPotential(null);
+  }, [loaded]);
+
+  useEffect(() => {
+    // Tant que le chargement initial n'est pas terminé, archives peut valoir
+    // [] puis passer à son contenu réel : ce n'est PAS un changement du point
+    // de vue utilisateur, juste l'arrivée des données. On ignore tout tant
+    // que loaded n'est pas vrai ; le premier passage APRÈS loaded===true sert
+    // uniquement de référence, jamais de déclencheur (cf. bug rechargement).
+    if (!loaded) return;
+    const scannedArchives = archives.filter(a => a.ticket_scanned && a.realized_saving != null);
+    const newCagnotte  = scannedArchives.reduce((a, arc) => a + (arc.realized_saving || 0), 0);
+    const newPotential = archives.reduce((a, arc) => a + (arc.potential_saving || 0), 0);
+
+    if (prevCagnotteRootRef.current === null) {
+      prevCagnotteRootRef.current = newCagnotte;
+    } else if (prevCagnotteRootRef.current !== newCagnotte) {
+      const oldVal = prevCagnotteRootRef.current;
+      prevCagnotteRootRef.current = newCagnotte;
+      setPendingCagnotte(p => p ? { from: p.from, to: newCagnotte } : { from: oldVal, to: newCagnotte });
+    }
+
+    if (prevPotentialRootRef.current === null) {
+      prevPotentialRootRef.current = newPotential;
+    } else if (prevPotentialRootRef.current !== newPotential) {
+      const oldVal = prevPotentialRootRef.current;
+      prevPotentialRootRef.current = newPotential;
+      setPendingPotential(p => p ? { from: p.from, to: newPotential } : { from: oldVal, to: newPotential });
+    }
+  }, [archives, loaded]);
+
+  // #64.1 — outils de simulation dev uniquement (import.meta.env.DEV, jamais
+  // en prod). N'écrivent rien en base, ne touchent à aucune archive réelle :
+  // arment juste directement une célébration en attente, comme le ferait une
+  // vraie confirmation détectée par l'effet ci-dessus.
+  const simulerCagnotteDev = () => {
+    const from = prevCagnotteRootRef.current ?? 0;
+    const to = Math.round((from + 0.5) * 100) / 100;
+    prevCagnotteRootRef.current = to;
+    setPendingCagnotte(p => p ? { from: p.from, to } : { from, to });
+  };
+  const simulerPotentialDev = () => {
+    const from = prevPotentialRootRef.current ?? 0;
+    const to = Math.round((from + 0.5) * 100) / 100;
+    prevPotentialRootRef.current = to;
+    setPendingPotential(p => p ? { from: p.from, to } : { from, to });
+  };
+
   const [storeRatings, setStoreRatings] = useState({});
   const [showSuccess, setShowSuccess] = useState(null);
   const [showRating,  setShowRating]  = useState(null);
   const [favorites, setFavorites] = useState([]);
-  const [loaded, setLoaded]       = useState(false);
   const [loadError, setLoadError] = useState(null);
   const [loadRetry, setLoadRetry] = useState(0);
   const [produitsRef, setProduitsRef] = useState([]);
@@ -5924,7 +6129,7 @@ export default function App() {
               )}
             </div>
           )}
-          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout}/>}
+          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)}/>}
           {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} setTab={setTab}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius} userPos={userPos} isAdmin={isAdmin} modeCoreActif={modeCoreActif}/>}
@@ -5949,6 +6154,18 @@ export default function App() {
           {loaded && isAdmin && tab==="rejets" && <AdminRejetsCorePanel modeCoreActif={modeCoreActif} onToggleModeCore={setModeCoreActif}/>}
         </div>
         <TabBar tab={tab} setTab={setTab} isAdmin={isAdmin}/>
+        {/* #64.1 — dev uniquement, jamais en prod, jamais sur l'Accueil : reproduit
+            le vrai parcours (simulation hors Accueil → retour Accueil → célébration) */}
+        {import.meta.env.DEV && tab !== "home" && (
+          <div style={{ position:"fixed", bottom:90, right:12, zIndex:500, display:"flex", flexDirection:"column", gap:6 }}>
+            <button onClick={simulerCagnotteDev} style={{ padding:"8px 12px", borderRadius:10, border:"none", background:"#00B341", color:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:11, cursor:"pointer", boxShadow:"0 3px 10px rgba(0,0,0,0.25)" }}>
+              🎉 Simuler économie confirmée
+            </button>
+            <button onClick={simulerPotentialDev} style={{ padding:"8px 12px", borderRadius:10, border:"none", background:"#4A90D9", color:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:11, cursor:"pointer", boxShadow:"0 3px 10px rgba(0,0,0,0.25)" }}>
+              💰 Simuler économie estimée
+            </button>
+          </div>
+        )}
         {appToast && <Toast msg={appToast.msg} ok={appToast.ok}/>}
         {showCircleSheet  && <CircleSheet  circles={circles} userId={session.user.id} userEmail={session.user.email} profileMap={profileMap} pseudo={pseudo} archives={archives} onClose={()=>setShowCircleSheet(false)} onInvite={inviteByPseudo} onUpdateStatus={updateCircleStatus}/>}
         {showStatsSheet   && <StatsSheet   userId={session.user.id} archives={archives} onClose={()=>setShowStatsSheet(false)}/>}
