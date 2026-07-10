@@ -1430,6 +1430,18 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     setKnownStoresLoading(false);
   };
 
+  // #54 — évite de créer une fiche `stores` dupliquée : réutilise une fiche
+  // existante de la même enseigne (déjà chargée dans knownStores) si son
+  // adresse correspond, une fois normalisée (casse/accents/espaces via
+  // normName, déjà utilisé ailleurs dans ce fichier pour ce genre de
+  // comparaison). Sinon, comportement inchangé : insertStoreInDB crée la
+  // fiche.
+  const resoudreOuCreerStore = async (enseigne, adresse, lat, lng, nom) => {
+    const existant = knownStores.find(s => s.address && normName(s.address) === normName(adresse));
+    if (existant) return existant.id;
+    return insertStoreInDB(enseigne, adresse, lat, lng, nom);
+  };
+
   const EXAMPLE = `{
   "store": "Intermarché",
   "date": "2026-04-11",
@@ -1760,6 +1772,25 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                     );
                   })()}
 
+                  {/* #54 — magasins déjà connus pour cette enseigne : sélection
+                      manuelle possible avant de créer une nouvelle fiche
+                      (filet de sécurité complémentaire au dédoublonnage
+                      automatique par adresse de resoudreOuCreerStore). */}
+                  {knownStores.length > 0 && (
+                    <div style={{ marginBottom:16 }}>
+                      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:700, color:C.gray, marginBottom:6 }}>Ou sélectionne un magasin déjà connu</div>
+                      <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                        {knownStores.map(s => (
+                          <button key={s.id} onClick={()=>setResolvedStoreId(s.id)}
+                            style={{ padding:"10px 14px", borderRadius:10, border:`2px solid ${C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, cursor:"pointer", textAlign:"left" }}>
+                            {s.name || storeNameEdit}
+                            {s.address && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:600, color:C.textLight, marginTop:2 }}>{s.address}</div>}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Adresse */}
                   <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Adresse (optionnel)</div>
                   {storeLocation.trim() && !showManualAddress ? (
@@ -1841,13 +1872,13 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                       setManualGeocoding(true); setError("");
                       if (savedGpsCoords) {
                         const fullAddress = [manualRue.trim(), manualCP.trim(), manualVille.trim()].filter(Boolean).join(', ');
-                        const id = await insertStoreInDB(selectedStore, fullAddress, savedGpsCoords.lat, savedGpsCoords.lng, storeNameEdit.trim()||null);
+                        const id = await resoudreOuCreerStore(selectedStore, fullAddress, savedGpsCoords.lat, savedGpsCoords.lng, storeNameEdit.trim()||null);
                         setResolvedStoreId(id);
                       } else {
                         const fullAddress = `${manualRue.trim()}, ${manualCP.trim()} ${manualVille.trim()}`.trim();
                         const coords = await geocodeAddress(fullAddress);
                         if (coords) {
-                          const id = await insertStoreInDB(selectedStore, fullAddress, coords.lat, coords.lng, storeNameEdit.trim()||null);
+                          const id = await resoudreOuCreerStore(selectedStore, fullAddress, coords.lat, coords.lng, storeNameEdit.trim()||null);
                           setResolvedStoreId(id);
                         } else {
                           setError("Adresse introuvable — vérifie et réessaie");
@@ -1860,7 +1891,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                       setManualGeocoding(true); setError("");
                       const coords = await geocodeAddress(storeLocation.trim());
                       if (coords) {
-                        const id = await insertStoreInDB(selectedStore, storeLocation.trim(), coords.lat, coords.lng, storeNameEdit.trim()||null);
+                        const id = await resoudreOuCreerStore(selectedStore, storeLocation.trim(), coords.lat, coords.lng, storeNameEdit.trim()||null);
                         setResolvedStoreId(id);
                       }
                       setManualGeocoding(false);
