@@ -1488,6 +1488,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
       id:           Date.now()+p.id,
       brand:        p.brand||"",
       product:      p.name,
+      libelle_ticket: p.libelle_ticket||null,
       format:       p.format||"",
       qty:          p.qty||1,
       storeId:      selectedStore||"autre",

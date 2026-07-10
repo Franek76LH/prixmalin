@@ -11,7 +11,8 @@ export async function envoyerTicketCore(toImport, { storeLegacyId, magasinTexte,
     if (!Array.isArray(toImport) || toImport.length === 0) return;
 
     const lignes = toImport.map(p => ({
-      libelle_brut:  p.product,
+      libelle_brut:   p.product,
+      libelle_ticket: p.libelle_ticket || null,
       brand:         p.brand || null,
       name:          p.product || null,
       format:        p.format || null,

@@ -229,9 +229,18 @@ export default function AdminRejetsCorePanel({ modeCoreActif, onToggleModeCore }
             source : <strong>{rejet.source}</strong>
           </div>
 
-          <div style={{ fontFamily: F, fontSize: 14, color: '#111', fontWeight: 700, marginBottom: 10 }}>
+          <div style={{ fontFamily: F, fontSize: 14, color: '#111', fontWeight: 700, marginBottom: rejet.motif === 'alias_non_trouve' && rejet.payload?.libelle_ticket ? 2 : 10 }}>
             {detailPourMotif(rejet)}
           </div>
+
+          {/* #68 — texte réel du ticket, si dispo (payload JSONB, aucune
+              colonne dédiée). Affiché seulement pour alias_non_trouve, aucun
+              changement pour les autres motifs ni pour les non-admin. */}
+          {rejet.motif === 'alias_non_trouve' && rejet.payload?.libelle_ticket && (
+            <div style={{ fontFamily: F, fontSize: 11, color: '#999', marginBottom: 10 }}>
+              ticket : {rejet.payload.libelle_ticket}
+            </div>
+          )}
 
           {!rejet.traite && (
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: F, fontSize: 13, color: '#333', cursor: 'pointer' }}>
