@@ -13,6 +13,12 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { chargerEtCalculerEconomiesConfirmeesCore } from '../../lib/economiesCoreConfirmees';
+import {
+  chargerSuggestionsPourRejets,
+  proposerAliasCore,
+  validerSuggestionAliasCore,
+  refuserSuggestionAliasCore,
+} from '../../lib/suggestionsAliasCore';
 
 const F = "'Nunito',sans-serif";
 
@@ -56,7 +62,7 @@ function detailPourMotif(rejet) {
   return '—';
 }
 
-export default function AdminRejetsCorePanel({ modeCoreActif, onToggleModeCore }) {
+export default function AdminRejetsCorePanel({ modeCoreActif, onToggleModeCore, coreActifGlobal }) {
   const [afficherTraites, setAfficherTraites] = useState(false);
   const [rejets, setRejets] = useState([]);
   const [chargement, setChargement] = useState(true);
@@ -67,6 +73,19 @@ export default function AdminRejetsCorePanel({ modeCoreActif, onToggleModeCore }
   const [economies, setEconomies] = useState(null);
   const [chargementEconomies, setChargementEconomies] = useState(false);
   const [lignesInjectees, setLignesInjectees] = useState(null);
+
+  // #67 — suggestions d'alias par IA, indexées par rejet_ecriture_core_id.
+  const [suggestions, setSuggestions] = useState({});
+  const [lotEnCours, setLotEnCours] = useState(false);
+  const [lotResume, setLotResume] = useState(null);
+  const [suggestionEnCours, setSuggestionEnCours] = useState(null);
+  const [suggestionErreurs, setSuggestionErreurs] = useState({});
+
+  const rechargerSuggestions = async (listeRejets) => {
+    const idsAliasNonTrouve = listeRejets.filter(r => r.motif === 'alias_non_trouve').map(r => r.id);
+    const data = await chargerSuggestionsPourRejets(idsAliasNonTrouve);
+    setSuggestions(Object.fromEntries(data.map(s => [s.rejet_ecriture_core_id, s])));
+  };
 
   useEffect(() => {
     if (!modeCoreActif) return;
@@ -92,11 +111,56 @@ export default function AdminRejetsCorePanel({ modeCoreActif, onToggleModeCore }
       } else {
         setErreur(null);
         setRejets(data || []);
+        await rechargerSuggestions(data || []);
       }
       setChargement(false);
     })();
     return () => { annule = true; };
   }, [afficherTraites]);
+
+  const lancerPropositionAlias = async () => {
+    setLotEnCours(true);
+    setLotResume(null);
+    const resultat = await proposerAliasCore();
+    setLotEnCours(false);
+    if (!resultat) {
+      setErreur("Échec de la proposition d'alias, réessaie.");
+      return;
+    }
+    setLotResume(resultat);
+    await rechargerSuggestions(rejets);
+  };
+
+  const validerSuggestion = async (suggestion) => {
+    setSuggestionEnCours(suggestion.id);
+    setSuggestionErreurs(prev => ({ ...prev, [suggestion.id]: null }));
+    const resultat = await validerSuggestionAliasCore(suggestion.id);
+    setSuggestionEnCours(null);
+    if (!resultat?.succes) {
+      setSuggestionErreurs(prev => ({ ...prev, [suggestion.id]: resultat?.erreur || "Échec de la validation." }));
+      return;
+    }
+    setRejets(prev => afficherTraites
+      ? prev.map(r => (r.id === suggestion.rejet_ecriture_core_id ? { ...r, traite: true } : r))
+      : prev.filter(r => r.id !== suggestion.rejet_ecriture_core_id)
+    );
+    setSuggestions(prev => {
+      const { [suggestion.rejet_ecriture_core_id]: _retire, ...reste } = prev;
+      return reste;
+    });
+  };
+
+  const refuserSuggestion = async (suggestion) => {
+    setSuggestionEnCours(suggestion.id);
+    setSuggestionErreurs(prev => ({ ...prev, [suggestion.id]: null }));
+    const resultat = await refuserSuggestionAliasCore(suggestion.id);
+    setSuggestionEnCours(null);
+    if (!resultat?.succes) {
+      setSuggestionErreurs(prev => ({ ...prev, [suggestion.id]: resultat?.erreur || "Échec du refus." }));
+      return;
+    }
+    setSuggestions(prev => ({ ...prev, [suggestion.rejet_ecriture_core_id]: { ...suggestion, statut: 'refusee' } }));
+  };
 
   const marquerTraite = async (id) => {
     const { error } = await supabase.from('rejets_ecriture_core').update({ traite: true }).eq('id', id);
@@ -116,15 +180,40 @@ export default function AdminRejetsCorePanel({ modeCoreActif, onToggleModeCore }
         Panneau admin — #56.3a
       </div>
 
-      {/* #56.4 — état porté par App.jsx (modeCoreActif), pas un state local :
-          c'est ce qui permet à cette case d'influencer l'écran Comparer. */}
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontFamily: F, fontSize: 13, fontWeight: 700, color: '#8E44AD', cursor: 'pointer' }}>
-        <input type="checkbox" checked={!!modeCoreActif} onChange={e => onToggleModeCore(e.target.checked)} />
-        🔧 Voir le comparateur en mode Core (debug)
-      </label>
+      {/* #56.6 — modeCoreActif est un tri-état porté par App.jsx (pas un state
+          local) : null = suivre coreActifGlobal (le kill switch, valable pour
+          tout le monde), true/false = override explicite pour comparer
+          ponctuellement l'autre moteur sans changer le réglage global. */}
+      <div style={{ marginBottom: 16, padding: '10px 12px', background: '#F6F0FA', borderRadius: 10, border: '1px solid #E0D0EE' }}>
+        <div style={{ fontFamily: F, fontSize: 12, color: '#555', marginBottom: 8 }}>
+          Réglage global (<code>parametres_globaux.core_actif</code>) : <strong>{coreActifGlobal ? 'Core actif' : 'Legacy'}</strong>
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {[
+            { valeur: null,  label: 'Suivre le réglage global' },
+            { valeur: true,  label: 'Forcer Core' },
+            { valeur: false, label: 'Forcer legacy' },
+          ].map(({ valeur, label }) => (
+            <button
+              key={String(valeur)}
+              onClick={() => onToggleModeCore(valeur)}
+              style={{
+                flex: 1, padding: '7px 8px', borderRadius: 8, cursor: 'pointer',
+                fontFamily: F, fontWeight: 800, fontSize: 11,
+                border: modeCoreActif === valeur ? '2px solid #8E44AD' : '1px solid #D9C7E8',
+                background: modeCoreActif === valeur ? '#8E44AD' : '#fff',
+                color: modeCoreActif === valeur ? '#fff' : '#8E44AD',
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
 
-      {/* #56.5.B — économies Core confirmées, réutilise le toggle ci-dessus */}
-      {modeCoreActif && (
+      {/* #56.5.B — économies Core confirmées, debug admin explicite uniquement
+          (override "Forcer Core"), pas juste parce que le global est actif. */}
+      {modeCoreActif === true && (
         <div style={{ background: '#F6F0FA', border: '1px solid #E0D0EE', borderRadius: 10, padding: '12px 14px', marginBottom: 16 }}>
           <div style={{ fontFamily: F, fontWeight: 800, fontSize: 13, color: '#8E44AD', marginBottom: 8 }}>
             💶 Économies Core confirmées (debug)
@@ -188,6 +277,31 @@ export default function AdminRejetsCorePanel({ modeCoreActif, onToggleModeCore }
         Afficher aussi les rejets traités
       </label>
 
+      {/* #67 — bouton admin déclenchant le lot de suggestions IA. N'affecte
+          aucun rejet directement : ne fait qu'enregistrer des suggestions
+          'en_attente' (voir plus bas, par rejet), jamais un alias ni un prix. */}
+      {rejets.some(r => r.motif === 'alias_non_trouve' && !r.traite) && (
+        <div style={{ marginBottom: 16 }}>
+          <button
+            onClick={lancerPropositionAlias}
+            disabled={lotEnCours}
+            style={{
+              width: '100%', padding: '10px 12px', borderRadius: 8, border: 'none',
+              background: lotEnCours ? '#B39DDB' : '#8E44AD', color: '#fff',
+              fontFamily: F, fontWeight: 800, fontSize: 13, cursor: lotEnCours ? 'default' : 'pointer',
+            }}
+          >
+            {lotEnCours ? 'Analyse en cours…' : '🧠 Proposer des alias'}
+          </button>
+          {lotResume && !lotEnCours && (
+            <div style={{ fontFamily: F, fontSize: 12, color: '#555', marginTop: 6 }}>
+              Terminé — {lotResume.traites} rejet(s) traité(s), {lotResume.suggestions_creees} suggestion(s) créée(s),
+              {' '}{lotResume.sans_proposition} sans proposition, {lotResume.erreurs} en erreur.
+            </div>
+          )}
+        </div>
+      )}
+
       {chargement && (
         <div style={{ fontFamily: F, fontSize: 13, color: '#777' }}>Chargement…</div>
       )}
@@ -241,6 +355,61 @@ export default function AdminRejetsCorePanel({ modeCoreActif, onToggleModeCore }
               ticket : {rejet.payload.libelle_ticket}
             </div>
           )}
+
+          {/* #67 — suggestion IA rattachée à ce rejet, si le bouton "Proposer
+              des alias" en a créé une. Aucun impact sur la case "Traité"
+              ci-dessous tant que la suggestion n'est pas validée (RPC
+              valider_suggestion_alias_core, seule à marquer traite=true). */}
+          {rejet.motif === 'alias_non_trouve' && suggestions[rejet.id] && (() => {
+            const suggestion = suggestions[rejet.id];
+            const enCours = suggestionEnCours === suggestion.id;
+            const erreurSuggestion = suggestionErreurs[suggestion.id];
+            return (
+              <div style={{ background: '#F6F0FA', border: '1px solid #E0D0EE', borderRadius: 8, padding: '8px 10px', marginBottom: 10 }}>
+                {suggestion.resultat === 'produit_inconnu_du_referentiel' ? (
+                  <div style={{ fontFamily: F, fontSize: 12, color: '#8E44AD', fontWeight: 700 }}>
+                    Suggestion IA : produit inconnu du référentiel
+                  </div>
+                ) : (
+                  <div style={{ fontFamily: F, fontSize: 12, color: '#8E44AD', fontWeight: 700 }}>
+                    Suggestion IA : {suggestion.produit_nom || suggestion.produit_id}
+                    {suggestion.variante_libelle ? ` — ${suggestion.variante_libelle}` : ''}
+                    {' '}— confiance {suggestion.score_confiance}%
+                  </div>
+                )}
+                {suggestion.raison_ia && (
+                  <div style={{ fontFamily: F, fontSize: 11, color: '#777', marginTop: 2 }}>Raison : {suggestion.raison_ia}</div>
+                )}
+
+                {suggestion.statut === 'en_attente' && (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                    {suggestion.resultat === 'suggestion' && (
+                      <button
+                        onClick={() => validerSuggestion(suggestion)}
+                        disabled={enCours}
+                        style={{ flex: 1, padding: '6px 8px', borderRadius: 6, border: 'none', background: '#00B341', color: '#fff', fontFamily: F, fontWeight: 800, fontSize: 12, cursor: enCours ? 'default' : 'pointer' }}
+                      >
+                        Valider
+                      </button>
+                    )}
+                    <button
+                      onClick={() => refuserSuggestion(suggestion)}
+                      disabled={enCours}
+                      style={{ flex: 1, padding: '6px 8px', borderRadius: 6, border: '1px solid #CC0000', background: '#fff', color: '#CC0000', fontFamily: F, fontWeight: 800, fontSize: 12, cursor: enCours ? 'default' : 'pointer' }}
+                    >
+                      Refuser
+                    </button>
+                  </div>
+                )}
+                {suggestion.statut === 'refusee' && (
+                  <div style={{ fontFamily: F, fontSize: 11, color: '#999', fontStyle: 'italic', marginTop: 6 }}>Refusée</div>
+                )}
+                {erreurSuggestion && (
+                  <div style={{ fontFamily: F, fontSize: 11, color: '#CC0000', marginTop: 6 }}>{erreurSuggestion}</div>
+                )}
+              </div>
+            );
+          })()}
 
           {!rejet.traite && (
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: F, fontSize: 13, color: '#333', cursor: 'pointer' }}>
