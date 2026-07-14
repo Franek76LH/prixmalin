@@ -8,7 +8,7 @@ import { supabase } from './supabase';
 
 export async function envoyerTicketCore(toImport, { storeLegacyId, magasinTexte, dateTicket } = {}) {
   try {
-    if (!Array.isArray(toImport) || toImport.length === 0) return;
+    if (!Array.isArray(toImport) || toImport.length === 0) return null;
 
     const lignes = toImport.map(p => ({
       libelle_brut:   p.product,
@@ -33,13 +33,20 @@ export async function envoyerTicketCore(toImport, { storeLegacyId, magasinTexte,
       lignes,
     };
 
-    const { error } = await supabase.rpc('enregistrer_ticket_core', { p_ticket: payload });
+    const { data, error } = await supabase.rpc('enregistrer_ticket_core', { p_ticket: payload });
     if (error) {
       console.error('[Core#56.5.A] Erreur RPC enregistrer_ticket_core', error);
-      return;
+      return null;
     }
+    // #56.6 — le résultat ({statut, prix_ecrits, rejets}) est maintenant
+    // renvoyé pour permettre à l'appelant de calculer un realized_saving Core
+    // scopé à ce ticket quand core_actif=true. N'importe rien pour un appelant
+    // qui continue à ignorer la valeur de retour (comportement fire-and-forget
+    // inchangé par défaut).
+    return data ?? null;
   } catch (error) {
     console.error('[Core#56.5.A] Exception enregistrer_ticket_core', error);
+    return null;
   }
 }
 

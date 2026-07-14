@@ -12,6 +12,8 @@ import AdminRejetsCorePanel from "./components/admin/AdminRejetsCorePanel";
 import { onNeedRefresh, applyUpdate } from "./lib/swUpdate";
 // #56.5.A — double écriture Core, fire-and-forget, invisible pour l'utilisateur
 import { envoyerTicketCore, envoyerPrixManuelCore } from "./lib/doubleEcritureCore";
+// #56.6 — realized_saving Core scopé à un ticket, réutilise #56.5.B
+import { calculerRealizedSavingTicket } from "./lib/economiesCoreConfirmees";
 // #56.4 — vrai moteur Core (produits/prix/magasins via la vue prix_comparables),
 // pour le mode debug admin de CompareTab. Distinct du pipeline #58.2
 // (adaptateurPanierPrix/classementPanierCore, lui basé sur price_db legacy),
@@ -725,7 +727,7 @@ function FaqSheet({ userId, pseudo, onClose }) {
   );
 }
 
-function MesPrixSheet({ priceDB, setPriceDB, archives, updateArchive, onTicketValidated, onCreateArchive, userId, produitsRef, onClose }) {
+function MesPrixSheet({ priceDB, setPriceDB, archives, updateArchive, onTicketValidated, onCreateArchive, userId, produitsRef, onClose, coreActifGlobal }) {
   const F = "'Nunito',sans-serif";
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", zIndex:300, animation:"fadeIn 0.2s ease" }} onClick={onClose}>
@@ -738,7 +740,7 @@ function MesPrixSheet({ priceDB, setPriceDB, archives, updateArchive, onTicketVa
           <button onClick={onClose} style={{ background:"rgba(255,255,255,0.2)", borderRadius:99, width:36, height:36, border:"none", fontSize:16, color:"#fff", cursor:"pointer" }}>✕</button>
         </div>
         <div style={{ overflowY:"auto", flex:1 }}>
-          <PricesTab priceDB={priceDB} setPriceDB={setPriceDB} archives={archives} updateArchive={updateArchive} onTicketValidated={onTicketValidated} onCreateArchive={onCreateArchive} userId={userId} produitsRef={produitsRef} hideActions={true}/>
+          <PricesTab priceDB={priceDB} setPriceDB={setPriceDB} archives={archives} updateArchive={updateArchive} onTicketValidated={onTicketValidated} onCreateArchive={onCreateArchive} userId={userId} produitsRef={produitsRef} hideActions={true} coreActifGlobal={coreActifGlobal}/>
         </div>
       </div>
     </div>
@@ -1499,14 +1501,16 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
       date:         result?.date?new Date(result.date).toISOString():new Date().toISOString(),
       share:        idsToShare.has(p.id),
     }));
-    // #56.5.A — double écriture Core, fire-and-forget : n'affecte jamais le
-    // flux legacy (pas de await, jamais d'erreur remontée ni affichée).
-    void envoyerTicketCore(toImport, {
+    // #56.5.A — double écriture Core, un seul appel. #56.6 : la promesse est
+    // transmise à onImport (au lieu d'être ignorée via void) pour permettre
+    // un realized_saving Core scopé à ce ticket quand core_actif=true — mais
+    // confirm() ne l'attend jamais lui-même, le flux legacy reste inchangé.
+    const ecritureCorePromise = envoyerTicketCore(toImport, {
       storeLegacyId: resolvedStoreId || null,
       magasinTexte:  storeNameEdit.trim() || result?.store || null,
       dateTicket:    result?.date || null,
     });
-    onImport(toImport);
+    onImport(toImport, ecritureCorePromise);
     onClose();
   };
 
@@ -3658,7 +3662,7 @@ function EconomiesTab({ priceDB, archives, items, setTab }) {
 }
 
 // ── PRICES TAB ────────────────────────────────────────────────────────────────
-function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValidated, onCreateArchive, userId, produitsRef = [], autoOpenCamera = false, onAutoOpenConsumed, initialScanResult = null, onInitialScanConsumed, hideActions = false }) {
+function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValidated, onCreateArchive, userId, produitsRef = [], autoOpenCamera = false, onAutoOpenConsumed, initialScanResult = null, onInitialScanConsumed, hideActions = false, coreActifGlobal = false }) {
   const [showImport,    setShowImport]    = useState(false);
   const [capturedResult] = useState(initialScanResult);
 
@@ -3682,33 +3686,44 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
     setPriceDB(updated);
     showToast("✓ Prix enregistré");
   };
-  const importPrices = entries => {
+  const importPrices = async (entries, ecritureCorePromise) => {
     // Trouve la dernière archive sans ticket scanné
     const openArchive = [...archives].reverse().find(a => !a.ticket_scanned);
 
     let realizedSaving = null;
     if (openArchive) {
-      realizedSaving = 0;
-      entries.forEach(e => {
-        // Est-ce que cet article était sur la liste archivée ?
-        const archiveItem = openArchive.items.find(item =>
-          normName(item.product) === normName(e.product) &&
-          normFormat(item.format || '') === normFormat(e.format || '')
-        );
-        if (!archiveItem) return;
-        const qty = archiveItem.qty || 1;
-        const eKey = `${normName(e.brand||'')}_${normName(e.product)}_${normFormat(e.format||'')}`;
-        const cutoffMoy = Date.now() - JOURS_MOYENNE * 86400000;
-        const alts = priceDB.filter(p => {
-          const pKey = `${normName(p.brand||'')}_${normName(p.product)}_${normFormat(p.format||'')}`;
-          return pKey === eKey && p.storeId !== e.storeId && new Date(p.date).getTime() >= cutoffMoy;
+      if (coreActifGlobal) {
+        // #56.6 — attend l'écriture Core déjà lancée par confirm() (un seul
+        // appel, jamais dupliqué), puis calcule le realized_saving scopé à CE
+        // ticket via #56.5.B (calculerRealizedSavingTicket), jamais tout
+        // l'historique. Produits non résolus ignorés proprement (total à 0
+        // si rien n'est calculable, jamais de faux positif).
+        await ecritureCorePromise;
+        const resultatCore = await calculerRealizedSavingTicket({ utilisateurId: userId });
+        realizedSaving = resultatCore.total;
+      } else {
+        realizedSaving = 0;
+        entries.forEach(e => {
+          // Est-ce que cet article était sur la liste archivée ?
+          const archiveItem = openArchive.items.find(item =>
+            normName(item.product) === normName(e.product) &&
+            normFormat(item.format || '') === normFormat(e.format || '')
+          );
+          if (!archiveItem) return;
+          const qty = archiveItem.qty || 1;
+          const eKey = `${normName(e.brand||'')}_${normName(e.product)}_${normFormat(e.format||'')}`;
+          const cutoffMoy = Date.now() - JOURS_MOYENNE * 86400000;
+          const alts = priceDB.filter(p => {
+            const pKey = `${normName(p.brand||'')}_${normName(p.product)}_${normFormat(p.format||'')}`;
+            return pKey === eKey && p.storeId !== e.storeId && new Date(p.date).getTime() >= cutoffMoy;
+          });
+          if (alts.length > 0) {
+            const avgMarket = alts.reduce((s, p) => s + p.price, 0) / alts.length;
+            realizedSaving += (avgMarket - e.price) * qty;
+          }
         });
-        if (alts.length > 0) {
-          const avgMarket = alts.reduce((s, p) => s + p.price, 0) / alts.length;
-          realizedSaving += (avgMarket - e.price) * qty;
-        }
-      });
-      realizedSaving = Math.round(realizedSaving * 100) / 100;
+        realizedSaving = Math.round(realizedSaving * 100) / 100;
+      }
       updateArchive(openArchive.id, { ticket_scanned: true, realized_saving: realizedSaving });
       onTicketValidated?.(openArchive.id, openArchive.store);
     } else {
@@ -3973,15 +3988,19 @@ function distanceKm(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.asin(Math.sqrt(a));
 }
 
-function CompareTab({ items, priceDB, onValidate, searchRadius, userPos, isAdmin, modeCoreActif }) {
+function CompareTab({ items, priceDB, onValidate, searchRadius, userPos, isAdmin, modeCoreActif, coreActifGlobal }) {
   const F = "'Nunito',sans-serif";
 
   const [gpsError, setGpsError] = useState(false);
   const [storesGeo, setStoresGeo] = useState([]);
 
-  // #56.4 — mode debug Core, admin uniquement. isAdmin est réutilisé tel
-  // quel depuis App.jsx (#56.3b) : aucune nouvelle détection admin ici.
-  const utiliserCoreDebug = isAdmin === true && modeCoreActif === true;
+  // #56.6 — source de vérité : modeCoreActif (tri-état, admin uniquement)
+  // prend le dessus s'il est explicitement défini (override de comparaison
+  // ponctuelle), sinon coreActifGlobal (kill switch, tout le monde) décide.
+  // badgeDebugVisible reste strictement l'ancien comportement #56.4 : jamais
+  // affiché à un non-admin, jamais lié au réglage global lui-même.
+  const utiliserCore = (isAdmin === true && modeCoreActif !== null) ? modeCoreActif : coreActifGlobal;
+  const badgeDebugVisible = isAdmin === true && modeCoreActif === true;
 
   useEffect(()=>{
     supabase.from('stores').select('id, name, enseigne, latitude, longitude')
@@ -4100,7 +4119,7 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos, isAdmin
   }, [items, priceDB, storesGeo, userPos, searchRadius, vueDev]);
 
   // #56.4 — vrai pipeline Core (produits/prix/magasins via prix_comparables),
-  // uniquement quand utiliserCoreDebug est vrai. Séquence reprise à l'identique
+  // uniquement quand utiliserCore est vrai. Séquence reprise à l'identique
   // de ShadowCompareDiagnostic.jsx (mêmes fonctions, même ordre, même garde
   // d'annulation) : on ne réinvente aucune logique de matching/agrégation.
   const [coreResultat,   setCoreResultat]   = useState(null);
@@ -4108,7 +4127,7 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos, isAdmin
   const [coreErreur,     setCoreErreur]     = useState(null);
 
   useEffect(() => {
-    if (!utiliserCoreDebug) { setCoreResultat(null); setCoreErreur(null); return; }
+    if (!utiliserCore) { setCoreResultat(null); setCoreErreur(null); return; }
     let annule = false;
     (async () => {
       try {
@@ -4131,7 +4150,7 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos, isAdmin
       }
     })();
     return () => { annule = true; };
-  }, [utiliserCoreDebug, items, userPos, searchRadius]);
+  }, [utiliserCore, items, userPos, searchRadius]);
 
   // Adaptateur — résultat comparateurCore.js → même forme que analysis/ranked
   // legacy (ci-dessous), pour alimenter les cartes existantes sans les
@@ -4139,7 +4158,7 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos, isAdmin
   // n'apparaît simplement pas dans byStore pour cet article (identique au
   // comportement legacy quand priceDB n'a rien).
   const coreAdapte = useMemo(() => {
-    if (!utiliserCoreDebug || !coreResultat) return null;
+    if (!utiliserCore || !coreResultat) return null;
     const { classement, regroupement, exclusions, cibles } = coreResultat;
 
     const parItemMagasin = new Map();
@@ -4184,7 +4203,7 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos, isAdmin
     });
 
     return { analysis: analysisCore, ranked: rankedCore, missingGlobal: missingGlobalCore, exclusions };
-  }, [utiliserCoreDebug, coreResultat, items]);
+  }, [utiliserCore, coreResultat, items]);
 
   if(items.length===0) return (
     <div style={{ padding:"40px 20px 100px", textAlign:"center" }}>
@@ -4259,11 +4278,11 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos, isAdmin
   const missingGlobal= items.filter(item=>!priceDB.some(p=>itemMatchesPrice(item,p)));
 
   // #56.4 — variables "Affichée" : legacy par défaut, Core uniquement si
-  // utiliserCoreDebug. Tout ce qui précède (analysis, ranked, best,
+  // utiliserCore. Tout ce qui précède (analysis, ranked, best,
   // secondBest, missingGlobal...) reste inchangé et continue d'exister —
-  // utiliserCoreDebug===false garde donc un comportement identique à avant.
-  const analysisAffichee       = utiliserCoreDebug ? (coreAdapte?.analysis ?? []) : analysis;
-  const rankedAffiche          = utiliserCoreDebug ? (coreAdapte?.ranked ?? []) : ranked;
+  // utiliserCore===false garde donc un comportement identique à avant.
+  const analysisAffichee       = utiliserCore ? (coreAdapte?.analysis ?? []) : analysis;
+  const rankedAffiche          = utiliserCore ? (coreAdapte?.ranked ?? []) : ranked;
   const bestAffiche            = rankedAffiche[0];
   const secondBestAffiche      = rankedAffiche[1] ?? null;
   const worstTotalAffiche      = rankedAffiche.length > 1 ? rankedAffiche[rankedAffiche.length - 1].total : 0;
@@ -4277,7 +4296,7 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos, isAdmin
   const mapsQueryAffichee   = bestAffiche ? `${bestAffiche.name}${bestStoreEntryAffiche ? ' ' + bestStoreEntryAffiche.store_address : ''}` : '';
   const mapsUrlAffiche      = bestAffiche ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapsQueryAffichee)}` : '#';
   const maxSavingsAffiche   = bestAffiche ? worstTotalAffiche - bestAffiche.total : 0;
-  const missingGlobalAffiche = utiliserCoreDebug ? (coreAdapte?.missingGlobal ?? []) : missingGlobal;
+  const missingGlobalAffiche = utiliserCore ? (coreAdapte?.missingGlobal ?? []) : missingGlobal;
 
   const [lastVerified, setLastVerified] = useState(null);
   useEffect(() => {
@@ -4314,18 +4333,19 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos, isAdmin
         </div>
       </div>
 
-      {/* #56.4 — badge visible uniquement si isAdmin ET modeCoreActif, jamais sinon */}
-      {utiliserCoreDebug && (
+      {/* #56.6 — badge réservé à l'override admin explicite (isAdmin && modeCoreActif===true),
+          jamais lié au réglage global lui-même : un non-admin ne le voit jamais. */}
+      {badgeDebugVisible && (
         <div style={{ background:"#8E44AD", borderRadius:10, padding:"8px 14px", marginBottom:14, textAlign:"center", fontFamily:F, fontWeight:800, fontSize:12, color:"#fff", letterSpacing:"0.03em" }}>
           🔧 MODE CORE — debug
         </div>
       )}
-      {utiliserCoreDebug && coreChargement && (
-        <div style={{ textAlign:"center", padding:"20px", fontFamily:F, fontSize:13, color:C.textLight }}>Chargement du moteur Core…</div>
+      {utiliserCore && coreChargement && (
+        <div style={{ textAlign:"center", padding:"20px", fontFamily:F, fontSize:13, color:C.textLight }}>Chargement des prix…</div>
       )}
-      {utiliserCoreDebug && coreErreur && (
+      {utiliserCore && coreErreur && (
         <div style={{ background:"#FEE", borderRadius:12, padding:"14px", marginBottom:14, fontFamily:F, fontSize:13, color:C.red, fontWeight:700 }}>
-          ⚠️ Erreur moteur Core : {coreErreur}
+          ⚠️ Problème de chargement des prix, réessaie plus tard.
         </div>
       )}
 
@@ -4347,7 +4367,7 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos, isAdmin
         </div>
       )}
 
-      {vueDev === 'actuelle' && !(utiliserCoreDebug && coreChargement) && (
+      {vueDev === 'actuelle' && !(utiliserCore && coreChargement) && (
         <>
       {/* Aucun prix */}
       {rankedAffiche.length===0 && (
@@ -4468,7 +4488,7 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos, isAdmin
                   .filter(({byStore})=>!byStore[bestAffiche.id]&&Object.keys(byStore).length>0)
                   .map(({item,byStore})=>{
                     const alt = Object.entries(byStore)
-                      .map(([sid,pr])=>({ store: utiliserCoreDebug ? { logo:'🏪', name: pr?.nom_magasin || 'Magasin' } : STORES.find(s=>s.id===sid), pr }))
+                      .map(([sid,pr])=>({ store: utiliserCore ? { logo:'🏪', name: pr?.nom_magasin || 'Magasin' } : STORES.find(s=>s.id===sid), pr }))
                       .sort((a,b)=>a.pr.price-b.pr.price)[0];
                     return (
                       <div key={item.id} style={{ background:"rgba(255,255,255,0.1)", borderRadius:8, padding:"8px 12px", display:"flex", alignItems:"center", gap:8 }}>
@@ -5441,11 +5461,20 @@ export default function App() {
   // par accident : false pendant le chargement, false sans session, false
   // sur toute erreur RPC).
   const [isAdmin, setIsAdmin] = useState(false);
-  // #56.4 — mode debug Comparer sur le moteur Core, admin uniquement, jamais
-  // persisté (aucun localStorage, aucun paramètre URL) : repasse à false à
-  // chaque rechargement de page. N'a d'effet que combiné à isAdmin===true,
-  // vérifié dans CompareTab (utiliserCoreDebug), jamais ici.
-  const [modeCoreActif, setModeCoreActif] = useState(false);
+  // #56.6 — modeCoreActif devient tri-état : null = suivre coreActifGlobal
+  // (comportement par défaut, pour tout le monde) ; true/false = override
+  // explicite de l'admin pour comparer ponctuellement l'autre moteur. Jamais
+  // persisté (aucun localStorage, aucun paramètre URL) : repasse à null à
+  // chaque rechargement de page.
+  const [modeCoreActif, setModeCoreActif] = useState(null);
+
+  // #56.6 — kill switch global (parametres_globaux.core_actif via la RPC
+  // core_est_actif()). Legacy par défaut, et sur toute erreur/absence : ne
+  // devient jamais Core par accident. Relu au changement de session et au
+  // retour au premier plan (visibilitychange) — pas de polling permanent, pas
+  // de localStorage : un onglet resté ouvert en arrière-plan ne verra le
+  // changement qu'à son retour au premier plan ou au rechargement.
+  const [coreActifGlobal, setCoreActifGlobal] = useState(false);
 
   // #65 — bandeau de mise à jour. needRefresh vient de registerSW (main.jsx,
   // hors arbre React) via le pont swUpdate.js ; jamais mis à jour tout seul.
@@ -5589,6 +5618,25 @@ export default function App() {
       setIsAdmin(!error && data === true);
     });
     return () => { annule = true; };
+  }, [session]);
+
+  // #56.6 — kill switch global, même principe que isAdmin ci-dessus : relu à
+  // chaque changement de session, plus au retour au premier plan (l'app ne
+  // recharge pas forcément la page à ce moment-là, contrairement à isAdmin
+  // qui n'a besoin que du cas session).
+  useEffect(() => {
+    if (!session) { setCoreActifGlobal(false); return; }
+    let annule = false;
+    const lireCoreActif = () => {
+      supabase.rpc('core_est_actif').then(({ data, error }) => {
+        if (annule) return;
+        setCoreActifGlobal(!error && data === true);
+      });
+    };
+    lireCoreActif();
+    const onVisibilite = () => { if (document.visibilityState === 'visible') lireCoreActif(); };
+    document.addEventListener('visibilitychange', onVisibilite);
+    return () => { annule = true; document.removeEventListener('visibilitychange', onVisibilite); };
   }, [session]);
 
   const fetchStoreRatings = useCallback(async () => {
@@ -6032,30 +6080,39 @@ export default function App() {
     setCguAcceptedAt(now);
   };
 
-  const handleImportPrices = entries => {
+  const handleImportPrices = async (entries, ecritureCorePromise) => {
     const openArchive = [...archives].reverse().find(a => !a.ticket_scanned);
     let realizedSaving = null;
     if (openArchive) {
-      realizedSaving = 0;
-      entries.forEach(e => {
-        const archiveItem = openArchive.items.find(item =>
-          normName(item.product) === normName(e.product) &&
-          normFormat(item.format || '') === normFormat(e.format || '')
-        );
-        if (!archiveItem) return;
-        const qty = archiveItem.qty || 1;
-        const eKey = `${normName(e.brand||'')}_${normName(e.product)}_${normFormat(e.format||'')}`;
-        const cutoffMoy = Date.now() - JOURS_MOYENNE * 86400000;
-        const alts = priceDB.filter(p => {
-          const pKey = `${normName(p.brand||'')}_${normName(p.product)}_${normFormat(p.format||'')}`;
-          return pKey === eKey && p.storeId !== e.storeId && new Date(p.date).getTime() >= cutoffMoy;
+      if (coreActifGlobal) {
+        // #56.6 — même principe que importPrices (PricesTab) : un seul appel
+        // Core déjà lancé par confirm(), attendu ici, puis realized_saving
+        // scopé à ce ticket via #56.5.B, jamais tout l'historique.
+        await ecritureCorePromise;
+        const resultatCore = await calculerRealizedSavingTicket({ utilisateurId: session?.user?.id });
+        realizedSaving = resultatCore.total;
+      } else {
+        realizedSaving = 0;
+        entries.forEach(e => {
+          const archiveItem = openArchive.items.find(item =>
+            normName(item.product) === normName(e.product) &&
+            normFormat(item.format || '') === normFormat(e.format || '')
+          );
+          if (!archiveItem) return;
+          const qty = archiveItem.qty || 1;
+          const eKey = `${normName(e.brand||'')}_${normName(e.product)}_${normFormat(e.format||'')}`;
+          const cutoffMoy = Date.now() - JOURS_MOYENNE * 86400000;
+          const alts = priceDB.filter(p => {
+            const pKey = `${normName(p.brand||'')}_${normName(p.product)}_${normFormat(p.format||'')}`;
+            return pKey === eKey && p.storeId !== e.storeId && new Date(p.date).getTime() >= cutoffMoy;
+          });
+          if (alts.length > 0) {
+            const avgMarket = alts.reduce((s, p) => s + p.price, 0) / alts.length;
+            realizedSaving += (avgMarket - e.price) * qty;
+          }
         });
-        if (alts.length > 0) {
-          const avgMarket = alts.reduce((s, p) => s + p.price, 0) / alts.length;
-          realizedSaving += (avgMarket - e.price) * qty;
-        }
-      });
-      realizedSaving = Math.round(realizedSaving * 100) / 100;
+        realizedSaving = Math.round(realizedSaving * 100) / 100;
+      }
       updateArchive(openArchive.id, { ticket_scanned: true, realized_saving: realizedSaving });
       setShowRating({ id: openArchive.id, store: openArchive.store });
     } else {
@@ -6186,9 +6243,9 @@ export default function App() {
           {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)}/>}
           {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} setTab={setTab}/>}
-          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius} userPos={userPos} isAdmin={isAdmin} modeCoreActif={modeCoreActif}/>}
+          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius} userPos={userPos} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
-          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
+          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;
             const {data,error}=await supabase.from('archives').insert({...rest,user_id:session?.user?.id}).select('id').single();
             if(error){ console.error("Erreur création archive ticket :",error); showAppToast("⚠️ Archive non sauvegardée, vérifie ta connexion",false); }
@@ -6205,7 +6262,7 @@ export default function App() {
           }}/>}
           {loaded && tab==="economies" && <EconomiesTab priceDB={priceDB} archives={archives} items={items} setTab={setTab}/>}
           {/* #56.3b — jamais rendu pour un non-admin, même si tab="rejets" traîne en state */}
-          {loaded && isAdmin && tab==="rejets" && <AdminRejetsCorePanel modeCoreActif={modeCoreActif} onToggleModeCore={setModeCoreActif}/>}
+          {loaded && isAdmin && tab==="rejets" && <AdminRejetsCorePanel modeCoreActif={modeCoreActif} onToggleModeCore={setModeCoreActif} coreActifGlobal={coreActifGlobal}/>}
         </div>
         <TabBar tab={tab} setTab={setTab} isAdmin={isAdmin}/>
         {/* #64.1 — dev uniquement, jamais en prod, jamais sur l'Accueil : reproduit
@@ -6224,7 +6281,7 @@ export default function App() {
         {showCircleSheet  && <CircleSheet  circles={circles} userId={session.user.id} userEmail={session.user.email} profileMap={profileMap} pseudo={pseudo} archives={archives} onClose={()=>setShowCircleSheet(false)} onInvite={inviteByPseudo} onUpdateStatus={updateCircleStatus}/>}
         {showStatsSheet   && <StatsSheet   userId={session.user.id} archives={archives} onClose={()=>setShowStatsSheet(false)}/>}
         {showFaqSheet     && <FaqSheet     userId={session.user.id} pseudo={pseudo} onClose={()=>setShowFaqSheet(false)}/>}
-        {showMesPrixSheet && <MesPrixSheet priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{ const {id:_id,...rest}=newArc; const {data,error}=await supabase.from('archives').insert({...rest,user_id:session?.user?.id}).select('id').single(); if(error){ showAppToast("⚠️ Archive non sauvegardée, vérifie ta connexion",false); } else { const {data:all}=await supabase.from('archives').select('*').order('date'); if(all) setArchives(all); setShowRating({id:data.id,store:newArc.store}); } }} userId={session?.user?.id} produitsRef={produitsRef} onClose={()=>setShowMesPrixSheet(false)}/>}
+        {showMesPrixSheet && <MesPrixSheet priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{ const {id:_id,...rest}=newArc; const {data,error}=await supabase.from('archives').insert({...rest,user_id:session?.user?.id}).select('id').single(); if(error){ showAppToast("⚠️ Archive non sauvegardée, vérifie ta connexion",false); } else { const {data:all}=await supabase.from('archives').select('*').order('date'); if(all) setArchives(all); setShowRating({id:data.id,store:newArc.store}); } }} userId={session?.user?.id} produitsRef={produitsRef} onClose={()=>setShowMesPrixSheet(false)}/>}
         {showScanChoix && (
           <ScanChoixSheet
             onClose={() => setShowScanChoix(false)}
