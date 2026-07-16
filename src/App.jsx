@@ -4524,7 +4524,14 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos, isAdmin
 }
 
 // ── ARCHIVE TAB ───────────────────────────────────────────────────────────────
-function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceDB, onImport, onSavePrice, produitsRef = [] }) {
+function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceDB, onImport, onSavePrice, produitsRef = [], libelleVersNomProduit = {} }) {
+  // Chantier 1 — affichage seulement : si la ligne de ticket correspondante
+  // est rattachée à un produit Core (résolu au chargement dans App, via
+  // lignes_ticket.produit_id), on montre nom_reference à la place du libellé
+  // brut du ticket. Sinon on garde item.product tel quel (comportement
+  // identique à avant). Ne touche ni item.product ni aucune donnée en base —
+  // seule la chaîne rendue à l'écran change.
+  const nomAffiche = (item) => libelleVersNomProduit[normName(item.product)] || item.product;
   const [pendingDeleteArc, setPendingDeleteArc] = useState(null);
   const [added, setAdded] = useState(new Set());
   const [sort, setSort] = useState("produit");
@@ -4741,7 +4748,7 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
                 return (
                   <div key={i} style={{ borderBottom:`1px solid ${C.grayLight}` }}>
                     <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 4px" }}>
-                      <div onClick={()=>setExpandedProduct(isOpen?null:key)} style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:700, color:C.text, cursor:"pointer", flex:1 }}>{item.brand?`${item.brand} · `:""}{item.product}{item.format?` ${item.format}`:""} <span style={{ fontSize:10, color:C.textLight }}>{isOpen?"▲":"▼"}</span></div>
+                      <div onClick={()=>setExpandedProduct(isOpen?null:key)} style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:700, color:C.text, cursor:"pointer", flex:1 }}>{item.brand?`${item.brand} · `:""}{nomAffiche(item)}{item.format?` ${item.format}`:""} <span style={{ fontSize:10, color:C.textLight }}>{isOpen?"▲":"▼"}</span></div>
                       <div style={{ display:"flex", alignItems:"center", gap:10, flexShrink:0, marginLeft:12 }}>
                         <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:900, color:C.blue }}>{item.unitPrice!=null?`${item.unitPrice.toFixed(2)} €`:"—"}</div>
                         <button onClick={()=>{ if(!done){ onAddToList(item); setAdded(prev=>new Set(prev).add(key)); } }} style={{ background:done?C.green:"#E8E8E8", border:"none", borderRadius:99, width:26, height:26, display:"inline-flex", alignItems:"center", justifyContent:"center", cursor:done?"default":"pointer", color:C.white, fontSize:14, fontWeight:900, padding:0, flexShrink:0 }}>{done?"✓":"🛒"}</button>
@@ -4804,7 +4811,7 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
                   <div style={{ padding:"10px 16px 14px", display:"flex", flexWrap:"wrap", gap:6 }}>
                     {arc.items.map((item,j)=>(
                       <span key={j} style={{ background:C.grayLight, borderRadius:99, padding:"4px 8px 4px 12px", fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:700, color:C.textLight, display:"inline-flex", alignItems:"center", gap:6 }}>
-                        {(()=>{ const up=item.unit_price??item.price??null; const qty=item.qty||1; const tot=up!=null?up*qty:null; return `${item.brand?item.brand+' · ':""}${item.product} ${item.format} | ×${qty} | ${up!=null?Number(up).toFixed(2).replace('.',','):"—"} € | = ${tot!=null?Number(tot).toFixed(2).replace('.',','):"—"} €`; })()}
+                        {(()=>{ const up=item.unit_price??item.price??null; const qty=item.qty||1; const tot=up!=null?up*qty:null; return `${item.brand?item.brand+' · ':""}${nomAffiche(item)} ${item.format} | ×${qty} | ${up!=null?Number(up).toFixed(2).replace('.',','):"—"} € | = ${tot!=null?Number(tot).toFixed(2).replace('.',','):"—"} €`; })()}
                         {(()=>{ const key=`${arc.id}_${j}`; const done=added.has(key); return (
                           <button onClick={()=>{ if(!done){ onAddToList(item); setAdded(prev=>new Set(prev).add(key)); } }} style={{ background:done?C.green:"#E8E8E8", border:"none", borderRadius:99, width:22, height:22, display:"inline-flex", alignItems:"center", justifyContent:"center", cursor:done?"default":"pointer", color:C.white, fontSize:12, fontWeight:900, padding:0, flexShrink:0 }}>{done?"✓":"🛒"}</button>
                         );})()}
@@ -5487,6 +5494,11 @@ export default function App() {
   const [searchRadius, setSearchRadius] = useState(10);
   const [userPos, setUserPos] = useState(null);
   const [archives, setArchives]   = useState([]);
+  // Chantier 1 — libellé officiel du Core (nom_reference) pour une ligne
+  // d'historique déjà rattachée à un produit via lignes_ticket.produit_id.
+  // Clé = libelle_brut normalisé (normName) ; affichage uniquement, ne
+  // modifie jamais archives.items ni aucune donnée en base.
+  const [libelleVersNomProduit, setLibelleVersNomProduit] = useState({});
   const [loaded, setLoaded]       = useState(false);
 
   // #64.1 — mémoire de "célébration en attente" pour la bannière Accueil.
@@ -5654,7 +5666,7 @@ export default function App() {
     setLoadError(null);
     (async ()=>{
       try {
-        const [list, prices, arcs, favs, refs, circs, prof] = await Promise.all([
+        const [list, prices, arcs, favs, refs, circs, prof, lignesTicketResolues] = await Promise.all([
           // LEGACY - shopping_list conservé temporairement
           // supabase.from('shopping_list').select('id, items').order('id').limit(1),
           supabase.from('liste_courses')
@@ -5669,8 +5681,25 @@ export default function App() {
           supabase.from('produits_ref').select('produit_generique, sous_categorie').order('id'),
           supabase.from('circles').select('*'),
           supabase.from('profiles').select('pseudo, cgu_accepted_at').eq('id', session.user.id).maybeSingle(),
+          // Chantier 1 — pont Historique (archives.items[].product, libellé
+          // brut) → nom officiel Core. RLS restreint déjà lignes_ticket aux
+          // tickets de l'utilisateur courant (tickets.utilisateur_id = auth.uid()).
+          // lignes_ticket a deux FK vers produits (produit_id et
+          // produit_suggere_ia_id) : l'embed doit désambiguïser explicitement,
+          // sinon PostgREST rejette la requête ("more than one relationship").
+          supabase.from('lignes_ticket')
+            .select('libelle_brut, produits!lignes_ticket_produit_id_fkey(nom_reference)')
+            .not('produit_id', 'is', null),
         ]);
         if (refs.data) setProduitsRef(refs.data);
+        if (lignesTicketResolues.data) {
+          const map = {};
+          for (const ligne of lignesTicketResolues.data) {
+            const nom = ligne.produits?.nom_reference;
+            if (nom) map[normName(ligne.libelle_brut)] = nom;
+          }
+          setLibelleVersNomProduit(map);
+        }
         if (list.data) {
           setItems((list.data || []).map(mapperLigneListeCourses));
         }
@@ -6255,7 +6284,7 @@ export default function App() {
               setShowRating({id:data.id,store:newArc.store});
             }
           }} userId={session?.user?.id} produitsRef={produitsRef}/>}
-          {loaded && tab==="archive"   && <ArchiveTab   archives={archives} storeRatings={storeRatings} onDelete={deleteArchive} priceDB={priceDB} onImport={handleImportPrices} onSavePrice={handleSavePrice} produitsRef={produitsRef} onAddToList={arcItem=>{
+          {loaded && tab==="archive"   && <ArchiveTab   archives={archives} storeRatings={storeRatings} onDelete={deleteArchive} priceDB={priceDB} onImport={handleImportPrices} onSavePrice={handleSavePrice} produitsRef={produitsRef} libelleVersNomProduit={libelleVersNomProduit} onAddToList={arcItem=>{
             const newItem={id:Date.now()+Math.random(),product:arcItem.product,format:arcItem.format||"",brand:arcItem.brand||"",qty:arcItem.qty||1,checked:false};
             addItem(newItem);
             showAppToast(`✓ ${arcItem.product} ajouté à ta liste`);
