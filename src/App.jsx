@@ -4524,7 +4524,7 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos, isAdmin
 }
 
 // ── ARCHIVE TAB ───────────────────────────────────────────────────────────────
-function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceDB, onImport, onSavePrice, produitsRef = [], libelleVersNomProduit = {} }) {
+function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceDB, onImport, onSavePrice, produitsRef = [], libelleVersNomProduit = {}, onLibelleResolu }) {
   // Chantier 1 — affichage seulement : si la ligne de ticket correspondante
   // est rattachée à un produit Core (résolu au chargement dans App, via
   // lignes_ticket.produit_id), on montre nom_reference à la place du libellé
@@ -4532,6 +4532,8 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
   // identique à avant). Ne touche ni item.product ni aucune donnée en base —
   // seule la chaîne rendue à l'écran change.
   const nomAffiche = (item) => libelleVersNomProduit[normName(item.product)] || item.product;
+  // Chantier 2 — correction d'un article depuis le détail ticket : { arc, item } de l'article tapé.
+  const [correctionCible, setCorrectionCible] = useState(null);
   const [pendingDeleteArc, setPendingDeleteArc] = useState(null);
   const [added, setAdded] = useState(new Set());
   const [sort, setSort] = useState("produit");
@@ -4543,6 +4545,43 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
   const [showEntry, setShowEntry] = useState(false);
   const [subTab, setSubTab] = useState("produit");
   const [selectedMonth, setSelectedMonth] = useState(null);
+
+  // Chantier 2 — retrouve la (les) ligne(s) lignes_ticket correspondant à cet
+  // article d'archive, via la même correspondance textuelle normalisée que le
+  // Chantier #69 (archives.items[].product ↔ lignes_ticket.libelle_brut),
+  // scopée en plus au jour du ticket (archives n'a pas de ticket_id, donc pas
+  // de clé technique directe — la RLS restreint déjà lignes_ticket à
+  // l'utilisateur courant). Puis appelle la RPC existante
+  // corriger_association_ligne_ticket (déjà utilisée ailleurs dans le repo
+  // pour une correction manuelle, méthode 'humaine').
+  const rattacherProduit = async (arc, item, produit) => {
+    const jour = new Date(arc.date).toISOString().slice(0, 10);
+    const { data: lignes, error: errLignes } = await supabase
+      .from('lignes_ticket')
+      .select('id, libelle_brut, tickets!inner(date_ticket)')
+      .eq('tickets.date_ticket', jour);
+    if (errLignes) return { ok: false, message: "Recherche du ticket impossible, vérifie ta connexion." };
+
+    const cible = normName(item.product);
+    const candidats = (lignes || []).filter(l => normName(l.libelle_brut) === cible);
+    if (candidats.length === 0) {
+      return { ok: false, message: "Impossible de retrouver cet article dans le système (ticket ancien ou non synchronisé)." };
+    }
+
+    let succes = 0;
+    for (const ligne of candidats) {
+      const { error } = await supabase.rpc('corriger_association_ligne_ticket', {
+        p_ligne_ticket_id: ligne.id,
+        p_produit_id: produit.id,
+        p_variante_produit_id: null,
+      });
+      if (!error) succes++;
+    }
+    if (succes === 0) return { ok: false, message: "Le rattachement a échoué, réessaie." };
+
+    onLibelleResolu?.(cible, produit.nom_reference);
+    return { ok: true };
+  };
 
   const categories = useMemo(() => {
     const seen = new Set();
@@ -4811,7 +4850,9 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
                   <div style={{ padding:"10px 16px 14px", display:"flex", flexWrap:"wrap", gap:6 }}>
                     {arc.items.map((item,j)=>(
                       <span key={j} style={{ background:C.grayLight, borderRadius:99, padding:"4px 8px 4px 12px", fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:700, color:C.textLight, display:"inline-flex", alignItems:"center", gap:6 }}>
-                        {(()=>{ const up=item.unit_price??item.price??null; const qty=item.qty||1; const tot=up!=null?up*qty:null; return `${item.brand?item.brand+' · ':""}${nomAffiche(item)} ${item.format} | ×${qty} | ${up!=null?Number(up).toFixed(2).replace('.',','):"—"} € | = ${tot!=null?Number(tot).toFixed(2).replace('.',','):"—"} €`; })()}
+                        <span onClick={()=>setCorrectionCible({arc,item})} style={{ cursor:"pointer" }} title="Corriger le produit rattaché">
+                          {(()=>{ const up=item.unit_price??item.price??null; const qty=item.qty||1; const tot=up!=null?up*qty:null; return `${item.brand?item.brand+' · ':""}${nomAffiche(item)} ${item.format} | ×${qty} | ${up!=null?Number(up).toFixed(2).replace('.',','):"—"} € | = ${tot!=null?Number(tot).toFixed(2).replace('.',','):"—"} €`; })()}
+                        </span>
                         {(()=>{ const key=`${arc.id}_${j}`; const done=added.has(key); return (
                           <button onClick={()=>{ if(!done){ onAddToList(item); setAdded(prev=>new Set(prev).add(key)); } }} style={{ background:done?C.green:"#E8E8E8", border:"none", borderRadius:99, width:22, height:22, display:"inline-flex", alignItems:"center", justifyContent:"center", cursor:done?"default":"pointer", color:C.white, fontSize:12, fontWeight:900, padding:0, flexShrink:0 }}>{done?"✓":"🛒"}</button>
                         );})()}
@@ -4827,6 +4868,96 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
       </>)}
       {showImport && <ImportTicketSheet onClose={()=>setShowImport(false)} onImport={onImport} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))} onManualEntry={()=>setShowEntry(true)}/>}
       {showEntry  && <PriceEntrySheet  onClose={()=>setShowEntry(false)} onSave={onSavePrice}/>}
+      {correctionCible && (
+        <CorrigerProduitSheet
+          item={correctionCible.item}
+          onClose={()=>setCorrectionCible(null)}
+          onChoisir={(produit)=>rattacherProduit(correctionCible.arc, correctionCible.item, produit)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── CORRIGER PRODUIT SHEET (Chantier 2) ─────────────────────────────────────
+// Recherche par nom dans produits.nom_reference (même requête que le
+// Catalogue : actif=true, ilike, limite 20, debounce ~280ms) pour rattacher
+// manuellement un article d'historique mal identifié à son vrai produit Core.
+function CorrigerProduitSheet({ item, onClose, onChoisir }) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [error, setError] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [confirmation, setConfirmation] = useState(null);
+  const seq = useRef(0);
+
+  useEffect(() => {
+    if (query.trim().length < 2) { setResults([]); setError(null); return; }
+    const mySeq = ++seq.current;
+    setSearching(true); setError(null);
+    const timer = setTimeout(async () => {
+      const { data, error: err } = await supabase.from('produits')
+        .select('id, nom_reference')
+        .eq('actif', true)
+        .ilike('nom_reference', `%${query.trim()}%`)
+        .order('nom_reference')
+        .limit(20);
+      if (mySeq !== seq.current) return;
+      if (err) { setError("Recherche impossible."); setSearching(false); return; }
+      setResults(data || []);
+      setSearching(false);
+    }, 280);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  const choisir = async (produit) => {
+    if (saving) return;
+    setSaving(true);
+    setError(null);
+    const res = await onChoisir(produit);
+    setSaving(false);
+    if (!res.ok) { setError(res.message); return; }
+    setConfirmation(produit.nom_reference);
+    setTimeout(onClose, 900);
+  };
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", zIndex:300 }} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{ background:C.white, borderRadius:"20px 20px 0 0", width:"100%", maxHeight:"80vh", display:"flex", flexDirection:"column", padding:"20px 20px 32px", boxSizing:"border-box" }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
+          <div>
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.text }}>Choisir le bon produit</div>
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, marginTop:2 }}>Actuellement : {item.product}{item.format?` ${item.format}`:""}</div>
+          </div>
+          <button onClick={onClose} style={{ background:C.grayLight, border:"none", borderRadius:99, width:28, height:28, color:C.textLight, fontSize:14, cursor:"pointer" }}>✕</button>
+        </div>
+
+        {confirmation ? (
+          <div style={{ textAlign:"center", padding:"24px 0", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.green }}>
+            ✓ Rattaché à « {confirmation} »
+          </div>
+        ) : (
+          <>
+            <input autoFocus value={query} onChange={e=>setQuery(e.target.value)}
+              placeholder="🔍 Chercher un produit du catalogue..."
+              style={{ width:"100%", padding:"11px 14px", borderRadius:10, border:`2px solid ${query?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:12 }}
+            />
+            {error && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:"#CC0000", marginBottom:8 }}>⚠️ {error}</div>}
+            <div style={{ overflowY:"auto", flex:1 }}>
+              {searching && <div style={{ textAlign:"center", padding:"12px 0", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>Recherche...</div>}
+              {!searching && query.trim().length >= 2 && results.length === 0 && !error && (
+                <div style={{ textAlign:"center", padding:"20px 0", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>Aucun produit trouvé</div>
+              )}
+              {results.map(p => (
+                <div key={p.id} onClick={()=>choisir(p)} style={{ padding:"12px 10px", borderBottom:`1px solid ${C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, cursor:saving?"default":"pointer", opacity:saving?0.6:1 }}>
+                  {p.nom_reference}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -6284,7 +6415,7 @@ export default function App() {
               setShowRating({id:data.id,store:newArc.store});
             }
           }} userId={session?.user?.id} produitsRef={produitsRef}/>}
-          {loaded && tab==="archive"   && <ArchiveTab   archives={archives} storeRatings={storeRatings} onDelete={deleteArchive} priceDB={priceDB} onImport={handleImportPrices} onSavePrice={handleSavePrice} produitsRef={produitsRef} libelleVersNomProduit={libelleVersNomProduit} onAddToList={arcItem=>{
+          {loaded && tab==="archive"   && <ArchiveTab   archives={archives} storeRatings={storeRatings} onDelete={deleteArchive} priceDB={priceDB} onImport={handleImportPrices} onSavePrice={handleSavePrice} produitsRef={produitsRef} libelleVersNomProduit={libelleVersNomProduit} onLibelleResolu={(cle,nom)=>setLibelleVersNomProduit(prev=>({...prev,[cle]:nom}))} onAddToList={arcItem=>{
             const newItem={id:Date.now()+Math.random(),product:arcItem.product,format:arcItem.format||"",brand:arcItem.brand||"",qty:arcItem.qty||1,checked:false};
             addItem(newItem);
             showAppToast(`✓ ${arcItem.product} ajouté à ta liste`);
