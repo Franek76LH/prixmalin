@@ -4570,8 +4570,10 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
 
   // Puis appelle la RPC existante corriger_association_ligne_ticket (déjà
   // utilisée ailleurs dans le repo pour une correction manuelle, méthode
-  // 'humaine').
-  const rattacherProduit = async (arc, item, produit) => {
+  // 'humaine'). Chantier #71.1 — varianteId est résolu en amont par
+  // CorrigerProduitSheet (0 variante active -> null légitime, 1 -> automatique,
+  // plusieurs -> choix explicite de l'utilisateur, jamais une valeur par défaut).
+  const rattacherProduit = async (arc, item, produit, varianteId = null) => {
     const { candidats, error: errLignes } = await trouverLignesTicket(arc, item);
     if (errLignes) return { ok: false, message: "Recherche du ticket impossible, vérifie ta connexion." };
     if (candidats.length === 0) {
@@ -4583,7 +4585,7 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
       const { error } = await supabase.rpc('corriger_association_ligne_ticket', {
         p_ligne_ticket_id: ligne.id,
         p_produit_id: produit.id,
-        p_variante_produit_id: null,
+        p_variante_produit_id: varianteId,
       });
       if (!error) succes++;
     }
@@ -4901,7 +4903,7 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
           item={correctionCible.item}
           enseigne={enseigneCourante}
           onClose={()=>setCorrectionCible(null)}
-          onChoisir={(produit)=>rattacherProduit(correctionCible.arc, correctionCible.item, produit)}
+          onChoisir={(produit,varianteId)=>rattacherProduit(correctionCible.arc, correctionCible.item, produit, varianteId)}
         />
       )}
     </div>
@@ -4913,6 +4915,17 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
 // rechercher_produits_pour_correction — voir le bloc SQL fourni séparément.
 // Plus de chargement client du catalogue : la RPC filtre, trie (enseigne du
 // ticket en tête) et limite à 20 côté serveur.
+// Chantier #71.1 — libellé lisible d'une variante : le champ libelle est
+// rempli pour les 3 produits multi-variantes connus aujourd'hui (Beurre,
+// Lait demi-écrémé, Poire), mais on reconstruit à partir des quantités si un
+// futur produit en a un vide.
+function libelleVariante(v) {
+  if (v.libelle) return v.libelle;
+  const base = `${v.quantite_nette ?? ''} ${v.unite_quantite ?? ''}`.trim();
+  if (v.nombre_unites && v.nombre_unites > 1) return `${v.nombre_unites} × ${base}`;
+  return base || 'Variante';
+}
+
 function CorrigerProduitSheet({ item, enseigne = null, onClose, onChoisir }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
@@ -4921,6 +4934,15 @@ function CorrigerProduitSheet({ item, enseigne = null, onClose, onChoisir }) {
   const [saving, setSaving] = useState(false);
   const [confirmation, setConfirmation] = useState(null);
   const seq = useRef(0);
+  // Chantier #71.1 — résolution de la variante. resolvingVariante : appel en
+  // cours pour compter les variantes actives du produit tapé. produitEnAttente
+  // + variantesAChoisir : on entre dans l'écran de choix uniquement si
+  // plusieurs variantes actives existent — jamais de repli silencieux sur
+  // NULL ni sur la première de la liste.
+  const [resolvingVariante, setResolvingVariante] = useState(false);
+  const [produitEnAttente, setProduitEnAttente] = useState(null);
+  const [variantesAChoisir, setVariantesAChoisir] = useState(null);
+  const [varianteChoisie, setVarianteChoisie] = useState(null);
 
   useEffect(() => {
     if (query.trim().length < 2) { setResults([]); setError(null); return; }
@@ -4939,15 +4961,51 @@ function CorrigerProduitSheet({ item, enseigne = null, onClose, onChoisir }) {
     return () => clearTimeout(timer);
   }, [query, enseigne]);
 
-  const choisir = async (produit) => {
-    if (saving) return;
+  const finaliser = async (produit, varianteId) => {
     setSaving(true);
     setError(null);
-    const res = await onChoisir({ id: produit.produit_id, nom_reference: produit.nom_reference });
+    const res = await onChoisir({ id: produit.produit_id, nom_reference: produit.nom_reference }, varianteId);
     setSaving(false);
     if (!res.ok) { setError(res.message); return; }
     setConfirmation(produit.nom_reference);
     setTimeout(onClose, 900);
+  };
+
+  // Sur un produit tapé : 0 variante active -> NULL légitime (vrac/frais) ;
+  // 1 -> automatique ; plusieurs -> écran de choix explicite, jamais de repli.
+  const choisir = async (produit) => {
+    if (saving || resolvingVariante) return;
+    setError(null);
+    setResolvingVariante(true);
+    const { data, error: errVar } = await supabase
+      .from('variantes_produit')
+      .select('id, libelle, quantite_nette, unite_quantite, nombre_unites')
+      .eq('produit_id', produit.produit_id)
+      .eq('actif', true);
+    setResolvingVariante(false);
+
+    if (errVar) { setError("Impossible de vérifier les variantes de ce produit, réessaie."); return; }
+
+    const liste = data || [];
+    if (liste.length <= 1) {
+      await finaliser(produit, liste[0]?.id ?? null);
+      return;
+    }
+
+    setProduitEnAttente(produit);
+    setVariantesAChoisir([...liste].sort((a, b) => libelleVariante(a).localeCompare(libelleVariante(b), "fr")));
+    setVarianteChoisie(null);
+  };
+
+  const annulerChoixVariante = () => {
+    setProduitEnAttente(null);
+    setVariantesAChoisir(null);
+    setVarianteChoisie(null);
+  };
+
+  const validerVariante = () => {
+    if (!varianteChoisie || !produitEnAttente) return;
+    finaliser(produitEnAttente, varianteChoisie);
   };
 
   return (
@@ -4955,16 +5013,37 @@ function CorrigerProduitSheet({ item, enseigne = null, onClose, onChoisir }) {
       <div onClick={e=>e.stopPropagation()} style={{ background:C.white, borderRadius:"20px 20px 0 0", width:"100%", maxHeight:"85vh", display:"flex", flexDirection:"column", padding:"20px 20px calc(20px + env(safe-area-inset-bottom, 0px))", boxSizing:"border-box", overflow:"hidden" }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
           <div>
-            <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.text }}>Choisir le bon produit</div>
-            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, marginTop:2 }}>Actuellement : {item.product}{item.format?` ${item.format}`:""}</div>
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.text }}>
+              {variantesAChoisir ? "Quelle quantité ?" : "Choisir le bon produit"}
+            </div>
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, marginTop:2 }}>
+              {variantesAChoisir ? produitEnAttente?.nom_reference : `Actuellement : ${item.product}${item.format?` ${item.format}`:""}`}
+            </div>
           </div>
-          <button onClick={onClose} style={{ background:C.grayLight, border:"none", borderRadius:99, width:28, height:28, color:C.textLight, fontSize:14, cursor:"pointer" }}>✕</button>
+          <button onClick={variantesAChoisir ? annulerChoixVariante : onClose} style={{ background:C.grayLight, border:"none", borderRadius:99, width:28, height:28, color:C.textLight, fontSize:14, cursor:"pointer" }}>
+            {variantesAChoisir ? "←" : "✕"}
+          </button>
         </div>
 
         {confirmation ? (
           <div style={{ textAlign:"center", padding:"24px 0", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.green }}>
             ✓ Rattaché à « {confirmation} »
           </div>
+        ) : variantesAChoisir ? (
+          <>
+            {error && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:"#CC0000", marginBottom:8 }}>⚠️ {error}</div>}
+            <div style={{ overflowY:"auto", WebkitOverflowScrolling:"touch", flex:1, minHeight:0, paddingBottom:24 }}>
+              {variantesAChoisir.map(v => (
+                <div key={v.id} onClick={()=>setVarianteChoisie(v.id)} style={{ padding:"12px 10px", borderBottom:`1px solid ${C.grayLight}`, display:"flex", alignItems:"center", gap:10, cursor:"pointer" }}>
+                  <div style={{ width:20, height:20, borderRadius:99, border:`2px solid ${varianteChoisie===v.id?C.blue:C.grayLight}`, background:varianteChoisie===v.id?C.blue:"transparent", flexShrink:0 }} />
+                  <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text }}>{libelleVariante(v)}</span>
+                </div>
+              ))}
+            </div>
+            <button onClick={validerVariante} disabled={!varianteChoisie || saving} style={{ marginTop:12, width:"100%", padding:"13px", border:"none", borderRadius:12, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.white, background:(!varianteChoisie || saving)?C.grayLight:C.blue, cursor:(!varianteChoisie || saving)?"default":"pointer" }}>
+              Valider
+            </button>
+          </>
         ) : (
           <>
             <input autoFocus value={query} onChange={e=>setQuery(e.target.value)}
@@ -4976,12 +5055,12 @@ function CorrigerProduitSheet({ item, enseigne = null, onClose, onChoisir }) {
               {query.trim().length < 2 && (
                 <div style={{ textAlign:"center", padding:"20px 0", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>Tape au moins 2 caractères pour chercher</div>
               )}
-              {searching && <div style={{ textAlign:"center", padding:"12px 0", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>Recherche...</div>}
+              {(searching || resolvingVariante) && <div style={{ textAlign:"center", padding:"12px 0", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>{resolvingVariante ? "Vérification..." : "Recherche..."}</div>}
               {!searching && query.trim().length >= 2 && results.length === 0 && !error && (
                 <div style={{ textAlign:"center", padding:"20px 0", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>Aucun produit trouvé</div>
               )}
               {results.map(p => (
-                <div key={p.produit_id} onClick={()=>choisir(p)} style={{ padding:"12px 10px", borderBottom:`1px solid ${C.grayLight}`, display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, cursor:saving?"default":"pointer", opacity:saving?0.6:1 }}>
+                <div key={p.produit_id} onClick={()=>choisir(p)} style={{ padding:"12px 10px", borderBottom:`1px solid ${C.grayLight}`, display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, cursor:(saving||resolvingVariante)?"default":"pointer", opacity:(saving||resolvingVariante)?0.6:1 }}>
                   <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text }}>{p.nom_reference}</span>
                   {p.dernier_prix != null && (
                     <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:700, color:C.textLight, flexShrink:0 }}>
