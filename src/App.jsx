@@ -4534,6 +4534,11 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
   const nomAffiche = (item) => libelleVersNomProduit[normName(item.product)] || item.product;
   // Chantier 2 — correction d'un article depuis le détail ticket : { arc, item } de l'article tapé.
   const [correctionCible, setCorrectionCible] = useState(null);
+  // Chantier 2b — enseigne du ticket en cours (magasins.enseigne_id), pour
+  // faire remonter en tête les produits déjà vus dans cette enseigne côté
+  // RPC de recherche. null si non résolue (recherche non filtrée/triée par
+  // enseigne dans ce cas, jamais bloquante).
+  const [enseigneCourante, setEnseigneCourante] = useState(null);
   const [pendingDeleteArc, setPendingDeleteArc] = useState(null);
   const [added, setAdded] = useState(new Set());
   const [sort, setSort] = useState("produit");
@@ -4551,19 +4556,24 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
   // Chantier #69 (archives.items[].product ↔ lignes_ticket.libelle_brut),
   // scopée en plus au jour du ticket (archives n'a pas de ticket_id, donc pas
   // de clé technique directe — la RLS restreint déjà lignes_ticket à
-  // l'utilisateur courant). Puis appelle la RPC existante
-  // corriger_association_ligne_ticket (déjà utilisée ailleurs dans le repo
-  // pour une correction manuelle, méthode 'humaine').
-  const rattacherProduit = async (arc, item, produit) => {
+  // l'utilisateur courant).
+  const trouverLignesTicket = async (arc, item) => {
     const jour = new Date(arc.date).toISOString().slice(0, 10);
-    const { data: lignes, error: errLignes } = await supabase
+    const { data: lignes, error } = await supabase
       .from('lignes_ticket')
-      .select('id, libelle_brut, tickets!inner(date_ticket)')
+      .select('id, libelle_brut, tickets!inner(date_ticket, magasin_id)')
       .eq('tickets.date_ticket', jour);
-    if (errLignes) return { ok: false, message: "Recherche du ticket impossible, vérifie ta connexion." };
-
+    if (error) return { candidats: [], error };
     const cible = normName(item.product);
-    const candidats = (lignes || []).filter(l => normName(l.libelle_brut) === cible);
+    return { candidats: (lignes || []).filter(l => normName(l.libelle_brut) === cible), error: null };
+  };
+
+  // Puis appelle la RPC existante corriger_association_ligne_ticket (déjà
+  // utilisée ailleurs dans le repo pour une correction manuelle, méthode
+  // 'humaine').
+  const rattacherProduit = async (arc, item, produit) => {
+    const { candidats, error: errLignes } = await trouverLignesTicket(arc, item);
+    if (errLignes) return { ok: false, message: "Recherche du ticket impossible, vérifie ta connexion." };
     if (candidats.length === 0) {
       return { ok: false, message: "Impossible de retrouver cet article dans le système (ticket ancien ou non synchronisé)." };
     }
@@ -4579,9 +4589,27 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
     }
     if (succes === 0) return { ok: false, message: "Le rattachement a échoué, réessaie." };
 
-    onLibelleResolu?.(cible, produit.nom_reference);
+    onLibelleResolu?.(normName(item.product), produit.nom_reference);
     return { ok: true };
   };
+
+  // Chantier 2b — résout l'enseigne du ticket en cours (via magasin_id) dès
+  // l'ouverture de la modale de correction, pour trier les résultats de la
+  // RPC de recherche. Best-effort : si le ticket/magasin n'est pas
+  // retrouvé, enseigneCourante reste null et la recherche n'est simplement
+  // pas triée par enseigne (jamais bloquant).
+  useEffect(() => {
+    if (!correctionCible) { setEnseigneCourante(null); return; }
+    let annule = false;
+    (async () => {
+      const { candidats } = await trouverLignesTicket(correctionCible.arc, correctionCible.item);
+      const magasinId = candidats[0]?.tickets?.magasin_id;
+      if (!magasinId) { if (!annule) setEnseigneCourante(null); return; }
+      const { data } = await supabase.from('magasins').select('enseigne_id').eq('id', magasinId).maybeSingle();
+      if (!annule) setEnseigneCourante(data?.enseigne_id ?? null);
+    })();
+    return () => { annule = true; };
+  }, [correctionCible]);
 
   const categories = useMemo(() => {
     const seen = new Set();
@@ -4871,6 +4899,7 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
       {correctionCible && (
         <CorrigerProduitSheet
           item={correctionCible.item}
+          enseigne={enseigneCourante}
           onClose={()=>setCorrectionCible(null)}
           onChoisir={(produit)=>rattacherProduit(correctionCible.arc, correctionCible.item, produit)}
         />
@@ -4879,11 +4908,12 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
   );
 }
 
-// ── CORRIGER PRODUIT SHEET (Chantier 2) ─────────────────────────────────────
-// Recherche par nom dans produits.nom_reference (même requête que le
-// Catalogue : actif=true, ilike, limite 20, debounce ~280ms) pour rattacher
-// manuellement un article d'historique mal identifié à son vrai produit Core.
-function CorrigerProduitSheet({ item, onClose, onChoisir }) {
+// ── CORRIGER PRODUIT SHEET (Chantier 2, recherche RPC depuis Chantier 2b) ───
+// Recherche tolérante (accents/ordre/multi-mots) déléguée à la RPC Postgres
+// rechercher_produits_pour_correction — voir le bloc SQL fourni séparément.
+// Plus de chargement client du catalogue : la RPC filtre, trie (enseigne du
+// ticket en tête) et limite à 20 côté serveur.
+function CorrigerProduitSheet({ item, enseigne = null, onClose, onChoisir }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -4897,25 +4927,23 @@ function CorrigerProduitSheet({ item, onClose, onChoisir }) {
     const mySeq = ++seq.current;
     setSearching(true); setError(null);
     const timer = setTimeout(async () => {
-      const { data, error: err } = await supabase.from('produits')
-        .select('id, nom_reference')
-        .eq('actif', true)
-        .ilike('nom_reference', `%${query.trim()}%`)
-        .order('nom_reference')
-        .limit(20);
-      if (mySeq !== seq.current) return;
+      const { data, error: err } = await supabase.rpc('rechercher_produits_pour_correction', {
+        p_terme: query.trim(),
+        p_enseigne: enseigne,
+      });
+      if (mySeq !== seq.current) return; // réponse obsolète, ignorée
       if (err) { setError("Recherche impossible."); setSearching(false); return; }
       setResults(data || []);
       setSearching(false);
     }, 280);
     return () => clearTimeout(timer);
-  }, [query]);
+  }, [query, enseigne]);
 
   const choisir = async (produit) => {
     if (saving) return;
     setSaving(true);
     setError(null);
-    const res = await onChoisir(produit);
+    const res = await onChoisir({ id: produit.produit_id, nom_reference: produit.nom_reference });
     setSaving(false);
     if (!res.ok) { setError(res.message); return; }
     setConfirmation(produit.nom_reference);
@@ -4924,7 +4952,7 @@ function CorrigerProduitSheet({ item, onClose, onChoisir }) {
 
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", zIndex:300 }} onClick={onClose}>
-      <div onClick={e=>e.stopPropagation()} style={{ background:C.white, borderRadius:"20px 20px 0 0", width:"100%", maxHeight:"80vh", display:"flex", flexDirection:"column", padding:"20px 20px 32px", boxSizing:"border-box" }}>
+      <div onClick={e=>e.stopPropagation()} style={{ background:C.white, borderRadius:"20px 20px 0 0", width:"100%", maxHeight:"85vh", display:"flex", flexDirection:"column", padding:"20px 20px calc(20px + env(safe-area-inset-bottom, 0px))", boxSizing:"border-box", overflow:"hidden" }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
           <div>
             <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.text }}>Choisir le bon produit</div>
@@ -4944,14 +4972,22 @@ function CorrigerProduitSheet({ item, onClose, onChoisir }) {
               style={{ width:"100%", padding:"11px 14px", borderRadius:10, border:`2px solid ${query?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:12 }}
             />
             {error && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:"#CC0000", marginBottom:8 }}>⚠️ {error}</div>}
-            <div style={{ overflowY:"auto", flex:1 }}>
+            <div style={{ overflowY:"auto", WebkitOverflowScrolling:"touch", flex:1, minHeight:0, paddingBottom:24 }}>
+              {query.trim().length < 2 && (
+                <div style={{ textAlign:"center", padding:"20px 0", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>Tape au moins 2 caractères pour chercher</div>
+              )}
               {searching && <div style={{ textAlign:"center", padding:"12px 0", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>Recherche...</div>}
               {!searching && query.trim().length >= 2 && results.length === 0 && !error && (
                 <div style={{ textAlign:"center", padding:"20px 0", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>Aucun produit trouvé</div>
               )}
               {results.map(p => (
-                <div key={p.id} onClick={()=>choisir(p)} style={{ padding:"12px 10px", borderBottom:`1px solid ${C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, cursor:saving?"default":"pointer", opacity:saving?0.6:1 }}>
-                  {p.nom_reference}
+                <div key={p.produit_id} onClick={()=>choisir(p)} style={{ padding:"12px 10px", borderBottom:`1px solid ${C.grayLight}`, display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, cursor:saving?"default":"pointer", opacity:saving?0.6:1 }}>
+                  <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text }}>{p.nom_reference}</span>
+                  {p.dernier_prix != null && (
+                    <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:700, color:C.textLight, flexShrink:0 }}>
+                      {Number(p.dernier_prix).toFixed(2).replace('.', ',')} €
+                    </span>
+                  )}
                 </div>
               ))}
             </div>
