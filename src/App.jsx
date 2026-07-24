@@ -8,6 +8,7 @@ import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adapt
 import { classerMagasinsPourPanier, calculerEconomiePotentielle } from "./lib/classementPanierCore";
 import ClassementPanierShadow from "./components/dev/ClassementPanierShadow";
 import AdminRejetsCorePanel from "./components/admin/AdminRejetsCorePanel";
+import AValiderSheet from "./components/dev/AValiderSheet";
 // #65 — bandeau de mise à jour PWA (pont vers registerSW dans main.jsx)
 import { onNeedRefresh, applyUpdate } from "./lib/swUpdate";
 // #56.5.A — double écriture Core, fire-and-forget, invisible pour l'utilisateur
@@ -5833,6 +5834,9 @@ export default function App() {
   const [showManualEntryFromScan, setShowManualEntryFromScan] = useState(false);
   const [showGalleryImportFromScan, setShowGalleryImportFromScan] = useState(false);
   const [autoImportResult, setAutoImportResult] = useState(null);
+  // Chantier anti-doublon, étape 1 — écran "À valider", dev uniquement (voir
+  // le bouton flottant plus bas, gardé par import.meta.env.DEV).
+  const [showAValider, setShowAValider] = useState(false);
   const handleFlash = () => setShowScanChoix(true);
   const handleFlashConfirmed = () => { setShowScanChoix(false); setAutoOpenCamera(true); setTab("prices"); };
   const [showCircleSheet,  setShowCircleSheet]  = useState(false);
@@ -6552,6 +6556,16 @@ export default function App() {
             </button>
           </div>
         )}
+        {/* Chantier #73 — accès discret réservé admin (même critère que
+            AdminRejetsCorePanel : isAdmin, calculé via la RPC
+            est_administrateur() / app_metadata.role==='admin'), jamais dans
+            la TabBar, invisible pour tout autre utilisateur en prod. */}
+        {isAdmin && (
+          <button onClick={()=>setShowAValider(true)} style={{ position:"fixed", top:10, left:10, zIndex:500, padding:"6px 10px", borderRadius:8, border:"none", background:"rgba(0,0,0,0.55)", color:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:10, cursor:"pointer" }}>
+            🔍 À valider
+          </button>
+        )}
+        {showAValider && isAdmin && <AValiderSheet onClose={()=>setShowAValider(false)}/>}
         {appToast && <Toast msg={appToast.msg} ok={appToast.ok}/>}
         {showCircleSheet  && <CircleSheet  circles={circles} userId={session.user.id} userEmail={session.user.email} profileMap={profileMap} pseudo={pseudo} archives={archives} onClose={()=>setShowCircleSheet(false)} onInvite={inviteByPseudo} onUpdateStatus={updateCircleStatus}/>}
         {showStatsSheet   && <StatsSheet   userId={session.user.id} archives={archives} onClose={()=>setShowStatsSheet(false)}/>}
