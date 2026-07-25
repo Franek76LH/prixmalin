@@ -5048,6 +5048,13 @@ function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onCl
   const [barcodeMessage, setBarcodeMessage] = useState(null);
   const [barcodeCandidats, setBarcodeCandidats] = useState(null);
   const [barcodeConfirmation, setBarcodeConfirmation] = useState(null);
+  // Chantier "Scan code-barres" bout 2 — code scanné mais absent de la base :
+  // gardé en mémoire pour que la recherche catalogue (déjà présente) devienne
+  // un "apprentissage" (enregistre le code sur la variante choisie) au lieu
+  // d'un rattachement classique. conflitCodeBarres : la variante choisie a
+  // déjà un AUTRE code -> confirmation explicite avant tout remplacement.
+  const [codeBarresEnAttente, setCodeBarresEnAttente] = useState(null);
+  const [conflitCodeBarres, setConflitCodeBarres] = useState(null);
 
   useEffect(() => {
     if (query.trim().length < 2) { setResults([]); setError(null); return; }
@@ -5066,13 +5073,13 @@ function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onCl
     return () => clearTimeout(timer);
   }, [query, enseigne]);
 
-  const finaliser = async (produit, varianteId, methode = 'humaine') => {
+  const finaliser = async (produit, varianteId, methode = 'humaine', texteConfirmation = null) => {
     setSaving(true);
     setError(null);
     const res = await onChoisir({ id: produit.produit_id, nom_reference: produit.nom_reference }, varianteId, methode);
     setSaving(false);
     if (!res.ok) { setError(res.message); return; }
-    setConfirmation(produit.nom_reference);
+    setConfirmation(texteConfirmation ?? `✓ Rattaché à « ${produit.nom_reference} »`);
     setTimeout(onClose, 900);
   };
 
@@ -5086,6 +5093,7 @@ function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onCl
     setScanOuvert(false);
     setRechercheBarcode(true);
     setBarcodeMessage(null);
+    setCodeBarresEnAttente(null);
     const { data, error: errBc } = await supabase
       .from('variantes_produit')
       .select('id, produit_id, libelle, quantite_nette, unite_quantite, url_image, produits(nom_reference), marques(nom)')
@@ -5094,7 +5102,10 @@ function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onCl
     setRechercheBarcode(false);
     if (errBc) { setBarcodeMessage("Recherche impossible, réessaie."); return; }
     if (!data || data.length === 0) {
-      setBarcodeMessage("Ce code-barres n'est pas encore dans la base (géré au prochain lot).");
+      // Bout 2 — code inconnu : on le garde en mémoire, la recherche
+      // catalogue juste en dessous devient le moyen de l'apprendre.
+      setCodeBarresEnAttente(code);
+      setBarcodeMessage(`Code-barres inconnu (${code}). Cherche le bon produit ci-dessous pour l'enregistrer dessus.`);
       return;
     }
     if (data.length === 1) { setBarcodeConfirmation(data[0]); return; }
@@ -5116,6 +5127,68 @@ function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onCl
     );
   };
 
+  const annulerApprentissage = () => {
+    setCodeBarresEnAttente(null);
+    setConflitCodeBarres(null);
+    setBarcodeMessage(null);
+  };
+
+  // Chantier "Scan code-barres" bout 2 — enregistre codeBarresEnAttente sur
+  // la variante choisie (RLS admin déjà en place sur variantes_produit,
+  // aucune nouvelle RPC nécessaire) puis relie via le même chemin que le
+  // bout 1 (relier_variante_scan_code_barres). Vérifie d'abord qu'aucune
+  // AUTRE variante ne porte déjà ce code (contrainte UNIQUE en base de toute
+  // façon, mais message clair plutôt qu'une erreur brute), et demande
+  // confirmation avant d'écraser un code déjà présent et différent.
+  const procederApprentissage = async (produit, varianteId, forcerRemplacement = false) => {
+    if (!varianteId) {
+      setError("Ce produit n'a pas de variante précise à associer à ce code-barres.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+
+    const { data: autre, error: errAutre } = await supabase
+      .from('variantes_produit')
+      .select('id, libelle, produits(nom_reference)')
+      .eq('code_barres', codeBarresEnAttente)
+      .neq('id', varianteId)
+      .maybeSingle();
+    if (errAutre) { setSaving(false); setError("Vérification impossible, réessaie."); return; }
+    if (autre) {
+      setSaving(false);
+      setError(`Ce code-barres est déjà enregistré sur « ${autre.produits?.nom_reference ?? autre.libelle ?? 'un autre produit'} » — impossible de l'enregistrer aussi ici.`);
+      return;
+    }
+
+    const { data: varianteActuelle, error: errV } = await supabase
+      .from('variantes_produit').select('code_barres').eq('id', varianteId).maybeSingle();
+    if (errV) { setSaving(false); setError("Vérification impossible, réessaie."); return; }
+
+    if (varianteActuelle?.code_barres && varianteActuelle.code_barres !== codeBarresEnAttente && !forcerRemplacement) {
+      setSaving(false);
+      setConflitCodeBarres({ produit, varianteId, ancienCode: varianteActuelle.code_barres });
+      return;
+    }
+
+    if (varianteActuelle?.code_barres !== codeBarresEnAttente) {
+      const { error: errMaj } = await supabase
+        .from('variantes_produit')
+        .update({ code_barres: codeBarresEnAttente })
+        .eq('id', varianteId);
+      if (errMaj) {
+        setSaving(false);
+        setError(errMaj.code === '23505' ? "Ce code-barres est déjà utilisé par un autre produit." : "Enregistrement du code-barres impossible, réessaie.");
+        return;
+      }
+    }
+
+    setSaving(false);
+    setConflitCodeBarres(null);
+    await finaliser(produit, varianteId, 'scan_code_barres', `✓ Code-barres enregistré sur « ${produit.nom_reference} » + ligne reliée`);
+    setCodeBarresEnAttente(null);
+  };
+
   // Sur un produit tapé : 0 variante active -> NULL légitime (vrac/frais) ;
   // 1 -> automatique ; plusieurs -> écran de choix explicite, jamais de repli.
   const choisir = async (produit) => {
@@ -5133,7 +5206,9 @@ function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onCl
 
     const liste = data || [];
     if (liste.length <= 1) {
-      await finaliser(produit, liste[0]?.id ?? null);
+      const varianteId = liste[0]?.id ?? null;
+      if (codeBarresEnAttente) await procederApprentissage(produit, varianteId);
+      else await finaliser(produit, varianteId);
       return;
     }
 
@@ -5150,7 +5225,8 @@ function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onCl
 
   const validerVariante = () => {
     if (!varianteChoisie || !produitEnAttente) return;
-    finaliser(produitEnAttente, varianteChoisie);
+    if (codeBarresEnAttente) procederApprentissage(produitEnAttente, varianteChoisie);
+    else finaliser(produitEnAttente, varianteChoisie);
   };
 
   return (
@@ -5159,20 +5235,36 @@ function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onCl
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
           <div>
             <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.text }}>
-              {barcodeConfirmation || barcodeCandidats ? "Code-barres" : variantesAChoisir ? "Quelle quantité ?" : "Choisir le bon produit"}
+              {conflitCodeBarres ? "Code déjà utilisé ?" : barcodeConfirmation || barcodeCandidats ? "Code-barres" : variantesAChoisir ? "Quelle quantité ?" : "Choisir le bon produit"}
             </div>
             <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, marginTop:2 }}>
-              {barcodeConfirmation || barcodeCandidats ? `Actuellement : ${item.product}${item.format?` ${item.format}`:""}` : variantesAChoisir ? produitEnAttente?.nom_reference : `Actuellement : ${item.product}${item.format?` ${item.format}`:""}`}
+              {variantesAChoisir && !codeBarresEnAttente ? produitEnAttente?.nom_reference : `Actuellement : ${item.product}${item.format?` ${item.format}`:""}`}
             </div>
           </div>
-          <button onClick={barcodeConfirmation || barcodeCandidats ? annulerBarcode : variantesAChoisir ? annulerChoixVariante : onClose} style={{ background:C.grayLight, border:"none", borderRadius:99, width:28, height:28, color:C.textLight, fontSize:14, cursor:"pointer" }}>
-            {barcodeConfirmation || barcodeCandidats || variantesAChoisir ? "←" : "✕"}
+          <button onClick={conflitCodeBarres ? ()=>setConflitCodeBarres(null) : barcodeConfirmation || barcodeCandidats ? annulerBarcode : variantesAChoisir ? annulerChoixVariante : onClose} style={{ background:C.grayLight, border:"none", borderRadius:99, width:28, height:28, color:C.textLight, fontSize:14, cursor:"pointer" }}>
+            {conflitCodeBarres || barcodeConfirmation || barcodeCandidats || variantesAChoisir ? "←" : "✕"}
           </button>
         </div>
 
         {confirmation ? (
           <div style={{ textAlign:"center", padding:"24px 0", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.green }}>
-            ✓ Rattaché à « {confirmation} »
+            {confirmation}
+          </div>
+        ) : conflitCodeBarres ? (
+          <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+            {error && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:"#CC0000" }}>⚠️ {error}</div>}
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:14, color:C.text, lineHeight:1.5 }}>
+              « {conflitCodeBarres.produit.nom_reference} » a déjà le code-barres <strong>{conflitCodeBarres.ancienCode}</strong>.<br/>
+              Le remplacer par <strong>{codeBarresEnAttente}</strong> ?
+            </div>
+            <div style={{ display:"flex", gap:8 }}>
+              <button onClick={()=>procederApprentissage(conflitCodeBarres.produit, conflitCodeBarres.varianteId, true)} disabled={saving} style={{ flex:1, padding:"13px", border:"none", borderRadius:12, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.white, background:saving?C.grayLight:"#CC0000", cursor:saving?"default":"pointer" }}>
+                {saving ? "..." : "Remplacer"}
+              </button>
+              <button onClick={()=>setConflitCodeBarres(null)} disabled={saving} style={{ padding:"13px 16px", border:"none", borderRadius:12, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, background:C.grayLight, cursor:"pointer" }}>
+                Annuler
+              </button>
+            </div>
           </div>
         ) : barcodeConfirmation ? (
           <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
@@ -5237,7 +5329,14 @@ function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onCl
               </button>
             )}
             {rechercheBarcode && <div style={{ textAlign:"center", padding:"8px 0", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>Recherche du code-barres...</div>}
-            {barcodeMessage && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:"#B8860B", marginBottom:8 }}>ℹ️ {barcodeMessage}</div>}
+            {barcodeMessage && (
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:"#B8860B", marginBottom:8, display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
+                <span>ℹ️ {barcodeMessage}</span>
+                {codeBarresEnAttente && (
+                  <button onClick={annulerApprentissage} style={{ background:"none", border:"none", color:C.textLight, fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:800, textDecoration:"underline", cursor:"pointer", flexShrink:0 }}>Annuler</button>
+                )}
+              </div>
+            )}
             {error && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:"#CC0000", marginBottom:8 }}>⚠️ {error}</div>}
             <div style={{ overflowY:"auto", WebkitOverflowScrolling:"touch", flex:1, minHeight:0, paddingBottom:24 }}>
               {query.trim().length < 2 && (
@@ -5245,7 +5344,9 @@ function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onCl
               )}
               {(searching || resolvingVariante) && <div style={{ textAlign:"center", padding:"12px 0", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>{resolvingVariante ? "Vérification..." : "Recherche..."}</div>}
               {!searching && query.trim().length >= 2 && results.length === 0 && !error && (
-                <div style={{ textAlign:"center", padding:"20px 0", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>Aucun produit trouvé</div>
+                <div style={{ textAlign:"center", padding:"20px 0", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>
+                  {codeBarresEnAttente ? "Produit introuvable — création gérée au prochain lot." : "Aucun produit trouvé"}
+                </div>
               )}
               {results.map(p => (
                 <div key={p.produit_id} onClick={()=>choisir(p)} style={{ padding:"12px 10px", borderBottom:`1px solid ${C.grayLight}`, display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, cursor:(saving||resolvingVariante)?"default":"pointer", opacity:(saving||resolvingVariante)?0.6:1 }}>
