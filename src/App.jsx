@@ -8,6 +8,11 @@ import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adapt
 import { classerMagasinsPourPanier, calculerEconomiePotentielle } from "./lib/classementPanierCore";
 import ClassementPanierShadow from "./components/dev/ClassementPanierShadow";
 import AdminRejetsCorePanel from "./components/admin/AdminRejetsCorePanel";
+// Chantier "Scan code-barres", bout 1 — BarcodeDetector natif absent d'iOS
+// Safari, on utilise @zxing/browser (getUserMedia + décodage JS, éprouvé sur
+// iOS). Shadow François uniquement, voir estFrancois plus bas.
+import { BrowserMultiFormatReader } from "@zxing/browser";
+import { BarcodeFormat, DecodeHintType } from "@zxing/library";
 import AValiderSheet from "./components/dev/AValiderSheet";
 // #65 — bandeau de mise à jour PWA (pont vers registerSW dans main.jsx)
 import { onNeedRefresh, applyUpdate } from "./lib/swUpdate";
@@ -4525,7 +4530,7 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos, isAdmin
 }
 
 // ── ARCHIVE TAB ───────────────────────────────────────────────────────────────
-function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceDB, onImport, onSavePrice, produitsRef = [], libelleVersNomProduit = {}, onLibelleResolu }) {
+function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceDB, onImport, onSavePrice, produitsRef = [], libelleVersNomProduit = {}, onLibelleResolu, estFrancois = false }) {
   // Chantier 1 — affichage seulement : si la ligne de ticket correspondante
   // est rattachée à un produit Core (résolu au chargement dans App, via
   // lignes_ticket.produit_id), on montre nom_reference à la place du libellé
@@ -4574,7 +4579,12 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
   // 'humaine'). Chantier #71.1 — varianteId est résolu en amont par
   // CorrigerProduitSheet (0 variante active -> null légitime, 1 -> automatique,
   // plusieurs -> choix explicite de l'utilisateur, jamais une valeur par défaut).
-  const rattacherProduit = async (arc, item, produit, varianteId = null) => {
+  // Chantier "Scan code-barres" bout 1 — methode='scan_code_barres' appelle
+  // relier_variante_scan_code_barres à la place : même effet de bord que
+  // corriger_association_ligne_ticket (elle l'appelle en interne, aucune
+  // logique dupliquée), seule la méthode tracée et l'origine de l'alias
+  // changent.
+  const rattacherProduit = async (arc, item, produit, varianteId = null, methode = 'humaine') => {
     const { candidats, error: errLignes } = await trouverLignesTicket(arc, item);
     if (errLignes) return { ok: false, message: "Recherche du ticket impossible, vérifie ta connexion." };
     if (candidats.length === 0) {
@@ -4583,11 +4593,18 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
 
     let succes = 0;
     for (const ligne of candidats) {
-      const { error } = await supabase.rpc('corriger_association_ligne_ticket', {
-        p_ligne_ticket_id: ligne.id,
-        p_produit_id: produit.id,
-        p_variante_produit_id: varianteId,
-      });
+      const { error } = methode === 'scan_code_barres'
+        ? await supabase.rpc('relier_variante_scan_code_barres', {
+            p_ligne_ticket_id: ligne.id,
+            p_produit_id: produit.id,
+            p_variante_produit_id: varianteId,
+            p_libelle_alias: ligne.libelle_brut,
+          })
+        : await supabase.rpc('corriger_association_ligne_ticket', {
+            p_ligne_ticket_id: ligne.id,
+            p_produit_id: produit.id,
+            p_variante_produit_id: varianteId,
+          });
       if (!error) succes++;
     }
     if (succes === 0) return { ok: false, message: "Le rattachement a échoué, réessaie." };
@@ -4903,8 +4920,9 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
         <CorrigerProduitSheet
           item={correctionCible.item}
           enseigne={enseigneCourante}
+          estFrancois={estFrancois}
           onClose={()=>setCorrectionCible(null)}
-          onChoisir={(produit,varianteId)=>rattacherProduit(correctionCible.arc, correctionCible.item, produit, varianteId)}
+          onChoisir={(produit,varianteId,methode)=>rattacherProduit(correctionCible.arc, correctionCible.item, produit, varianteId, methode)}
         />
       )}
     </div>
@@ -4927,7 +4945,84 @@ function libelleVariante(v) {
   return base || 'Variante';
 }
 
-function CorrigerProduitSheet({ item, enseigne = null, onClose, onChoisir }) {
+// Chantier "Scan code-barres" bout 1 — nom composé pour une variante trouvée
+// par code-barres : marque + libellé + quantité, tel que demandé (distinct de
+// libelleVariante ci-dessus, qui ne sert qu'au sélecteur "plusieurs variantes"
+// de la recherche par nom).
+function nomComposeVariante(v) {
+  const marque = v.marques?.nom ? `${v.marques.nom} ` : '';
+  const libelle = v.libelle || '';
+  const quantite = (v.quantite_nette != null && v.unite_quantite) ? ` ${v.quantite_nette}${v.unite_quantite}` : '';
+  const compose = `${marque}${libelle}${quantite}`.trim();
+  return compose || (v.produits?.nom_reference ?? 'Produit sans nom');
+}
+
+// ── BARCODE SCANNER SHEET (Chantier "Scan code-barres", bout 1) ────────────
+// Caméra arrière + décodage EAN-13/EAN-8/UPC-A via @zxing/browser
+// (BarcodeDetector natif absent d'iOS Safari — cette lib décode en JS pur à
+// partir du flux vidéo, éprouvée sur iOS). Ferme la caméra dès qu'un code est
+// lu ou à la fermeture manuelle ; ne laisse jamais un flux caméra ouvert.
+function BarcodeScannerSheet({ onDetected, onClose }) {
+  const videoRef = useRef(null);
+  const [erreur, setErreur] = useState(null);
+  const [pret, setPret] = useState(false);
+
+  useEffect(() => {
+    let annule = false;
+    let controls = null;
+    (async () => {
+      try {
+        const hints = new Map();
+        hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.EAN_13, BarcodeFormat.EAN_8, BarcodeFormat.UPC_A]);
+        const reader = new BrowserMultiFormatReader(hints);
+        controls = await reader.decodeFromConstraints(
+          { video: { facingMode: { ideal: 'environment' } } },
+          videoRef.current,
+          (result) => {
+            if (annule || !result) return;
+            controls?.stop();
+            onDetected(result.getText());
+          }
+        );
+        if (!annule) setPret(true);
+      } catch (e) {
+        if (annule) return;
+        console.error('[BarcodeScannerSheet] ouverture caméra :', e);
+        setErreur(
+          e?.name === 'NotAllowedError'
+            ? "Accès à la caméra refusé — autorise-le dans Réglages > Safari > Caméra, puis réessaie."
+            : "Impossible d'ouvrir la caméra sur cet appareil."
+        );
+      }
+    })();
+    return () => { annule = true; controls?.stop(); };
+  }, [onDetected]);
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"#000", zIndex:600, display:"flex", flexDirection:"column" }}>
+      <div style={{ padding:"14px 16px calc(14px + env(safe-area-inset-top, 0px))", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0 }}>
+        <span style={{ color:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14 }}>📷 Scanner le code-barres</span>
+        <button onClick={onClose} style={{ background:"rgba(255,255,255,0.2)", border:"none", borderRadius:99, width:30, height:30, color:"#fff", fontSize:15, cursor:"pointer" }}>✕</button>
+      </div>
+      <div style={{ flex:1, position:"relative", display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden" }}>
+        <video ref={videoRef} style={{ width:"100%", height:"100%", objectFit:"cover" }} muted playsInline autoPlay />
+        {!pret && !erreur && (
+          <div style={{ position:"absolute", color:"#fff", fontFamily:"'Nunito',sans-serif", fontSize:13 }}>Ouverture de la caméra...</div>
+        )}
+        {erreur && (
+          <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center", padding:24, textAlign:"center", background:"rgba(0,0,0,0.7)" }}>
+            <div style={{ color:"#fff", fontFamily:"'Nunito',sans-serif", fontSize:14 }}>{erreur}</div>
+          </div>
+        )}
+        {pret && !erreur && (
+          <div style={{ position:"absolute", width:"72%", maxWidth:320, aspectRatio:"2/1", border:"3px solid #00B341", borderRadius:12, pointerEvents:"none" }} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onClose, onChoisir }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -4944,6 +5039,15 @@ function CorrigerProduitSheet({ item, enseigne = null, onClose, onChoisir }) {
   const [produitEnAttente, setProduitEnAttente] = useState(null);
   const [variantesAChoisir, setVariantesAChoisir] = useState(null);
   const [varianteChoisie, setVarianteChoisie] = useState(null);
+  // Chantier "Scan code-barres" bout 1 — scanOuvert : caméra affichée.
+  // barcodeCandidats : plusieurs variantes partagent le même code (rare),
+  // laisse choisir. barcodeConfirmation : une variante trouvée, en attente de
+  // "Relier ce produit" / "Annuler". barcodeMessage : erreur ou "code inconnu".
+  const [scanOuvert, setScanOuvert] = useState(false);
+  const [rechercheBarcode, setRechercheBarcode] = useState(false);
+  const [barcodeMessage, setBarcodeMessage] = useState(null);
+  const [barcodeCandidats, setBarcodeCandidats] = useState(null);
+  const [barcodeConfirmation, setBarcodeConfirmation] = useState(null);
 
   useEffect(() => {
     if (query.trim().length < 2) { setResults([]); setError(null); return; }
@@ -4962,14 +5066,54 @@ function CorrigerProduitSheet({ item, enseigne = null, onClose, onChoisir }) {
     return () => clearTimeout(timer);
   }, [query, enseigne]);
 
-  const finaliser = async (produit, varianteId) => {
+  const finaliser = async (produit, varianteId, methode = 'humaine') => {
     setSaving(true);
     setError(null);
-    const res = await onChoisir({ id: produit.produit_id, nom_reference: produit.nom_reference }, varianteId);
+    const res = await onChoisir({ id: produit.produit_id, nom_reference: produit.nom_reference }, varianteId, methode);
     setSaving(false);
     if (!res.ok) { setError(res.message); return; }
     setConfirmation(produit.nom_reference);
     setTimeout(onClose, 900);
+  };
+
+  // Chantier "Scan code-barres" bout 1 — recherche par code_barres exact
+  // (espaces retirés, zéros initiaux CONSERVÉS — un EAN commençant par 0 n'est
+  // pas le même code sans ce zéro). 0 résultat -> message clair, pas d'erreur
+  // ni de blocage (le lot suivant gèrera ce cas). Plusieurs résultats -> choix
+  // explicite, jamais une variante prise au hasard.
+  const rechercherParCodeBarres = async (codeBrut) => {
+    const code = codeBrut.replace(/\s+/g, '');
+    setScanOuvert(false);
+    setRechercheBarcode(true);
+    setBarcodeMessage(null);
+    const { data, error: errBc } = await supabase
+      .from('variantes_produit')
+      .select('id, produit_id, libelle, quantite_nette, unite_quantite, url_image, produits(nom_reference), marques(nom)')
+      .eq('code_barres', code)
+      .eq('actif', true);
+    setRechercheBarcode(false);
+    if (errBc) { setBarcodeMessage("Recherche impossible, réessaie."); return; }
+    if (!data || data.length === 0) {
+      setBarcodeMessage("Ce code-barres n'est pas encore dans la base (géré au prochain lot).");
+      return;
+    }
+    if (data.length === 1) { setBarcodeConfirmation(data[0]); return; }
+    setBarcodeCandidats(data);
+  };
+
+  const annulerBarcode = () => {
+    setBarcodeConfirmation(null);
+    setBarcodeCandidats(null);
+    setBarcodeMessage(null);
+  };
+
+  const relierViaBarcode = () => {
+    if (!barcodeConfirmation) return;
+    finaliser(
+      { produit_id: barcodeConfirmation.produit_id, nom_reference: barcodeConfirmation.produits?.nom_reference ?? nomComposeVariante(barcodeConfirmation) },
+      barcodeConfirmation.id,
+      'scan_code_barres'
+    );
   };
 
   // Sur un produit tapé : 0 variante active -> NULL légitime (vrac/frais) ;
@@ -5015,20 +5159,56 @@ function CorrigerProduitSheet({ item, enseigne = null, onClose, onChoisir }) {
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
           <div>
             <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.text }}>
-              {variantesAChoisir ? "Quelle quantité ?" : "Choisir le bon produit"}
+              {barcodeConfirmation || barcodeCandidats ? "Code-barres" : variantesAChoisir ? "Quelle quantité ?" : "Choisir le bon produit"}
             </div>
             <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, marginTop:2 }}>
-              {variantesAChoisir ? produitEnAttente?.nom_reference : `Actuellement : ${item.product}${item.format?` ${item.format}`:""}`}
+              {barcodeConfirmation || barcodeCandidats ? `Actuellement : ${item.product}${item.format?` ${item.format}`:""}` : variantesAChoisir ? produitEnAttente?.nom_reference : `Actuellement : ${item.product}${item.format?` ${item.format}`:""}`}
             </div>
           </div>
-          <button onClick={variantesAChoisir ? annulerChoixVariante : onClose} style={{ background:C.grayLight, border:"none", borderRadius:99, width:28, height:28, color:C.textLight, fontSize:14, cursor:"pointer" }}>
-            {variantesAChoisir ? "←" : "✕"}
+          <button onClick={barcodeConfirmation || barcodeCandidats ? annulerBarcode : variantesAChoisir ? annulerChoixVariante : onClose} style={{ background:C.grayLight, border:"none", borderRadius:99, width:28, height:28, color:C.textLight, fontSize:14, cursor:"pointer" }}>
+            {barcodeConfirmation || barcodeCandidats || variantesAChoisir ? "←" : "✕"}
           </button>
         </div>
 
         {confirmation ? (
           <div style={{ textAlign:"center", padding:"24px 0", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.green }}>
             ✓ Rattaché à « {confirmation} »
+          </div>
+        ) : barcodeConfirmation ? (
+          <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+            {error && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:"#CC0000" }}>⚠️ {error}</div>}
+            <div style={{ display:"flex", gap:12, alignItems:"center" }}>
+              {barcodeConfirmation.url_image && (
+                <img src={barcodeConfirmation.url_image} alt="" style={{ width:64, height:64, borderRadius:10, objectFit:"cover", background:C.grayLight, flexShrink:0 }} />
+              )}
+              <div>
+                <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.text }}>{nomComposeVariante(barcodeConfirmation)}</div>
+                {barcodeConfirmation.produits?.nom_reference && (
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, marginTop:2 }}>{barcodeConfirmation.produits.nom_reference}</div>
+                )}
+              </div>
+            </div>
+            <div style={{ display:"flex", gap:8 }}>
+              <button onClick={relierViaBarcode} disabled={saving} style={{ flex:1, padding:"13px", border:"none", borderRadius:12, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.white, background:saving?C.grayLight:C.green, cursor:saving?"default":"pointer" }}>
+                {saving ? "..." : "Relier ce produit"}
+              </button>
+              <button onClick={annulerBarcode} disabled={saving} style={{ padding:"13px 16px", border:"none", borderRadius:12, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, background:C.grayLight, cursor:"pointer" }}>
+                Annuler
+              </button>
+            </div>
+          </div>
+        ) : barcodeCandidats ? (
+          <div style={{ overflowY:"auto", WebkitOverflowScrolling:"touch", flex:1, minHeight:0, paddingBottom:24 }}>
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, marginBottom:8 }}>Plusieurs produits partagent ce code-barres, choisis le bon :</div>
+            {barcodeCandidats.map(v => (
+              <div key={v.id} onClick={()=>{ setBarcodeConfirmation(v); setBarcodeCandidats(null); }} style={{ padding:"12px 10px", borderBottom:`1px solid ${C.grayLight}`, display:"flex", alignItems:"center", gap:10, cursor:"pointer" }}>
+                {v.url_image && <img src={v.url_image} alt="" style={{ width:36, height:36, borderRadius:8, objectFit:"cover", background:C.grayLight, flexShrink:0 }} />}
+                <div>
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text }}>{nomComposeVariante(v)}</div>
+                  {v.produits?.nom_reference && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight }}>{v.produits.nom_reference}</div>}
+                </div>
+              </div>
+            ))}
           </div>
         ) : variantesAChoisir ? (
           <>
@@ -5051,6 +5231,13 @@ function CorrigerProduitSheet({ item, enseigne = null, onClose, onChoisir }) {
               placeholder="🔍 Chercher un produit du catalogue..."
               style={{ width:"100%", padding:"11px 14px", borderRadius:10, border:`2px solid ${query?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:12 }}
             />
+            {estFrancois && (
+              <button onClick={()=>{ setBarcodeMessage(null); setScanOuvert(true); }} disabled={rechercheBarcode} style={{ width:"100%", padding:"10px", marginBottom:12, border:`1.5px dashed ${C.blue}`, borderRadius:10, background:"transparent", color:C.blue, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, cursor:"pointer" }}>
+                📷 Scanner le code-barres
+              </button>
+            )}
+            {rechercheBarcode && <div style={{ textAlign:"center", padding:"8px 0", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>Recherche du code-barres...</div>}
+            {barcodeMessage && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:"#B8860B", marginBottom:8 }}>ℹ️ {barcodeMessage}</div>}
             {error && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:"#CC0000", marginBottom:8 }}>⚠️ {error}</div>}
             <div style={{ overflowY:"auto", WebkitOverflowScrolling:"touch", flex:1, minHeight:0, paddingBottom:24 }}>
               {query.trim().length < 2 && (
@@ -5074,6 +5261,9 @@ function CorrigerProduitSheet({ item, enseigne = null, onClose, onChoisir }) {
           </>
         )}
       </div>
+      {scanOuvert && (
+        <BarcodeScannerSheet onDetected={rechercherParCodeBarres} onClose={()=>setScanOuvert(false)}/>
+      )}
     </div>
   );
 }
@@ -5715,6 +5905,12 @@ export default function App() {
   // par accident : false pendant le chargement, false sans session, false
   // sur toute erreur RPC).
   const [isAdmin, setIsAdmin] = useState(false);
+  // Chantier "Scan code-barres", bout 1 — shadow strict sur le compte de
+  // François uniquement (pas isAdmin en général : critère volontairement
+  // plus étroit qu'un rôle admin générique, pour rester invisible même si
+  // d'autres comptes admin existent un jour). Dérivé de la session à chaque
+  // rendu, jamais mis en cache localement.
+  const estFrancois = session?.user?.email === 'francois.pimor@gmail.com';
   // #56.6 — modeCoreActif devient tri-état : null = suivre coreActifGlobal
   // (comportement par défaut, pour tout le monde) ; true/false = override
   // explicite de l'admin pour comparer ponctuellement l'autre moteur. Jamais
@@ -6534,7 +6730,7 @@ export default function App() {
               setShowRating({id:data.id,store:newArc.store});
             }
           }} userId={session?.user?.id} produitsRef={produitsRef}/>}
-          {loaded && tab==="archive"   && <ArchiveTab   archives={archives} storeRatings={storeRatings} onDelete={deleteArchive} priceDB={priceDB} onImport={handleImportPrices} onSavePrice={handleSavePrice} produitsRef={produitsRef} libelleVersNomProduit={libelleVersNomProduit} onLibelleResolu={(cle,nom)=>setLibelleVersNomProduit(prev=>({...prev,[cle]:nom}))} onAddToList={arcItem=>{
+          {loaded && tab==="archive"   && <ArchiveTab   archives={archives} storeRatings={storeRatings} onDelete={deleteArchive} priceDB={priceDB} onImport={handleImportPrices} onSavePrice={handleSavePrice} produitsRef={produitsRef} libelleVersNomProduit={libelleVersNomProduit} onLibelleResolu={(cle,nom)=>setLibelleVersNomProduit(prev=>({...prev,[cle]:nom}))} estFrancois={estFrancois} onAddToList={arcItem=>{
             const newItem={id:Date.now()+Math.random(),product:arcItem.product,format:arcItem.format||"",brand:arcItem.brand||"",qty:arcItem.qty||1,checked:false};
             addItem(newItem);
             showAppToast(`✓ ${arcItem.product} ajouté à ta liste`);
