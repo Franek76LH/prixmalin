@@ -3,6 +3,7 @@ import { scanTicketWithClaude, imageFileToJpegBase64, scanMultipleTicketsWithCla
 import { STORES, CATEGORY_META, PRODUCT_SUGGESTIONS, STALE_DAYS, JOURS_MOYENNE } from "./constants";
 import { supabase } from "./lib/supabase";
 import { formatVariante, mapperLigneListeCourses, chargerVariantes, getCategoryPresentation } from "./lib/catalogueCore";
+import { nomComposeVariante } from "./lib/nomProduit";
 import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
 import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
 import { classerMagasinsPourPanier, calculerEconomiePotentielle } from "./lib/classementPanierCore";
@@ -14,6 +15,8 @@ import AdminRejetsCorePanel from "./components/admin/AdminRejetsCorePanel";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import { BarcodeFormat, DecodeHintType } from "@zxing/library";
 import AValiderSheet from "./components/dev/AValiderSheet";
+// Chantier "Scan code-barres", bout 3B — console de validation admin
+import ValidationScanSheet from "./components/admin/ValidationScanSheet";
 // #65 — bandeau de mise à jour PWA (pont vers registerSW dans main.jsx)
 import { onNeedRefresh, applyUpdate } from "./lib/swUpdate";
 // #56.5.A — double écriture Core, fire-and-forget, invisible pour l'utilisateur
@@ -4949,14 +4952,6 @@ function libelleVariante(v) {
 // par code-barres : marque + libellé + quantité, tel que demandé (distinct de
 // libelleVariante ci-dessus, qui ne sert qu'au sélecteur "plusieurs variantes"
 // de la recherche par nom).
-function nomComposeVariante(v) {
-  const marque = v.marques?.nom ? `${v.marques.nom} ` : '';
-  const libelle = v.libelle || '';
-  const quantite = (v.quantite_nette != null && v.unite_quantite) ? ` ${v.quantite_nette}${v.unite_quantite}` : '';
-  const compose = `${marque}${libelle}${quantite}`.trim();
-  return compose || (v.produits?.nom_reference ?? 'Produit sans nom');
-}
-
 // ── BARCODE SCANNER SHEET (Chantier "Scan code-barres", bout 1) ────────────
 // Caméra arrière + décodage EAN-13/EAN-8/UPC-A via @zxing/browser
 // (BarcodeDetector natif absent d'iOS Safari — cette lib décode en JS pur à
@@ -6134,6 +6129,12 @@ export default function App() {
   // Chantier anti-doublon, étape 1 — écran "À valider", dev uniquement (voir
   // le bouton flottant plus bas, gardé par import.meta.env.DEV).
   const [showAValider, setShowAValider] = useState(false);
+  // Chantier "Scan code-barres", bout 3B — console de validation admin des
+  // propositions envoyées par les utilisateurs non-admin (file d'attente
+  // propositions_liaison_scan). pendingScanCount alimente le badge du bouton
+  // flottant même quand la console n'est pas ouverte.
+  const [showValidationScan, setShowValidationScan] = useState(false);
+  const [pendingScanCount, setPendingScanCount] = useState(0);
   const handleFlash = () => setShowScanChoix(true);
   const handleFlashConfirmed = () => { setShowScanChoix(false); setAutoOpenCamera(true); setTab("prices"); };
   const [showCircleSheet,  setShowCircleSheet]  = useState(false);
@@ -6178,6 +6179,18 @@ export default function App() {
     });
     return () => { annule = true; };
   }, [session]);
+
+  // Chantier "Scan code-barres", bout 3B — compteur du badge, lu directement
+  // sur la table (sa RLS autorise déjà l'admin à voir toutes les lignes, pas
+  // besoin de la RPC de liste ici). Relu à l'ouverture/fermeture de la
+  // console pour rester juste sans dépendre d'un polling.
+  useEffect(() => {
+    if (!isAdmin) { setPendingScanCount(0); return; }
+    let annule = false;
+    supabase.from('propositions_liaison_scan').select('id', { count: 'exact', head: true }).eq('statut', 'en_attente')
+      .then(({ count, error }) => { if (!annule && !error) setPendingScanCount(count || 0); });
+    return () => { annule = true; };
+  }, [isAdmin, showValidationScan]);
 
   // #56.6 — kill switch global, même principe que isAdmin ci-dessus : relu à
   // chaque changement de session, plus au retour au premier plan (l'app ne
@@ -6863,6 +6876,17 @@ export default function App() {
           </button>
         )}
         {showAValider && isAdmin && <AValiderSheet onClose={()=>setShowAValider(false)}/>}
+        {/* Chantier "Scan code-barres" bout 3B — même critère admin, même
+            emplacement discret hors TabBar. Badge = pendingScanCount. */}
+        {isAdmin && (
+          <button onClick={()=>setShowValidationScan(true)} style={{ position:"fixed", top:44, left:10, zIndex:500, padding:"6px 10px", borderRadius:8, border:"none", background:"rgba(0,0,0,0.55)", color:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:10, cursor:"pointer", display:"flex", alignItems:"center", gap:5 }}>
+            🧾 Validation scan
+            {pendingScanCount > 0 && (
+              <span style={{ background:"#CC0000", borderRadius:99, minWidth:16, height:16, padding:"0 4px", fontSize:10, fontWeight:900, display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1 }}>{pendingScanCount}</span>
+            )}
+          </button>
+        )}
+        {showValidationScan && isAdmin && <ValidationScanSheet onClose={()=>setShowValidationScan(false)} onCountChange={setPendingScanCount}/>}
         {appToast && <Toast msg={appToast.msg} ok={appToast.ok}/>}
         {showCircleSheet  && <CircleSheet  circles={circles} userId={session.user.id} userEmail={session.user.email} profileMap={profileMap} pseudo={pseudo} archives={archives} onClose={()=>setShowCircleSheet(false)} onInvite={inviteByPseudo} onUpdateStatus={updateCircleStatus}/>}
         {showStatsSheet   && <StatsSheet   userId={session.user.id} archives={archives} onClose={()=>setShowStatsSheet(false)}/>}
