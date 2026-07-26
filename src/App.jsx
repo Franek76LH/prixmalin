@@ -181,7 +181,22 @@ async function geocodeAddress(address) {
     const f = d.features?.[0];
     if (!f) return null;
     const [lng, lat] = f.geometry.coordinates;
-    return { lat, lng };
+    // Chantier géoloc comparateur — label lisible en plus des coordonnées ;
+    // ne casse aucun appelant existant (tous ne lisent que .lat/.lng).
+    const label = f.properties?.label || f.properties?.city || null;
+    return { lat, lng, label };
+  } catch { return null; }
+}
+
+// Chantier géoloc comparateur — reverse-geocoding best-effort d'un point GPS
+// vers un nom de ville affichable. null si l'API échoue ou ne trouve rien :
+// l'appelant retombe alors sur un libellé générique ("Ma position").
+async function reverseGeocodeLabel(lat, lng) {
+  try {
+    const r = await fetch(`https://api-adresse.data.gouv.fr/reverse/?lon=${lng}&lat=${lat}`);
+    const d = await r.json();
+    const f = d.features?.[0];
+    return f?.properties?.city || f?.properties?.label || null;
   } catch { return null; }
 }
 
@@ -3997,10 +4012,89 @@ function distanceKm(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.asin(Math.sqrt(a));
 }
 
-function CompareTab({ items, priceDB, onValidate, searchRadius, userPos, isAdmin, modeCoreActif, coreActifGlobal }) {
+function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius, userPos, setUserPos, zoneLabel, setZoneLabel, userId, isAdmin, modeCoreActif, coreActifGlobal }) {
   const F = "'Nunito',sans-serif";
 
-  const [gpsError, setGpsError] = useState(false);
+  // Chantier géoloc comparateur — sélecteur de zone (point de référence).
+  // zoneEditOpen forcé "ouvert" tant qu'aucun point n'existe (userPos null) :
+  // voir le early-return plus bas, jamais de liste de prix sans point.
+  const [zoneEditOpen, setZoneEditOpen] = useState(false);
+  const [adresseSaisie, setAdresseSaisie] = useState("");
+  const [geocodingEnCours, setGeocodingEnCours] = useState(false);
+  const [gpsEnCours, setGpsEnCours] = useState(false);
+  const [gpsError, setGpsError] = useState(null);
+  const [geoError, setGeoError] = useState(null);
+  const gpsAutoTente = useRef(false);
+
+  // Persiste le point choisi (coords + libellé) sur profiles, même mécanisme
+  // que les favoris (table Supabase liée à l'utilisateur) : un point choisi
+  // sur un appareil est donc retrouvé sur un autre. userId absent (session
+  // pas encore prête) -> on garde quand même le point en mémoire locale.
+  const definirZone = async (coords, label) => {
+    setUserPos(coords);
+    setZoneLabel(label);
+    setZoneEditOpen(false);
+    setGeoError(null);
+    setGpsError(null);
+    if (!userId) return;
+    const { error } = await supabase.from('profiles').upsert({
+      id: userId,
+      zone_lat: coords?.lat ?? null,
+      zone_lng: coords?.lng ?? null,
+      zone_label: label ?? null,
+    });
+    if (error) console.error("Erreur sauvegarde de la zone de comparaison :", error);
+  };
+
+  const utiliserGps = () => {
+    if (!navigator.geolocation) { setGpsError("Géolocalisation non disponible sur cet appareil."); return; }
+    setGpsEnCours(true);
+    setGpsError(null);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        const label = await reverseGeocodeLabel(coords.lat, coords.lng);
+        await definirZone(coords, label || "Ma position");
+        setGpsEnCours(false);
+      },
+      () => {
+        setGpsError("Impossible d'obtenir ta position — vérifie l'autorisation de localisation.");
+        setGpsEnCours(false);
+      }
+    );
+  };
+
+  const validerAdresse = async () => {
+    const saisie = adresseSaisie.trim();
+    if (!saisie || geocodingEnCours) return;
+    setGeocodingEnCours(true);
+    setGeoError(null);
+    const res = await geocodeAddress(saisie);
+    setGeocodingEnCours(false);
+    if (!res) { setGeoError("Adresse introuvable, réessaie."); return; }
+    await definirZone({ lat: res.lat, lng: res.lng }, res.label || saisie);
+    setAdresseSaisie("");
+  };
+
+  // À l'ouverture du comparateur, sans point mémorisé (chargé en amont
+  // depuis profiles par App), tentative automatique et silencieuse du GPS —
+  // gpsAutoTente empêche de relancer la demande à chaque re-render ou
+  // fermeture du sélecteur. Échec/refus : le sélecteur reste affiché (aucun
+  // prix montré sans point, voir le early-return plus bas).
+  useEffect(() => {
+    if (userPos || gpsAutoTente.current || !navigator.geolocation) return;
+    gpsAutoTente.current = true;
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        const label = await reverseGeocodeLabel(coords.lat, coords.lng);
+        await definirZone(coords, label || "Ma position");
+      },
+      () => {} // refus/échec silencieux : le sélecteur reste affiché
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userPos]);
+
   const [storesGeo, setStoresGeo] = useState([]);
 
   // #56.6 — source de vérité : modeCoreActif (tri-état, admin uniquement)
@@ -4222,6 +4316,52 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos, isAdmin
     </div>
   );
 
+  // Chantier géoloc comparateur — tant qu'aucun point de référence n'existe
+  // (GPS jamais accepté et rien de mémorisé/saisi), CE sélecteur remplace la
+  // liste de prix dans le rendu final (jamais de comparaison sans point — le
+  // bug d'origine montrait tous les prix, toutes villes confondues). Construit
+  // ici comme une simple valeur JSX, PAS comme un early return : userPos peut
+  // changer de null à défini pendant que ce composant est monté (résolution
+  // GPS après l'ouverture), et un early return avant les hooks ci-dessous
+  // (analysis, storeTotals, lastVerified) romprait alors l'ordre des Hooks
+  // React entre deux rendus du même montage.
+  const zoneManquante = !userPos || zoneEditOpen;
+  const selecteurZone = (
+    <>
+      {userPos && (
+        <button onClick={()=>setZoneEditOpen(false)} style={{ background:"none", border:"none", padding:0, marginBottom:14, fontFamily:F, fontWeight:700, fontSize:13, color:C.textLight, cursor:"pointer" }}>
+          ← Annuler
+        </button>
+      )}
+      <div style={{ fontSize:44, textAlign:"center", marginBottom:10 }}>📍</div>
+      <div style={{ fontFamily:F, fontWeight:900, fontSize:16, color:C.text, textAlign:"center", marginBottom:6 }}>D'où fais-tu tes courses ?</div>
+      <div style={{ fontFamily:F, fontSize:13, color:C.textLight, textAlign:"center", marginBottom:20 }}>
+        On compare les prix autour de ce point — chez toi, au travail, où tu veux.
+      </div>
+
+      <button onClick={utiliserGps} disabled={gpsEnCours} style={{ width:"100%", padding:"14px", marginBottom:10, border:"none", borderRadius:14, background:gpsEnCours?C.grayLight:C.blue, fontFamily:F, fontWeight:900, fontSize:15, color:"#fff", cursor:gpsEnCours?"default":"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
+        📍 {gpsEnCours ? "Localisation..." : "Utiliser ma position (GPS)"}
+      </button>
+      {gpsError && <div style={{ fontFamily:F, fontSize:12, color:C.red, marginBottom:10, textAlign:"center" }}>⚠️ {gpsError}</div>}
+
+      <div style={{ textAlign:"center", fontFamily:F, fontSize:12, color:C.textLight, margin:"10px 0" }}>ou</div>
+
+      <div style={{ display:"flex", gap:8 }}>
+        <input
+          value={adresseSaisie}
+          onChange={e=>setAdresseSaisie(e.target.value)}
+          onKeyDown={e=>{ if (e.key === 'Enter') validerAdresse(); }}
+          placeholder="Adresse, ville ou code postal"
+          style={{ flex:1, padding:"12px 14px", borderRadius:12, border:`2px solid ${C.grayLight}`, fontFamily:F, fontSize:14, boxSizing:"border-box" }}
+        />
+        <button onClick={validerAdresse} disabled={!adresseSaisie.trim() || geocodingEnCours} style={{ padding:"12px 18px", border:"none", borderRadius:12, background:(!adresseSaisie.trim()||geocodingEnCours)?C.grayLight:C.orange, fontFamily:F, fontWeight:800, fontSize:14, color:"#111", cursor:(!adresseSaisie.trim()||geocodingEnCours)?"default":"pointer" }}>
+          {geocodingEnCours ? "..." : "Valider"}
+        </button>
+      </div>
+      {geoError && <div style={{ fontFamily:F, fontSize:12, color:C.red, marginTop:10, textAlign:"center" }}>⚠️ {geoError}</div>}
+    </>
+  );
+
   const analysis = useMemo(()=>{
     const storeMap = Object.fromEntries(storesGeo.map(s => [s.id, s]));
     return items.map(item=>{
@@ -4325,7 +4465,31 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos, isAdmin
   }, [bestAffiche?.id]);
 
   return (
-    <div style={{ padding:"16px 16px 110px" }}>
+    <div style={{ padding: zoneManquante ? "24px 20px 100px" : "16px 16px 110px" }}>
+      {zoneManquante ? selecteurZone : (
+      <>
+      {/* Chantier géoloc comparateur — zone active + rayon, toujours visible
+          (même après un GPS réussi) : "modifier" rouvre le sélecteur au-dessus,
+          sans perdre la liste de prix déjà calculée. */}
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10, gap:8 }}>
+        <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+          📍 {zoneLabel || "Ma position"} · {searchRadius} km
+        </div>
+        <button onClick={()=>setZoneEditOpen(true)} style={{ background:"none", border:"none", padding:0, flexShrink:0, fontFamily:F, fontWeight:700, fontSize:12, color:C.blue, cursor:"pointer", textDecoration:"underline" }}>
+          modifier
+        </button>
+      </div>
+      <div style={{ display:"flex", gap:6, marginBottom:16, overflowX:"auto" }}>
+        {[2,5,10,20,50,100].map(r=>(
+          <button key={r} onClick={()=>setSearchRadius(r)} style={{
+            padding:"6px 14px", borderRadius:20, border:"none", cursor:"pointer",
+            fontFamily:F, fontWeight:700, fontSize:13,
+            background: searchRadius===r ? "#CC0000" : "#f0f0f0",
+            color: searchRadius===r ? "#fff" : "#333",
+            whiteSpace:"nowrap", flexShrink:0
+          }}>{r} km</button>
+        ))}
+      </div>
 
       {/* Résumé liste */}
       <div style={{ background:C.blue, borderRadius:14, padding:"14px 18px", marginBottom:16, display:"flex", alignItems:"center", gap:12 }}>
@@ -4527,6 +4691,8 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, userPos, isAdmin
 
       {import.meta.env.DEV && vueDev === 'nouvelle' && shadowPanier && (
         <ClassementPanierShadow resultat={shadowPanier} />
+      )}
+      </>
       )}
     </div>
   );
@@ -6032,6 +6198,10 @@ export default function App() {
   const [priceDB, setPriceDB]     = useState([]);
   const [searchRadius, setSearchRadius] = useState(10);
   const [userPos, setUserPos] = useState(null);
+  // Chantier géoloc comparateur — libellé du point de référence actif
+  // (ville/adresse saisie, ou "Ma position"/ville retrouvée par reverse-geocoding
+  // pour un point GPS). Chargé depuis profiles.zone_label au démarrage.
+  const [zoneLabel, setZoneLabel] = useState(null);
   const [archives, setArchives]   = useState([]);
   // Chantier 1 — libellé officiel du Core (nom_reference) pour une ligne
   // d'historique déjà rattachée à un produit via lignes_ticket.produit_id.
@@ -6240,7 +6410,7 @@ export default function App() {
           supabase.from('favorites').select('id, items').order('id').limit(1),
           supabase.from('produits_ref').select('produit_generique, sous_categorie').order('id'),
           supabase.from('circles').select('*'),
-          supabase.from('profiles').select('pseudo, cgu_accepted_at').eq('id', session.user.id).maybeSingle(),
+          supabase.from('profiles').select('pseudo, cgu_accepted_at, zone_lat, zone_lng, zone_label').eq('id', session.user.id).maybeSingle(),
           // Chantier 1 — pont Historique (archives.items[].product, libellé
           // brut) → nom officiel Core. RLS restreint déjà lignes_ticket aux
           // tickets de l'utilisateur courant (tickets.utilisateur_id = auth.uid()).
@@ -6291,6 +6461,13 @@ export default function App() {
           }
         }
         setPseudo(prof.data?.pseudo ?? null);
+        // Chantier géoloc comparateur — point de référence mémorisé, utilisé
+        // tel quel comme userPos initial (pas de tentative GPS automatique
+        // si un point existe déjà, voir CompareTab).
+        if (prof.data?.zone_lat != null && prof.data?.zone_lng != null) {
+          setUserPos({ lat: prof.data.zone_lat, lng: prof.data.zone_lng });
+          setZoneLabel(prof.data.zone_label ?? null);
+        }
         const cguAt = prof.data?.cgu_accepted_at ?? null;
         if (!cguAt) {
           const pending = localStorage.getItem('prixmalin_cgu_pending');
@@ -6832,7 +7009,7 @@ export default function App() {
           {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)}/>}
           {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} setTab={setTab}/>}
-          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius} userPos={userPos} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal}/>}
+          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
           {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;
