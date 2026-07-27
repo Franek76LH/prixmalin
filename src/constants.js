@@ -53,5 +53,5 @@ export const PRODUCT_SUGGESTIONS = [
   { name:"Sucre en poudre",  format:"1kg" },
 ];
 
-export const STALE_DAYS = 30;
+export const STALE_DAYS = 180;
 export const JOURS_MOYENNE = 60;
