@@ -2,7 +2,7 @@ import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } fr
 import { scanTicketWithClaude, imageFileToJpegBase64, scanMultipleTicketsWithClaude } from "./scanTicket";
 import { STORES, CATEGORY_META, PRODUCT_SUGGESTIONS, STALE_DAYS, JOURS_MOYENNE } from "./constants";
 import { supabase } from "./lib/supabase";
-import { formatVariante, mapperLigneListeCourses, chargerVariantes, getCategoryPresentation, formatFormatStructure } from "./lib/catalogueCore";
+import { formatVariante, mapperLigneListeCourses, chargerVariantes, getCategoryPresentation, formatFormatStructure, calculerPrixUnitaire } from "./lib/catalogueCore";
 import { nomComposeVariante } from "./lib/nomProduit";
 import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
 import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
@@ -4310,15 +4310,66 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
         setCoreChargement(true);
         setCoreErreur(null);
         const { cibles, exclusions } = construireCiblesComparaison(items);
-        const produitIds = [...new Set(cibles.map(c => c.produit_id))];
+
+        // Chantier 75 (révision) — un article ajouté en "toutes marques/tous
+        // formats" (variante_produit_id null) n'a normalement AUCUN format
+        // démontrable et reste donc exclu de la comparaison (exclusions.
+        // produitIdSansFormat, inchangé). On lui donne quand même un prix par
+        // magasin : pour chaque magasin qui vend ce produit_id (n'importe
+        // quelle variante), on retient l'offre la MOINS CHÈRE AU KILO/LITRE/
+        // PIÈCE (repli sur le prix le plus bas si aucune offre de ce magasin
+        // n'a de prix unitaire calculable) — c'est ce qui rend comparables
+        // des formats différents. Ces "cibles sans format" et leurs lignes
+        // résolues sont ADDITIONNÉES à cibles/regroupement (jamais retirées
+        // ni modifiées) : faireCorrespondrePrix/regrouperParMagasin restent
+        // strictement inchangées pour les articles à format fixé.
+        const itemsSansFormat = exclusions.produitIdSansFormat;
+        const produitIdsSansFormat = [...new Set(itemsSansFormat.map(item => item.produit_id))];
+        const produitIds = [...new Set([...cibles.map(c => c.produit_id), ...produitIdsSansFormat])];
         const cutoffISO = new Date(Date.now() - STALE_DAYS * 86400000).toISOString();
         const prixBruts = await chargerPrixComparables(produitIds, {});
         if (annule) return;
         const correspondancesFraiches = faireCorrespondrePrix(cibles, prixBruts, { userPos, searchRadius, staleCutoffISO: cutoffISO });
         const regroupement = regrouperParMagasin(correspondancesFraiches);
-        const totauxParMagasin = calculerTotauxMagasins(regroupement, cibles);
+
+        const ciblesSansFormat = [];
+        const regroupementEtendu = { ...regroupement };
+        itemsSansFormat.forEach(item => {
+          ciblesSansFormat.push({ itemId: item.id, produit_id: item.produit_id, item });
+
+          const candidats = prixBruts.filter(p => {
+            if (p.produit_id !== item.produit_id) return false;
+            if (p.magasin_id == null) return false;
+            if (p.observe_le && new Date(p.observe_le) < new Date(cutoffISO)) return false;
+            if (userPos && searchRadius != null && p.latitude != null && p.longitude != null) {
+              if (distanceKm(userPos.lat, userPos.lng, p.latitude, p.longitude) > searchRadius) return false;
+            }
+            return true;
+          });
+          if (candidats.length === 0) return;
+
+          const parMagasin = new Map();
+          candidats.forEach(p => {
+            if (!parMagasin.has(p.magasin_id)) parMagasin.set(p.magasin_id, []);
+            parMagasin.get(p.magasin_id).push(p);
+          });
+
+          parMagasin.forEach((lignesMagasin, magasinId) => {
+            const enrichies = lignesMagasin.map(p => ({ p, unitaire: calculerPrixUnitaire({ prix: p.prix_total }, p) }));
+            const avecUnitaire = enrichies.filter(e => e.unitaire);
+            const choisi = avecUnitaire.length > 0
+              ? avecUnitaire.reduce((a, b) => (a.unitaire.valeur <= b.unitaire.valeur ? a : b)).p
+              : lignesMagasin.reduce((a, b) => (a.prix_total <= b.prix_total ? a : b));
+
+            if (!regroupementEtendu[magasinId]) regroupementEtendu[magasinId] = [];
+            regroupementEtendu[magasinId] = [...regroupementEtendu[magasinId], { itemId: item.id, produit_id: item.produit_id, prix: choisi }];
+          });
+        });
+
+        const ciblesEtendues = [...cibles, ...ciblesSansFormat];
+        const totauxParMagasin = calculerTotauxMagasins(regroupementEtendu, ciblesEtendues);
         const classement = classerMagasins(totauxParMagasin);
-        if (!annule) setCoreResultat({ classement, regroupement, exclusions, cibles });
+        if (!annule) setCoreResultat({ classement, regroupement: regroupementEtendu, exclusions, cibles: ciblesEtendues });
       } catch (err) {
         if (!annule) { setCoreErreur(err?.message || 'Erreur inconnue'); setCoreResultat(null); }
       } finally {

@@ -94,6 +94,41 @@ export function formatFormatStructure(variante) {
   return n > 1 ? `${n} × ${base}` : base;
 }
 
+// Chantier 75 — prix ramené à l'unité de mesure (€/kg, €/L, €/pièce), pour
+// comparer des formats différents d'un même produit. Lecture seule sur les
+// champs structurés de la variante (quantite_nette, unite_quantite,
+// nombre_unites) ; jamais une valeur par défaut pour une unité non reconnue
+// ou une quantité manquante/nulle — null dans ce cas, à l'appelant de gérer
+// l'affichage de repli.
+export function calculerPrixUnitaire(prix, variante) {
+  if (!prix || !variante) return null;
+
+  const quantiteNette = variante.quantite_nette != null ? Number(variante.quantite_nette) : null;
+  if (quantiteNette == null || !Number.isFinite(quantiteNette) || quantiteNette <= 0) return null;
+
+  const unite = (variante.unite_quantite || '').toLowerCase().trim();
+  if (!unite) return null;
+
+  const nombreUnites = Number(variante.nombre_unites) || 1;
+  const quantiteTotale = quantiteNette * nombreUnites;
+
+  let quantiteEnBase, libelleUnite;
+  if (unite === 'g') { quantiteEnBase = quantiteTotale / 1000; libelleUnite = '€/kg'; }
+  else if (unite === 'kg') { quantiteEnBase = quantiteTotale; libelleUnite = '€/kg'; }
+  else if (unite === 'ml') { quantiteEnBase = quantiteTotale / 1000; libelleUnite = '€/L'; }
+  else if (unite === 'cl') { quantiteEnBase = quantiteTotale / 100; libelleUnite = '€/L'; }
+  else if (unite === 'l') { quantiteEnBase = quantiteTotale; libelleUnite = '€/L'; }
+  else if (unite === 'pièce' || unite === 'piece') { quantiteEnBase = quantiteTotale; libelleUnite = '€/pièce'; }
+  else return null;
+
+  if (!Number.isFinite(quantiteEnBase) || quantiteEnBase <= 0) return null;
+
+  const prixNumerique = Number(prix.prix);
+  if (!Number.isFinite(prixNumerique)) return null;
+
+  return { valeur: prixNumerique / quantiteEnBase, libelleUnite };
+}
+
 // Détermine l'emoji/couleur de présentation d'une catégorie Core, avec repli sur CATEGORY_META
 export function getCategoryPresentation(categorieDb) {
   const bySlug = CATEGORY_META.find(c => c.id === categorieDb.slug);
