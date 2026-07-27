@@ -2,7 +2,7 @@ import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } fr
 import { scanTicketWithClaude, imageFileToJpegBase64, scanMultipleTicketsWithClaude } from "./scanTicket";
 import { STORES, CATEGORY_META, PRODUCT_SUGGESTIONS, STALE_DAYS, JOURS_MOYENNE } from "./constants";
 import { supabase } from "./lib/supabase";
-import { formatVariante, mapperLigneListeCourses, chargerVariantes, getCategoryPresentation } from "./lib/catalogueCore";
+import { formatVariante, mapperLigneListeCourses, chargerVariantes, getCategoryPresentation, formatFormatStructure } from "./lib/catalogueCore";
 import { nomComposeVariante } from "./lib/nomProduit";
 import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
 import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
@@ -2491,10 +2491,16 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
   const [qty,              setQty]              = useState(1);
   const [submitting,       setSubmitting]       = useState(false);
   const [submitError,      setSubmitError]      = useState(null);
+  // Chantier 74 — sélecteur Marque/Format à partir des champs structurés.
+  // 'all' = "Toutes les marques" / "Tous les formats", sélectionné par défaut.
+  const [marqueSelectionnee, setMarqueSelectionnee] = useState('all');
+  const [formatSelectionne,  setFormatSelectionne]  = useState('all');
 
   const loadVariantes = async () => {
     setVarianteError(null);
     setVariantesLoading(true);
+    setMarqueSelectionnee('all');
+    setFormatSelectionne('all');
     try {
       const data = await chargerVariantes(produit.id);
       setVariantes(data);
@@ -2514,8 +2520,54 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [produit.id]);
 
+  // Chantier 74 — la rangée Marque n'existe que si au moins une variante a
+  // une marque (marque_id non nul) ; sinon (produits frais...) elle reste
+  // masquée, indépendamment de tout filtre en cours.
+  const produitADesMarques = useMemo(() => variantes.some(v => v.marque_id), [variantes]);
+
+  // Marques disponibles compte tenu du format déjà sélectionné (filtre croisé).
+  const marquesListe = useMemo(() => {
+    const pertinentes = formatSelectionne === 'all'
+      ? variantes
+      : variantes.filter(v => formatFormatStructure(v) === formatSelectionne);
+    const map = new Map();
+    pertinentes.forEach(v => { if (v.marque_id && v.marques?.nom) map.set(v.marque_id, v.marques.nom); });
+    return [...map.entries()]
+      .map(([id, nom]) => ({ id, nom }))
+      .sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
+  }, [variantes, formatSelectionne]);
+
+  // Formats disponibles compte tenu de la marque déjà sélectionnée (filtre croisé).
+  const formatsListe = useMemo(() => {
+    const pertinentes = marqueSelectionnee === 'all'
+      ? variantes
+      : variantes.filter(v => v.marque_id === marqueSelectionnee);
+    const labels = new Set();
+    pertinentes.forEach(v => { const l = formatFormatStructure(v); if (l) labels.add(l); });
+    return [...labels];
+  }, [variantes, marqueSelectionnee]);
+
+  // Variante(s) résolues par le couple (marque, format) courant. "Toutes les
+  // marques"/"Tous les formats" élargissent simplement l'ensemble retenu —
+  // aucune comparaison de prix ici (chantier suivant).
+  const variantesResolues = useMemo(() => {
+    return variantes.filter(v =>
+      (marqueSelectionnee === 'all' || v.marque_id === marqueSelectionnee) &&
+      (formatSelectionne === 'all' || formatFormatStructure(v) === formatSelectionne)
+    );
+  }, [variantes, marqueSelectionnee, formatSelectionne]);
+
+  // Chantier 74 (suite) — un seul bouton vert plein par rangée (le choix actif),
+  // tous les autres en gris neutre (jamais un contour vert qui donnerait
+  // l'impression que tout est sélectionné).
+  const pillStyle = (actif) => ({
+    padding: "9px 16px", background: actif ? C.green : C.grayLight, border: `2px solid ${actif ? C.green : "transparent"}`,
+    borderRadius: 99, fontFamily: "'Nunito',sans-serif", fontWeight: 800, fontSize: 14,
+    color: actif ? C.white : C.textLight, cursor: "pointer",
+  });
+
   const alreadyInList = items.some(i => i.product.toLowerCase().trim() === produit.nom_reference.toLowerCase().trim());
-  const canSubmit = !variantesLoading && !varianteError && varianteId !== null && !submitting;
+  const canSubmit = !variantesLoading && !varianteError && !submitting;
 
   // Le résultat booléen d'addItem (via App.addItem) détermine si l'article a bien
   // été enregistré — un simple await ne suffit pas car les erreurs y sont interceptées.
@@ -2536,8 +2588,13 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
         qty,
         checked:             false,
         produit_id:          produit.id,
+        // Chantier 74 — le couple (marque, format) peut résoudre 0, 1 ou
+        // plusieurs variantes (ex. "Tous les formats" + une marque qui a
+        // 3 tailles) ; seul le cas à exactement 1 variante fixe un
+        // variante_produit_id précis, sinon null (même comportement que
+        // l'ancien "Format indifférent").
         variante_produit_id:
-          varianteId && varianteId !== 'any' ? varianteId : null,
+          varianteId === 'any' ? null : (variantesResolues.length === 1 ? variantesResolues[0].id : null),
       };
 
       const ok = await onAdd(item);
@@ -2589,9 +2646,6 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
             </div>
           )}
 
-          {/* Format */}
-          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Format</div>
-
           {variantesLoading && (
             <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.gray, marginBottom:14 }}>Chargement des formats…</div>
           )}
@@ -2603,30 +2657,49 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
             </div>
           )}
 
-          {!variantesLoading && !varianteError && (
+          {!variantesLoading && !varianteError && variantes.length === 0 && (
             <div style={{ marginBottom:14 }}>
-              {variantes.length === 0 ? (
-                <div>
-                  <span style={{ display:"inline-block", padding:"9px 16px", background:C.green, borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.white }}>
-                    ✓ Format indifférent
-                  </span>
-                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.gray, marginTop:6 }}>
-                    Aucun autre format référencé
-                  </div>
-                </div>
-              ) : (
-                <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-                  {variantes.map(v => (
-                    <button key={v.id} onClick={()=>setVarianteId(v.id)} style={{ padding:"9px 16px", background:varianteId===v.id?C.green:"#fff", border:`2px solid ${C.green}`, borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:varianteId===v.id?C.white:C.green, cursor:"pointer" }}>
-                      {formatVariante(v)}
-                    </button>
-                  ))}
-                  <button onClick={()=>setVarianteId('any')} style={{ padding:"9px 16px", background:varianteId==='any'?C.green:C.grayLight, border:`2px solid ${varianteId==='any'?C.green:"transparent"}`, borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:varianteId==='any'?C.white:C.textLight, cursor:"pointer" }}>
-                    Format indifférent
-                  </button>
-                </div>
-              )}
+              <span style={{ display:"inline-block", padding:"9px 16px", background:C.green, borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.white }}>
+                ✓ Format indifférent
+              </span>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.gray, marginTop:6 }}>
+                Aucun autre format référencé
+              </div>
             </div>
+          )}
+
+          {!variantesLoading && !varianteError && variantes.length > 0 && (
+            <>
+              {/* Chantier 74 — Marque (masquée si aucune variante n'a de marque) */}
+              {produitADesMarques && (
+                <>
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Marque</div>
+                  <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:14 }}>
+                    <button onClick={()=>setMarqueSelectionnee('all')} style={pillStyle(marqueSelectionnee==='all')}>
+                      Toutes les marques
+                    </button>
+                    {marquesListe.map(m => (
+                      <button key={m.id} onClick={()=>setMarqueSelectionnee(m.id)} style={pillStyle(marqueSelectionnee===m.id)}>
+                        {m.nom}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {/* Chantier 74 — Format, construit uniquement à partir des champs structurés */}
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Format</div>
+              <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:14 }}>
+                <button onClick={()=>setFormatSelectionne('all')} style={pillStyle(formatSelectionne==='all')}>
+                  Tous les formats
+                </button>
+                {formatsListe.map(label => (
+                  <button key={label} onClick={()=>setFormatSelectionne(label)} style={pillStyle(formatSelectionne===label)}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </>
           )}
 
           {/* Quantité */}

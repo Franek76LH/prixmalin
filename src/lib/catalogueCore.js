@@ -53,16 +53,45 @@ export function mapperLigneListeCourses(row) {
   };
 }
 
-// Charge les variantes actives d'un produit, triées par quantité
+// Charge les variantes actives d'un produit, triées par quantité. Inclut
+// marque_id + marques(nom) pour le sélecteur Marque/Format du Catalogue
+// (chantier 74) — champ additif, n'affecte pas les appelants existants qui
+// l'ignorent (AddItemSheet, ListTab).
 export async function chargerVariantes(produitId) {
   const { data, error } = await supabase
     .from('variantes_produit')
-    .select('id, produit_id, libelle, quantite_nette, unite_quantite, nombre_unites')
+    .select('id, produit_id, libelle, quantite_nette, unite_quantite, nombre_unites, marque_id, marques(nom)')
     .eq('produit_id', produitId)
     .eq('actif', true)
     .order('quantite_nette', { ascending: true, nullsFirst: false });
   if (error) throw error;
   return data || [];
+}
+
+// Chantier 74 — libellé de format construit UNIQUEMENT à partir des champs
+// structurés (quantite_nette, unite_quantite, nombre_unites), jamais du
+// champ libre `libelle` (legacy, incohérent : "1kg" vs "1 kg", "- 500g",
+// "3 Minutes - 500G"...). Distinct de formatVariante ci-dessus, qui reste
+// utilisée telle quelle ailleurs (AddItemSheet, ListTab) pour ne rien changer
+// hors du sélecteur Marque/Format du Catalogue.
+export function formatFormatStructure(variante) {
+  const qte = variante?.quantite_nette != null ? Number(variante.quantite_nette) : null;
+  const unite = (variante?.unite_quantite || '').toLowerCase().trim();
+  if (qte == null || !Number.isFinite(qte) || !unite) return null;
+
+  let base;
+  if (unite === 'kg') {
+    base = qte < 1 ? `${formatNombreFR(Math.round(qte * 1000))} g` : `${formatNombreFR(qte)} kg`;
+  } else if (unite === 'l') {
+    base = qte < 1 ? `${formatNombreFR(Math.round(qte * 1000))} ml` : `${formatNombreFR(qte)} L`;
+  } else if (unite === 'pièce' || unite === 'piece') {
+    base = `${formatNombreFR(qte)} pièce${qte > 1 ? 's' : ''}`;
+  } else {
+    base = `${formatNombreFR(qte)} ${unite}`;
+  }
+
+  const n = Number(variante?.nombre_unites) || 1;
+  return n > 1 ? `${n} × ${base}` : base;
 }
 
 // Détermine l'emoji/couleur de présentation d'une catégorie Core, avec repli sur CATEGORY_META
