@@ -2,8 +2,8 @@ import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } fr
 import { scanTicketWithClaude, imageFileToJpegBase64, scanMultipleTicketsWithClaude } from "./scanTicket";
 import { STORES, CATEGORY_META, PRODUCT_SUGGESTIONS, STALE_DAYS, JOURS_MOYENNE } from "./constants";
 import { supabase } from "./lib/supabase";
-import { formatVariante, mapperLigneListeCourses, chargerVariantes, getCategoryPresentation, formatFormatStructure, calculerPrixUnitaire } from "./lib/catalogueCore";
-import { nomComposeVariante } from "./lib/nomProduit";
+import { mapperLigneListeCourses, chargerVariantes, getCategoryPresentation, formatFormatStructure, calculerPrixUnitaire } from "./lib/catalogueCore";
+import { nomComposeVariante, formatEtiquetteVariante } from "./lib/nomProduit";
 import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
 import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
 import { classerMagasinsPourPanier, calculerEconomiePotentielle } from "./lib/classementPanierCore";
@@ -1116,7 +1116,7 @@ function AddItemSheet({ onClose, onAdd }) {
       id:                  Date.now(),
       product:             product.trim(),
       format:              variante_id && variante_id !== 'any'
-                             ? formatVariante(variantes.find(v => v.id === variante_id))
+                             ? formatEtiquetteVariante(variantes.find(v => v.id === variante_id))
                              : format.trim(),
       brand:               brandFixed ? brand.trim() : '',
       qty,
@@ -1321,7 +1321,7 @@ function AddItemSheet({ onClose, onAdd }) {
                         border:     variante_id === v.id ? `2px solid ${C.green}` : `2px solid transparent`,
                         fontWeight: variante_id === v.id ? 700 : 400,
                       }}>
-                      {formatVariante(v)}
+                      {formatEtiquetteVariante(v)}
                     </button>
                   ))}
                   <button onClick={() => setVarianteId('any')}
@@ -3229,7 +3229,7 @@ function EditItemSheet({ item, onClose, onSave }) {
               variante_produit_id:  varianteObj?.id ?? null,
               variante:             varianteObj ?? null,
               format:               '',
-              formatDisplay:        varianteObj ? formatVariante(varianteObj) : 'Format indifférent',
+              formatDisplay:        varianteObj ? formatEtiquetteVariante(varianteObj) : 'Format indifférent',
             };
           })()
         : { ...item, product: product.trim(), format: format.trim(), brand: brandFixed ? brand.trim() : "", qty };
@@ -3329,7 +3329,7 @@ function EditItemSheet({ item, onClose, onSave }) {
                           border:     varianteId===v.id ? `2px solid ${C.green}` : '2px solid transparent',
                           fontWeight: varianteId===v.id ? 700 : 400,
                         }}>
-                        {formatVariante(v)}
+                        {formatEtiquetteVariante(v)}
                       </button>
                     ))}
                     <button onClick={()=>setVarianteId('any')}
@@ -5227,17 +5227,6 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
 // rechercher_produits_pour_correction — voir le bloc SQL fourni séparément.
 // Plus de chargement client du catalogue : la RPC filtre, trie (enseigne du
 // ticket en tête) et limite à 20 côté serveur.
-// Chantier #71.1 — libellé lisible d'une variante : le champ libelle est
-// rempli pour les 3 produits multi-variantes connus aujourd'hui (Beurre,
-// Lait demi-écrémé, Poire), mais on reconstruit à partir des quantités si un
-// futur produit en a un vide.
-function libelleVariante(v) {
-  if (v.libelle) return v.libelle;
-  const base = `${v.quantite_nette ?? ''} ${v.unite_quantite ?? ''}`.trim();
-  if (v.nombre_unites && v.nombre_unites > 1) return `${v.nombre_unites} × ${base}`;
-  return base || 'Variante';
-}
-
 // Chantier "Scan code-barres" bout 1 — nom composé pour une variante trouvée
 // par code-barres : marque + libellé + quantité, tel que demandé (distinct de
 // libelleVariante ci-dessus, qui ne sert qu'au sélecteur "plusieurs variantes"
@@ -5482,7 +5471,7 @@ function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onCl
     setResolvingVariante(true);
     const { data, error: errVar } = await supabase
       .from('variantes_produit')
-      .select('id, libelle, quantite_nette, unite_quantite, nombre_unites')
+      .select('id, libelle, quantite_nette, unite_quantite, nombre_unites, marque_id, marques(nom)')
       .eq('produit_id', produit.produit_id)
       .eq('actif', true);
     setResolvingVariante(false);
@@ -5498,7 +5487,7 @@ function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onCl
     }
 
     setProduitEnAttente(produit);
-    setVariantesAChoisir([...liste].sort((a, b) => libelleVariante(a).localeCompare(libelleVariante(b), "fr")));
+    setVariantesAChoisir([...liste].sort((a, b) => formatEtiquetteVariante(a).localeCompare(formatEtiquetteVariante(b), "fr")));
     setVarianteChoisie(null);
   };
 
@@ -5594,7 +5583,7 @@ function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onCl
               {variantesAChoisir.map(v => (
                 <div key={v.id} onClick={()=>setVarianteChoisie(v.id)} style={{ padding:"12px 10px", borderBottom:`1px solid ${C.grayLight}`, display:"flex", alignItems:"center", gap:10, cursor:"pointer" }}>
                   <div style={{ width:20, height:20, borderRadius:99, border:`2px solid ${varianteChoisie===v.id?C.blue:C.grayLight}`, background:varianteChoisie===v.id?C.blue:"transparent", flexShrink:0 }} />
-                  <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text }}>{libelleVariante(v)}</span>
+                  <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text }}>{formatEtiquetteVariante(v)}</span>
                 </div>
               ))}
             </div>
