@@ -731,7 +731,8 @@ function FaqSheet({ userId, pseudo, onClose }) {
               ) : (<>
                 <select value={feedbackCategorie} onChange={e=>setFeedbackCategorie(e.target.value)} style={{ width:"100%", padding:"10px 12px", borderRadius:10, border:`1.5px solid ${C.grayLight}`, fontFamily:F, fontSize:14, color:C.text, background:"#fff", marginBottom:10, outline:"none", boxSizing:"border-box" }}>
                   <option value="suggestion">💡 Suggestion</option>
-                  <option value="probleme">🔧 Signaler un problème</option>
+                  <option value="bug">🔧 Signaler un problème</option>
+                  <option value="question">❓ Question</option>
                   <option value="autre">💬 Autre</option>
                 </select>
                 <textarea value={feedbackMessage} onChange={e=>setFeedbackMessage(e.target.value)} placeholder="Décris ton problème ou ta suggestion…" rows={4} style={{ width:"100%", padding:"10px 12px", borderRadius:10, border:`1.5px solid ${feedbackMessage?C.blue:C.grayLight}`, fontFamily:F, fontSize:14, color:C.text, outline:"none", resize:"none", boxSizing:"border-box", marginBottom:10 }}/>
