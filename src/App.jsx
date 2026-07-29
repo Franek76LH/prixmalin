@@ -3399,7 +3399,7 @@ function EditItemSheet({ item, onClose, onSave }) {
 }
 
 // ── LIST TAB ──────────────────────────────────────────────────────────────────
-function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites, saveFavorites, searchRadius, setSearchRadius, userPos, setUserPos }) {
+function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites, saveFavorites, searchRadius, setSearchRadius, userPos, setUserPos, prefsMarqueParItem = {}, setPrefMarque }) {
   const [showAdd,      setShowAdd]      = useState(false);
   const [showFavModal, setShowFavModal] = useState(false);
   const [editItem,     setEditItem]     = useState(null);
@@ -3445,24 +3445,41 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
     setShowFavModal(false);
   };
 
-  const ItemRow = ({item, done}) => (
+  // Comparateur — préférence marque par ligne (défaut 'nationale' si absente).
+  const prefDe = item => prefsMarqueParItem[item.id] === 'mdd_ok' ? 'mdd_ok' : 'nationale';
+  const ItemRow = ({item, done}) => {
+    const pref = prefDe(item);
+    return (
     <div style={{ display:"flex", alignItems:"center", gap:12, background:done?'#F3FAF5':C.white, borderRadius:12, padding:"12px 14px", border:`1px solid ${done?'#C8E6C9':C.grayLight}`, opacity:1, boxShadow:done?'inset 3px 0 0 #4CAF50':'0 1px 4px rgba(0,0,0,0.06)' }}>
       <button onClick={()=>toggleCheck(item.id)} style={{ width:26, height:26, borderRadius:6, border:`2px solid ${done?C.green:C.blue}`, background:done?C.green:C.white, cursor:"pointer", flexShrink:0, color:C.white, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13 }}>
         {done?"✓":""}
       </button>
-      <div style={{ flex:1 }}>
+      <div style={{ flex:1, minWidth:0 }}>
         <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, textDecoration:'none' }}>
           {item.brand?`${item.brand} · `:""}{item.product}
         </div>
         <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.gray, marginTop:1 }}>
           {item.formatDisplay ?? item.format}{item.brand?"":""} {!item.brand&&<span style={{ color:C.orange, fontSize:11 }}>· toutes marques</span>}
         </div>
+        {/* Préférence marque (v1, non persistée) : "nationale" filtre les MDD,
+            "MDD ok" les inclut (affichées en générique dans le comparateur). */}
+        {!done && (
+          <div style={{ display:"inline-flex", marginTop:6, borderRadius:8, overflow:"hidden", border:`1px solid ${C.grayLight}` }}>
+            <button onClick={()=>setPrefMarque?.(item.id, 'nationale')} style={{ padding:"3px 9px", border:"none", cursor:"pointer", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:11, background:pref==='nationale'?C.blue:C.white, color:pref==='nationale'?C.white:C.gray }}>
+              Marque nationale
+            </button>
+            <button onClick={()=>setPrefMarque?.(item.id, 'mdd_ok')} style={{ padding:"3px 9px", border:"none", cursor:"pointer", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:11, background:pref==='mdd_ok'?C.blue:C.white, color:pref==='mdd_ok'?C.white:C.gray }}>
+              MDD ok
+            </button>
+          </div>
+        )}
       </div>
       <div style={{ background:done?C.green:C.blue, color:C.white, borderRadius:8, padding:"3px 9px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13 }}>×{item.qty}</div>
       {!done && <button onClick={()=>setEditItem(item)} style={{ background:C.grayLight, border:"none", borderRadius:8, padding:"4px 7px", fontSize:12, cursor:"pointer" }}>✏️</button>}
       <button onClick={()=>removeItem(item.id)} style={{ background:"none", border:"none", fontSize:15, cursor:"pointer", color:C.gray }}>✕</button>
     </div>
-  );
+    );
+  };
 
   return (
     <div style={{ padding:"16px 16px 110px" }}>
@@ -4086,7 +4103,7 @@ function distanceKm(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.asin(Math.sqrt(a));
 }
 
-function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius, userPos, setUserPos, zoneLabel, setZoneLabel, userId, isAdmin, modeCoreActif, coreActifGlobal }) {
+function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius, userPos, setUserPos, zoneLabel, setZoneLabel, userId, isAdmin, modeCoreActif, coreActifGlobal, prefsMarqueParItem = {} }) {
   const F = "'Nunito',sans-serif";
 
   // Chantier géoloc comparateur — sélecteur de zone (point de référence).
@@ -4310,6 +4327,16 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
       try {
         setCoreChargement(true);
         setCoreErreur(null);
+        // Préférence marque par ligne (défaut 'nationale' si absente).
+        // "nationale" (pragmatique) = tout SAUF les MDD explicites
+        // (est_mdd=true) ; les sans-marque restent visibles. "mdd_ok" = tout.
+        // est_mdd absent (legacy sans marque) => jamais un MDD explicite =>
+        // autorisé. Défini DANS l'effet : la seule dépendance est
+        // prefsMarqueParItem (déjà dans le tableau de deps).
+        const offreAutorisee = (prixRow, itemId) => {
+          if (prefsMarqueParItem[itemId] === 'mdd_ok') return true;
+          return prixRow?.est_mdd !== true;
+        };
         const { cibles, exclusions } = construireCiblesComparaison(items);
 
         // Chantier 75 (révision) — un article ajouté en "toutes marques/tous
@@ -4331,7 +4358,14 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
         const prixBruts = await chargerPrixComparables(produitIds, {});
         if (annule) return;
         const correspondancesFraiches = faireCorrespondrePrix(cibles, prixBruts, { userPos, searchRadius, staleCutoffISO: cutoffISO });
-        const regroupement = regrouperParMagasin(correspondancesFraiches);
+        // Préférence marque par ligne — post-filtre additif AVANT le
+        // regroupement : une ligne "nationale" écarte les MDD explicites,
+        // "MDD ok" les garde. Ne touche pas comparateurCore.js.
+        const correspondancesFiltrees = correspondancesFraiches.map(c => ({
+          ...c,
+          correspondances: (c.correspondances || []).filter(pr => offreAutorisee(pr, c.itemId)),
+        }));
+        const regroupement = regrouperParMagasin(correspondancesFiltrees);
 
         const ciblesSansFormat = [];
         const regroupementEtendu = { ...regroupement };
@@ -4341,6 +4375,8 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
           const candidats = prixBruts.filter(p => {
             if (p.produit_id !== item.produit_id) return false;
             if (p.magasin_id == null) return false;
+            // Préférence marque par ligne (même règle que le post-filtre).
+            if (!offreAutorisee(p, item.id)) return false;
             if (p.observe_le && new Date(p.observe_le) < new Date(cutoffISO)) return false;
             if (userPos && searchRadius != null && p.latitude != null && p.longitude != null) {
               if (distanceKm(userPos.lat, userPos.lng, p.latitude, p.longitude) > searchRadius) return false;
@@ -4378,7 +4414,7 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
       }
     })();
     return () => { annule = true; };
-  }, [utiliserCore, items, userPos, searchRadius]);
+  }, [utiliserCore, items, userPos, searchRadius, prefsMarqueParItem]);
 
   // Adaptateur — résultat comparateurCore.js → même forme que analysis/ranked
   // legacy (ci-dessous), pour alimenter les cartes existantes sans les
@@ -4744,6 +4780,11 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
                     <div style={{ flex:1, minWidth:0 }}>
                       <div style={{ fontFamily:F, fontWeight:700, fontSize:13, color:"rgba(255,255,255,0.92)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                         {item.brand?`${item.brand} · `:""}{item.product}
+                        {/* Badge générique MDD quand l'offre retenue est un MDD
+                            (est_mdd). On n'affiche JAMAIS le nom de la sous-marque. */}
+                        {utiliserCore && p?.est_mdd === true && (
+                          <span style={{ marginLeft:6, background:"rgba(255,255,255,0.22)", color:"#fff", borderRadius:5, padding:"1px 5px", fontSize:9, fontWeight:900, verticalAlign:"middle" }}>MDD</span>
+                        )}
                       </div>
                       <div style={{ fontFamily:F, fontSize:11, color:"rgba(255,255,255,0.45)", marginTop:1 }}>
                         {item.format}{item.qty>1?` × ${item.qty}`:""}
@@ -6316,6 +6357,11 @@ export default function App() {
   // (ville/adresse saisie, ou "Ma position"/ville retrouvée par reverse-geocoding
   // pour un point GPS). Chargé depuis profiles.zone_label au démarrage.
   const [zoneLabel, setZoneLabel] = useState(null);
+  // Comparateur — préférence "Marque nationale / MDD ok" PAR LIGNE de liste
+  // (clé = item.id). Défaut = 'nationale' (clé absente => nationale). Non
+  // persisté en v1 : état client uniquement, réinitialisé au rechargement.
+  const [prefsMarqueParItem, setPrefsMarqueParItem] = useState({});
+  const setPrefMarque = (itemId, pref) => setPrefsMarqueParItem(prev => ({ ...prev, [itemId]: pref }));
   const [archives, setArchives]   = useState([]);
   // Chantier 1 — libellé officiel du Core (nom_reference) pour une ligne
   // d'historique déjà rattachée à un produit via lignes_ticket.produit_id.
@@ -7121,9 +7167,9 @@ export default function App() {
             </div>
           )}
           {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)}/>}
-          {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos}/>}
+          {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} prefsMarqueParItem={prefsMarqueParItem} setPrefMarque={setPrefMarque}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} setTab={setTab}/>}
-          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal}/>}
+          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} prefsMarqueParItem={prefsMarqueParItem}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
           {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;
