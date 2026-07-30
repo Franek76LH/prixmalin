@@ -1428,7 +1428,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     setEditableProducts(initialResult.products.map((p, i) => ({ ...p, id: i, keep: true })));
     setStoreNameEdit(initialResult.store || "");
     setStoreLocation(initialResult.address || "");
-    fetchKnownStores(enseigne);
+    fetchKnownStores(enseigne, initialResult.address || null);
     setStatus("store");
   }, []);
 
@@ -1443,7 +1443,13 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     };
   }, [scanning, galleryScanning]);
 
-  const fetchKnownStores = async (enseigne) => {
+  // Chantier 78 — après un scan, le CODE POSTAL du ticket PRIME sur le
+  // "dernier magasin utilisé". `adresseTicket` est passé depuis le flux de
+  // scan (address du ticket) ; le flux manuel (changement d'enseigne dans le
+  // menu) l'appelle sans adresse -> comportement d'avant inchangé. Aucun
+  // appel réseau : on extrait le CP par regex de l'adresse du ticket ET de
+  // l'adresse (texte libre) de chaque magasin déjà chargé.
+  const fetchKnownStores = async (enseigne, adresseTicket = null) => {
     if (!enseigne || enseigne === 'autre') { setKnownStores([]); return; }
     setKnownStoresLoading(true);
     setResolvedStoreId(null);
@@ -1452,8 +1458,35 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     const { data } = await supabase.from('stores').select('*').eq('enseigne', enseigne);
     const stores = data || [];
     setKnownStores(stores);
+
+    const extraireCP = (txt) => { const m = String(txt || '').match(/\b\d{5}\b/); return m ? m[0] : null; };
+    const cpTicket = extraireCP(adresseTicket);
     const lastId = localStorage.getItem(`prixmalin_lastStore_${enseigne}`);
-    if (lastId && stores.some(s => s.id === lastId)) setResolvedStoreId(lastId);
+    const lastConnu = lastId && stores.some(s => s.id === lastId) ? lastId : null;
+
+    let choisi = null;
+    if (cpTicket) {
+      // (a) Un magasin de l'enseigne correspond au CP du ticket -> il prime.
+      const candidatsCP = stores.filter(s => extraireCP(s.address) === cpTicket);
+      if (candidatsCP.length > 0) {
+        // Entre doublons de MÊME CP, on garde le "dernier utilisé" s'il en
+        // fait partie, sinon le premier.
+        choisi = (lastConnu && candidatsCP.some(s => s.id === lastConnu)) ? lastConnu : candidatsCP[0].id;
+      } else if (lastConnu) {
+        // (b) Aucun magasin à ce CP : repli sur le dernier utilisé UNIQUEMENT
+        // s'il ne CONTREDIT pas le CP du ticket (règle : jamais auto-choisir
+        // un magasin dont le CP contredit le ticket).
+        const cpLast = extraireCP(stores.find(s => s.id === lastConnu)?.address);
+        if (!cpLast || cpLast === cpTicket) choisi = lastConnu;
+      }
+      // sinon : le dernier utilisé contredit le CP -> rien de sélectionné,
+      // l'utilisateur choisit / crée le magasin.
+    } else {
+      // (c) Pas de CP exploitable dans le ticket -> comportement d'avant.
+      choisi = lastConnu;
+    }
+
+    if (choisi) setResolvedStoreId(choisi);
     setKnownStoresLoading(false);
   };
 
@@ -1492,7 +1525,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
       setStoreNameEdit(parsed.store||"");
       setStoreLocation(parsed.address||"");
       setError("");
-      await fetchKnownStores(enseigne);
+      await fetchKnownStores(enseigne, parsed.address || null);
       setStatus("store");
     } catch(e) { setError("JSON invalide : "+e.message); }
   };
@@ -1585,7 +1618,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true})));
                   setStoreNameEdit(parsed.store||"");
                   setStoreLocation(parsed.address||"");
-                  await fetchKnownStores(enseigne);
+                  await fetchKnownStores(enseigne, parsed.address || null);
                   setStatus("store");
                 } catch(e) { setError("Erreur scan : " + e.message); }
                 setScanning(false);
@@ -1604,7 +1637,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true, share:true})));
                   setStoreNameEdit(parsed.store || "");
                   setStoreLocation(parsed.address || "");
-                  await fetchKnownStores(enseigne);
+                  await fetchKnownStores(enseigne, parsed.address || null);
                   setStatus("store");
                 } catch(e) { setError("Erreur scan : " + e.message); }
                 setGalleryScanning(false);
@@ -1636,7 +1669,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true})));
                   setStoreNameEdit(parsed.store||"");
                   setStoreLocation(parsed.address||"");
-                  await fetchKnownStores(enseigne);
+                  await fetchKnownStores(enseigne, parsed.address || null);
                   setStatus("store");
                 } catch(e) { setError("Erreur scan : " + e.message); }
                 setScanning(false);
