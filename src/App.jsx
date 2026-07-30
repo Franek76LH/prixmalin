@@ -1380,8 +1380,39 @@ function AddItemSheet({ onClose, onAdd }) {
   );
 }
 
+// ── BROUILLON DE SCAN (Chantier 79) ───────────────────────────────────────────
+// Reprise d'un scan interrompu. L'état post-OCR d'ImportTicketSheet ne vit
+// qu'en mémoire et est perdu quand iOS recharge la page en arrière-plan. On le
+// sérialise dans localStorage (léger : le résultat OCR déjà parsé + les
+// éditions + l'étape, JAMAIS l'image). Clé versionnée : changer le suffixe
+// invalide proprement un ancien format. Aucun réseau, aucune base.
+const SCAN_DRAFT_KEY = 'prixmalin_scanDraft_v1';
+function lireScanDraft() {
+  try { const s = localStorage.getItem(SCAN_DRAFT_KEY); return s ? JSON.parse(s) : null; }
+  catch { return null; }
+}
+function ecrireScanDraft(draft) {
+  try { localStorage.setItem(SCAN_DRAFT_KEY, JSON.stringify(draft)); } catch { /* quota/mode privé : on ignore */ }
+}
+function effacerScanDraft() {
+  try { localStorage.removeItem(SCAN_DRAFT_KEY); } catch { /* ignore */ }
+}
+function formatDateBrouillon(iso) {
+  const d = iso ? new Date(iso) : null;
+  if (!d || Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }).replace(':', 'h');
+}
+// Étape du scan en langage utilisateur (pas la valeur technique de status).
+// Le brouillon n'est sauvegardé qu'aux étapes 'store' et 'share' ; 'store'
+// couvre à la fois le magasin et la revue des produits.
+function etapeLisibleScan(status) {
+  if (status === 'share') return 'Partage';
+  if (status === 'store') return 'Vérification du magasin et des produits';
+  return 'Prise de photo';
+}
+
 // ── IMPORT TICKET SHEET ───────────────────────────────────────────────────────
-function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera = false, autoOpenGallery = false, onManualEntry, initialResult = null }) {
+function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera = false, autoOpenGallery = false, onManualEntry, initialResult = null, resumeDraft = null }) {
   const [jsonText, setJsonText] = useState("");
   const [status,   setStatus]   = useState(directCamera ? "camera" : "idle");
   const [error,    setError]    = useState("");
@@ -1421,7 +1452,9 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   }, []);
 
   useEffect(() => {
-    if (!initialResult) return;
+    // Chantier 79 — la reprise d'un brouillon prime sur un initialResult
+    // (scan frais). Les deux ne s'appliquent jamais ensemble.
+    if (resumeDraft || !initialResult) return;
     const enseigne = storeIdFromName(initialResult.store);
     setResult(initialResult);
     setSelectedStore(enseigne);
@@ -1430,6 +1463,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     setStoreLocation(initialResult.address || "");
     fetchKnownStores(enseigne, initialResult.address || null);
     setStatus("store");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -1534,6 +1568,59 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   const [editingId,    setEditingId]    = useState(null);
   const [editDraft,    setEditDraft]    = useState({});
 
+  // ── Chantier 79 — brouillon reprenable ──────────────────────────────────
+  // draftCreatedAt : date de début du brouillon, stable entre sauvegardes.
+  // draftRef : dernier brouillon calculé, pour le flush sur éviction (les
+  // listeners captureraient sinon un state figé).
+  const draftCreatedAt = useRef(resumeDraft?.createdAt || null);
+  const draftRef = useRef(null);
+
+  // Réhydratation d'un brouillon repris : on replace TOUT l'état + l'étape.
+  // Ne re-fetch pas knownStores (resolvedStoreId sauvegardé suffit au confirm).
+  useEffect(() => {
+    if (!resumeDraft) return;
+    setResult(resumeDraft.result || null);
+    setEditableProducts(Array.isArray(resumeDraft.editableProducts) ? resumeDraft.editableProducts : []);
+    setSelectedStore(resumeDraft.selectedStore || "");
+    setResolvedStoreId(resumeDraft.resolvedStoreId || null);
+    setStoreNameEdit(resumeDraft.storeNameEdit || "");
+    setStoreLocation(resumeDraft.storeLocation || "");
+    setShareChecked(new Set(Array.isArray(resumeDraft.shareChecked) ? resumeDraft.shareChecked : []));
+    setStatus(resumeDraft.status === 'share' ? 'share' : 'store');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Sauvegarde du brouillon à chaque changement significatif, UNIQUEMENT
+  // pendant les étapes de validation (result présent + étape store/share).
+  useEffect(() => {
+    if (!result || (status !== 'store' && status !== 'share')) { draftRef.current = null; return; }
+    if (!draftCreatedAt.current) draftCreatedAt.current = new Date().toISOString();
+    const draft = {
+      v: 1,
+      createdAt: draftCreatedAt.current,
+      updatedAt: new Date().toISOString(),
+      result, editableProducts, selectedStore, resolvedStoreId,
+      storeNameEdit, storeLocation, status,
+      shareChecked: Array.from(shareChecked),
+    };
+    draftRef.current = draft;
+    ecrireScanDraft(draft);
+  }, [result, editableProducts, selectedStore, resolvedStoreId, storeNameEdit, storeLocation, status, shareChecked]);
+
+  // Flush fiable juste avant que iOS évince/recharge la page : on re-écrit le
+  // dernier brouillon connu sur passage en arrière-plan (visibilitychange
+  // document.hidden) et sur pagehide.
+  useEffect(() => {
+    const flush = () => { if (draftRef.current) ecrireScanDraft({ ...draftRef.current, updatedAt: new Date().toISOString() }); };
+    const onVisibility = () => { if (document.hidden) flush(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', flush);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', flush);
+    };
+  }, []);
+
   const loadExample = () => { setJsonText(EXAMPLE); parseAndPreview(EXAMPLE); };
   const toggleProduct = id => setEditableProducts(prev=>prev.map(p=>p.id===id?{...p,keep:!p.keep}:p));
   const updatePrice = (id,val) => setEditableProducts(prev=>prev.map(p=>p.id===id?{...p,price:parseFloat(val)||0}:p));
@@ -1569,6 +1656,11 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
       dateTicket:    result?.date || null,
     });
     onImport(toImport, ecritureCorePromise);
+    // Chantier 79 — écriture en base lancée : le brouillon n'a plus lieu
+    // d'être. On l'efface AVANT onClose (jamais sur un simple ✕/onClose).
+    draftRef.current = null;
+    draftCreatedAt.current = null;
+    effacerScanDraft();
     onClose();
   };
 
@@ -3810,12 +3902,34 @@ function EconomiesTab({ priceDB, archives, items, setTab }) {
 }
 
 // ── PRICES TAB ────────────────────────────────────────────────────────────────
-function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValidated, onCreateArchive, userId, produitsRef = [], autoOpenCamera = false, onAutoOpenConsumed, initialScanResult = null, onInitialScanConsumed, hideActions = false, coreActifGlobal = false }) {
+function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValidated, onCreateArchive, userId, produitsRef = [], autoOpenCamera = false, onAutoOpenConsumed, autoResumeScan = false, onAutoResumeConsumed, initialScanResult = null, onInitialScanConsumed, hideActions = false, coreActifGlobal = false }) {
   const [showImport,    setShowImport]    = useState(false);
   const [capturedResult] = useState(initialScanResult);
+  // Chantier 79 — brouillon de scan reprenable. scanDraft : détecté au montage
+  // (survit au rechargement, contrairement à ImportTicketSheet démonté).
+  // resumeDraft : brouillon transmis à la feuille pour réhydratation.
+  // showNewScanPrompt : demande avant d'écraser un brouillon par un nouveau scan.
+  const [scanDraft, setScanDraft] = useState(() => lireScanDraft());
+  const [resumeDraft, setResumeDraft] = useState(null);
+  const [showNewScanPrompt, setShowNewScanPrompt] = useState(false);
+  const [confirmAbandonScan, setConfirmAbandonScan] = useState(false);
 
   useEffect(() => {
-    if (autoOpenCamera || capturedResult) setShowImport(true);
+    const draft = lireScanDraft();
+    // Chantier 79 (ajustement) — "Reprendre" depuis l'accueil : rouvrir
+    // directement la feuille sur le brouillon.
+    if (autoResumeScan && draft) {
+      setScanDraft(draft); setResumeDraft(draft); setShowImport(true);
+      onAutoResumeConsumed?.();
+      return;
+    }
+    if (autoOpenCamera || capturedResult) {
+      // Nouveau scan demandé, mais un brouillon existe : ne pas écraser en
+      // douce -> proposer de reprendre ou repartir de zéro.
+      if (draft) { setScanDraft(draft); setShowNewScanPrompt(true); }
+      else setShowImport(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [showEntry,     setShowEntry]     = useState(false);
   const [editPrice,     setEditPrice]     = useState(null);
@@ -3987,8 +4101,48 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
         </div>
       </div>
 
+      {/* Chantier 79 — bandeau de reprise d'un scan interrompu (au montage,
+          survit au rechargement de la page). Masqué pendant que la feuille
+          ou la demande "nouveau scan" est ouverte. */}
+      {!hideActions && scanDraft && !showImport && !showNewScanPrompt && (
+        <div style={{ background:"#FFF8E6", border:`1.5px solid ${C.yellow}`, borderRadius:14, padding:"12px 14px", marginBottom:12 }}>
+          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, color:"#7A6000" }}>
+            🧾 Scan de ticket en cours
+          </div>
+          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:"#7A6000", marginTop:2 }}>
+            étape : {etapeLisibleScan(scanDraft.status)}{scanDraft.createdAt ? ` · commencé le ${formatDateBrouillon(scanDraft.createdAt)}` : ""}
+          </div>
+          <div style={{ display:"flex", gap:8, marginTop:10 }}>
+            <button onClick={()=>{ setResumeDraft(scanDraft); setShowImport(true); }} style={{ flex:1, padding:"10px", border:"none", borderRadius:10, background:C.orange, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, color:C.white, cursor:"pointer" }}>
+              Reprendre
+            </button>
+            <button onClick={()=>setConfirmAbandonScan(true)} style={{ padding:"10px 14px", border:"1.5px solid rgba(122,96,0,0.35)", borderRadius:10, background:"transparent", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:"#7A6000", cursor:"pointer" }}>
+              Abandonner
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Chantier 79 — confirmation d'abandon du scan en cours */}
+      {confirmAbandonScan && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:250, padding:24 }} onClick={()=>setConfirmAbandonScan(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{ background:C.white, borderRadius:16, padding:"20px", maxWidth:320, width:"100%" }}>
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.text, marginBottom:6 }}>Abandonner ce scan en cours ?</div>
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.gray, marginBottom:16 }}>Le ticket scanné et les modifications seront perdus.</div>
+            <div style={{ display:"flex", gap:8 }}>
+              <button onClick={()=>{ effacerScanDraft(); setScanDraft(null); setConfirmAbandonScan(false); }} style={{ flex:1, padding:"12px", border:"none", borderRadius:10, background:"#CC0000", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.white, cursor:"pointer" }}>
+                Abandonner
+              </button>
+              <button onClick={()=>setConfirmAbandonScan(false)} style={{ padding:"12px 16px", border:`1.5px solid ${C.grayLight}`, borderRadius:10, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, cursor:"pointer" }}>
+                Annuler
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {!hideActions && (
-        <button onClick={()=>setShowImport(true)} style={{ width:"100%", padding:"18px", marginBottom:12, background:"linear-gradient(135deg,#CC0000,#FF1A1A)", border:"none", borderRadius:14, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:10, boxShadow:"0 6px 24px rgba(204,0,0,0.45)" }}>
+        <button onClick={()=>{ const d = lireScanDraft(); if (d) { setScanDraft(d); setShowNewScanPrompt(true); } else setShowImport(true); }} style={{ width:"100%", padding:"18px", marginBottom:12, background:"linear-gradient(135deg,#CC0000,#FF1A1A)", border:"none", borderRadius:14, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:10, boxShadow:"0 6px 24px rgba(204,0,0,0.45)" }}>
           <span style={{ fontSize:22 }}>🧾</span> Importer un ticket de caisse
         </button>
       )}
@@ -4120,7 +4274,27 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
         </button>
       )}
 
-      {showImport    && <ImportTicketSheet onClose={()=>{setShowImport(false);onAutoOpenConsumed?.();onInitialScanConsumed?.();}} onImport={importPrices} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))} directCamera={autoOpenCamera} onManualEntry={()=>{ setShowImport(false); setShowEntry(true); }} initialResult={capturedResult}/>}
+      {/* Chantier 79 — demande avant d'écraser un brouillon par un nouveau scan */}
+      {showNewScanPrompt && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:250, padding:24 }} onClick={()=>setShowNewScanPrompt(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{ background:C.white, borderRadius:16, padding:"20px", maxWidth:340, width:"100%" }}>
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.text, marginBottom:6 }}>Un scan est déjà en cours</div>
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.gray, marginBottom:16 }}>
+              Le reprendre, ou repartir de zéro ?{scanDraft?.createdAt ? ` (commencé le ${formatDateBrouillon(scanDraft.createdAt)})` : ""}
+            </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              <button onClick={()=>{ setResumeDraft(scanDraft); setShowNewScanPrompt(false); setShowImport(true); }} style={{ padding:"12px", border:"none", borderRadius:10, background:C.orange, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.white, cursor:"pointer" }}>
+                Reprendre le scan en cours
+              </button>
+              <button onClick={()=>{ effacerScanDraft(); setScanDraft(null); setResumeDraft(null); setShowNewScanPrompt(false); setShowImport(true); }} style={{ padding:"12px", border:`1.5px solid ${C.grayLight}`, borderRadius:10, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, cursor:"pointer" }}>
+                Repartir de zéro
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showImport    && <ImportTicketSheet onClose={()=>{setShowImport(false);setResumeDraft(null);setScanDraft(lireScanDraft());onAutoOpenConsumed?.();onInitialScanConsumed?.();}} onImport={importPrices} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))} directCamera={autoOpenCamera} onManualEntry={()=>{ setShowImport(false); setShowEntry(true); }} initialResult={capturedResult} resumeDraft={resumeDraft}/>}
       {showEntry     && <PriceEntrySheet  onClose={()=>{setShowEntry(false);setEditPrice(null);}} onSave={savePrice} existingPrice={editPrice}/>}
       {toast && <Toast msg={toast.msg} ok={toast.ok}/>}
     </div>
@@ -6013,8 +6187,13 @@ function runConfettiRain(layer, onDone) {
   setTimeout(() => onDone?.(), 3600);
 }
 
-function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash, archives = [], pseudo, onStats, onMesPrix, onFaq, onSignOut, pendingCagnotte, onConsumeCagnotteCelebration, pendingPotential, onConsumePotentialCelebration }) {
+function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash, onResumeScan, archives = [], pseudo, onStats, onMesPrix, onFaq, onSignOut, pendingCagnotte, onConsumeCagnotteCelebration, pendingPotential, onConsumePotentialCelebration }) {
   const F = "'Nunito',sans-serif";
+  // Chantier 79 (ajustement) — scan en cours visible dès l'accueil. HomeTab
+  // n'étant monté que sur l'onglet home, la lecture au montage reflète l'état
+  // courant du brouillon (relu à chaque retour sur l'accueil).
+  const [scanDraft, setScanDraft] = useState(() => lireScanDraft());
+  const [confirmAbandonScan, setConfirmAbandonScan] = useState(false);
   const unchecked = items.filter(i => !i.checked).length;
   const members   = circles.filter(c => c.status === 'accepted');
   const avatarBg  = ["#E5181B","#F5C200","#00B341","#4A90D9","#8E44AD"];
@@ -6218,6 +6397,44 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash
           <span ref={cagnotteRealRef} style={{fontSize:'18px', fontWeight:'bold', color:'white', display:'inline-block', opacity: hideRealCagnotte ? 0 : 1}}>{displayCagnotte >= 0 ? "+" : ""}{displayCagnotte.toFixed(2)} €</span>
         </div>
       </div>
+
+      {/* Chantier 79 (ajustement) — carte "scan en cours" visible dès l'accueil */}
+      {scanDraft && (
+        <div style={{ margin:'12px 20px 0', padding:'12px 14px', background:'#FFF8E6', border:'1.5px solid #F5C200', borderRadius:14, position:'relative', zIndex:10, boxShadow:'0 3px 12px rgba(0,0,0,0.12)' }}>
+          <div style={{ fontFamily:F, fontWeight:900, fontSize:13, color:'#7A6000' }}>
+            🧾 Scan de ticket en cours
+          </div>
+          <div style={{ fontFamily:F, fontSize:12, color:'#7A6000', marginTop:2 }}>
+            étape : {etapeLisibleScan(scanDraft.status)}{scanDraft.createdAt ? ` · commencé le ${formatDateBrouillon(scanDraft.createdAt)}` : ''}
+          </div>
+          <div style={{ display:'flex', gap:8, marginTop:10 }}>
+            <button onClick={() => onResumeScan?.()} style={{ flex:1, padding:'10px', border:'none', borderRadius:10, background:'#E5181B', fontFamily:F, fontWeight:900, fontSize:13, color:'#fff', cursor:'pointer' }}>
+              Reprendre
+            </button>
+            <button onClick={() => setConfirmAbandonScan(true)} style={{ padding:'10px 14px', border:'1.5px solid rgba(122,96,0,0.35)', borderRadius:10, background:'transparent', fontFamily:F, fontWeight:800, fontSize:13, color:'#7A6000', cursor:'pointer' }}>
+              Abandonner
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation d'abandon du scan en cours */}
+      {confirmAbandonScan && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:9999, padding:24 }} onClick={() => setConfirmAbandonScan(false)}>
+          <div onClick={e => e.stopPropagation()} style={{ background:'#fff', borderRadius:16, padding:'20px', maxWidth:320, width:'100%' }}>
+            <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:'#1a1a1a', marginBottom:6 }}>Abandonner ce scan en cours ?</div>
+            <div style={{ fontFamily:F, fontSize:13, color:'#888', marginBottom:16 }}>Le ticket scanné et les modifications seront perdus.</div>
+            <div style={{ display:'flex', gap:8 }}>
+              <button onClick={() => { effacerScanDraft(); setScanDraft(null); setConfirmAbandonScan(false); }} style={{ flex:1, padding:'12px', border:'none', borderRadius:10, background:'#CC0000', fontFamily:F, fontWeight:900, fontSize:14, color:'#fff', cursor:'pointer' }}>
+                Abandonner
+              </button>
+              <button onClick={() => setConfirmAbandonScan(false)} style={{ padding:'12px 16px', border:'1.5px solid #eee', borderRadius:10, background:'#fff', fontFamily:F, fontWeight:800, fontSize:14, color:'#333', cursor:'pointer' }}>
+                Annuler
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* #64.1 — calque plein écran pour le pop géant (clone échappant à
           l'overflow:hidden du conteneur racine) et la pluie de confettis */}
@@ -6500,6 +6717,10 @@ export default function App() {
   const [pendingScanCount, setPendingScanCount] = useState(0);
   const handleFlash = () => setShowScanChoix(true);
   const handleFlashConfirmed = () => { setShowScanChoix(false); setAutoOpenCamera(true); setTab("prices"); };
+  // Chantier 79 (ajustement) — "Reprendre" depuis l'accueil : bascule sur
+  // l'onglet Prix qui rouvrira la feuille avec le brouillon (autoResumeScan).
+  const [autoResumeScan, setAutoResumeScan] = useState(false);
+  const handleResumeScan = () => { setAutoResumeScan(true); setTab("prices"); };
   const [showCircleSheet,  setShowCircleSheet]  = useState(false);
   const [showStatsSheet,   setShowStatsSheet]   = useState(false);
   const [showFaqSheet,     setShowFaqSheet]     = useState(false);
@@ -7199,12 +7420,12 @@ export default function App() {
               )}
             </div>
           )}
-          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)}/>}
+          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} onResumeScan={handleResumeScan} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)}/>}
           {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} prefsMarqueParItem={prefsMarqueParItem} setPrefMarque={setPrefMarque}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} setTab={setTab}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} prefsMarqueParItem={prefsMarqueParItem}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
-          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
+          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;
             const {data,error}=await supabase.from('archives').insert({...rest,user_id:session?.user?.id}).select('id').single();
             if(error){ console.error("Erreur création archive ticket :",error); showAppToast("⚠️ Archive non sauvegardée, vérifie ta connexion",false); }
