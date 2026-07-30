@@ -54,7 +54,7 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         model: "anthropic/claude-sonnet-4-5",
-        max_tokens: 4000,
+        max_tokens: 16000,
         messages: [{
           role: "user",
           content: [
@@ -100,7 +100,24 @@ RÈGLE ABSOLUE : extraire CHAQUE article du ticket sans exception.
     const clean = text.replace(/```json|```/g, "").trim();
     if (!clean) throw new Error("Réponse vide du modèle");
 
-    const parsed = JSON.parse(clean);
+    // Parsing robuste : on isole la sous-chaîne entre le PREMIER "{" et le
+    // DERNIER "}" (le modèle peut ajouter du texte autour, ou une réponse
+    // tronquée sur un gros ticket laisse du bruit). Si le parse échoue quand
+    // même (réponse coupée en plein milieu du JSON), message clair plutôt
+    // que l'erreur brute de JSON.parse.
+    const debut = clean.indexOf("{");
+    const fin = clean.lastIndexOf("}");
+    const jsonCandidat = (debut !== -1 && fin !== -1 && fin > debut)
+      ? clean.slice(debut, fin + 1)
+      : clean;
+
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonCandidat);
+    } catch (_e) {
+      throw new Error("Réponse du modèle incomplète (ticket trop long ?), réessaie");
+    }
+
     return new Response(JSON.stringify(parsed), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
