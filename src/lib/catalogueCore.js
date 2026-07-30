@@ -60,7 +60,7 @@ export function mapperLigneListeCourses(row) {
 export async function chargerVariantes(produitId) {
   const { data, error } = await supabase
     .from('variantes_produit')
-    .select('id, produit_id, libelle, quantite_nette, unite_quantite, nombre_unites, marque_id, marques(nom)')
+    .select('id, produit_id, libelle, quantite_nette, unite_quantite, nombre_unites, marque_id, marques(nom, est_mdd)')
     .eq('produit_id', produitId)
     .eq('actif', true)
     .order('quantite_nette', { ascending: true, nullsFirst: false });

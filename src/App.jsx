@@ -2609,7 +2609,7 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
 
 
 // ── CATALOG TAB ───────────────────────────────────────────────────────────────
-function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, items }) {
+function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, items, prefMarqueGlobale = 'nationale', setPrefMarqueGlobale }) {
   const [variantes,        setVariantes]        = useState([]);
   const [varianteId,       setVarianteId]       = useState(null);
   const [variantesLoading, setVariantesLoading] = useState(true);
@@ -2621,6 +2621,11 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
   // 'all' = "Toutes les marques" / "Tous les formats", sélectionné par défaut.
   const [marqueSelectionnee, setMarqueSelectionnee] = useState('all');
   const [formatSelectionne,  setFormatSelectionne]  = useState('all');
+  // Comparateur v1 — Temps 1 : segment Nationale/MDD. Défaut = profil global,
+  // sauf produit qui n'existe QU'en MDD -> bascule auto en 'mdd' (note affichée),
+  // sans modifier le profil global.
+  const [segmentMarque, setSegmentMarque] = useState(prefMarqueGlobale === 'mdd' ? 'mdd' : 'nationale');
+  const [basculeAutoMdd, setBasculeAutoMdd] = useState(false);
 
   const loadVariantes = async () => {
     setVarianteError(null);
@@ -2631,6 +2636,12 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
       const data = await chargerVariantes(produit.id);
       setVariantes(data);
       setVarianteId(data.length === 0 ? 'any' : null);
+      // Bascule auto MDD si le produit n'a AUCUNE variante nationale
+      // (nationale = est_mdd !== true, donc inclut les sans-marque).
+      const aUneNationale = data.some(v => v.marques?.est_mdd !== true);
+      const aUneMdd = data.some(v => v.marques?.est_mdd === true);
+      if (!aUneNationale && aUneMdd) { setSegmentMarque('mdd'); setBasculeAutoMdd(true); }
+      else { setSegmentMarque(prefMarqueGlobale === 'mdd' ? 'mdd' : 'nationale'); setBasculeAutoMdd(false); }
     } catch (e) {
       console.error("Erreur chargement variantes :", e);
       setVariantes([]);
@@ -2641,47 +2652,63 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
     }
   };
 
+  // Temps 1 — choix explicite du segment : édite le PROFIL GLOBAL (persisté) et
+  // annule l'état "bascule auto". Repart propre côté marque/format.
+  const choisirSegment = (seg) => {
+    const s = seg === 'mdd' ? 'mdd' : 'nationale';
+    setSegmentMarque(s);
+    setBasculeAutoMdd(false);
+    setMarqueSelectionnee('all');
+    setPrefMarqueGlobale?.(s);
+  };
+
   useEffect(() => {
     loadVariantes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [produit.id]);
 
-  // Chantier 74 — la rangée Marque n'existe que si au moins une variante a
-  // une marque (marque_id non nul) ; sinon (produits frais...) elle reste
-  // masquée, indépendamment de tout filtre en cours.
-  const produitADesMarques = useMemo(() => variantes.some(v => v.marque_id), [variantes]);
+  // Variantes retenues par le segment courant. Nationale = est_mdd !== true
+  // (inclut les sans-marque) ; MDD = est_mdd === true.
+  const variantesSegment = useMemo(
+    () => segmentMarque === 'mdd'
+      ? variantes.filter(v => v.marques?.est_mdd === true)
+      : variantes.filter(v => v.marques?.est_mdd !== true),
+    [variantes, segmentMarque]
+  );
 
-  // Marques disponibles compte tenu du format déjà sélectionné (filtre croisé).
+  // Marques affichables en Temps 2 : UNIQUEMENT des marques NATIONALES
+  // (jamais un nom de MDD). Vide hors segment nationale.
   const marquesListe = useMemo(() => {
+    if (segmentMarque !== 'nationale') return [];
     const pertinentes = formatSelectionne === 'all'
-      ? variantes
-      : variantes.filter(v => formatFormatStructure(v) === formatSelectionne);
+      ? variantesSegment
+      : variantesSegment.filter(v => formatFormatStructure(v) === formatSelectionne);
     const map = new Map();
-    pertinentes.forEach(v => { if (v.marque_id && v.marques?.nom) map.set(v.marque_id, v.marques.nom); });
+    pertinentes.forEach(v => { if (v.marque_id && v.marques?.nom && v.marques?.est_mdd !== true) map.set(v.marque_id, v.marques.nom); });
     return [...map.entries()]
       .map(([id, nom]) => ({ id, nom }))
       .sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
-  }, [variantes, formatSelectionne]);
+  }, [variantesSegment, formatSelectionne, segmentMarque]);
 
-  // Formats disponibles compte tenu de la marque déjà sélectionnée (filtre croisé).
+  // Formats disponibles dans le segment, filtrés par la marque nationale
+  // éventuellement choisie.
   const formatsListe = useMemo(() => {
-    const pertinentes = marqueSelectionnee === 'all'
-      ? variantes
-      : variantes.filter(v => v.marque_id === marqueSelectionnee);
+    const base = (segmentMarque === 'nationale' && marqueSelectionnee !== 'all')
+      ? variantesSegment.filter(v => v.marque_id === marqueSelectionnee)
+      : variantesSegment;
     const labels = new Set();
-    pertinentes.forEach(v => { const l = formatFormatStructure(v); if (l) labels.add(l); });
+    base.forEach(v => { const l = formatFormatStructure(v); if (l) labels.add(l); });
     return [...labels];
-  }, [variantes, marqueSelectionnee]);
+  }, [variantesSegment, marqueSelectionnee, segmentMarque]);
 
-  // Variante(s) résolues par le couple (marque, format) courant. "Toutes les
-  // marques"/"Tous les formats" élargissent simplement l'ensemble retenu —
-  // aucune comparaison de prix ici (chantier suivant).
+  // Variante(s) résolues par (segment, marque, format). La marque ne filtre
+  // qu'en segment nationale ; en MDD, pas de sous-marque.
   const variantesResolues = useMemo(() => {
-    return variantes.filter(v =>
-      (marqueSelectionnee === 'all' || v.marque_id === marqueSelectionnee) &&
+    return variantesSegment.filter(v =>
+      (segmentMarque !== 'nationale' || marqueSelectionnee === 'all' || v.marque_id === marqueSelectionnee) &&
       (formatSelectionne === 'all' || formatFormatStructure(v) === formatSelectionne)
     );
-  }, [variantes, marqueSelectionnee, formatSelectionne]);
+  }, [variantesSegment, marqueSelectionnee, formatSelectionne, segmentMarque]);
 
   // Chantier 74 (suite) — un seul bouton vert plein par rangée (le choix actif),
   // tous les autres en gris neutre (jamais un contour vert qui donnerait
@@ -2796,8 +2823,28 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
 
           {!variantesLoading && !varianteError && variantes.length > 0 && (
             <>
-              {/* Chantier 74 — Marque (masquée si aucune variante n'a de marque) */}
-              {produitADesMarques && (
+              {/* Comparateur v1 — Temps 1 : segment Nationale / MDD (édite le
+                  profil global). Défaut = profil global, ou MDD auto si le
+                  produit n'existe qu'en MDD. */}
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Préférence marque</div>
+              <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom: basculeAutoMdd ? 6 : 14 }}>
+                <button onClick={()=>choisirSegment('nationale')} style={pillStyle(segmentMarque==='nationale')}>
+                  Marques nationales
+                </button>
+                <button onClick={()=>choisirSegment('mdd')} style={pillStyle(segmentMarque==='mdd')}>
+                  MDD
+                </button>
+              </div>
+              {basculeAutoMdd && (
+                <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.orange, fontWeight:700, marginBottom:14 }}>
+                  Ce produit n'existe qu'en MDD — affiché en MDD.
+                </div>
+              )}
+
+              {/* Temps 2 — en nationale : liste des MARQUES NATIONALES (jamais
+                  un nom de MDD) + "Toutes les marques". En MDD : état générique,
+                  aucune sous-marque affichée. */}
+              {segmentMarque === 'nationale' && marquesListe.length > 0 && (
                 <>
                   <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Marque</div>
                   <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:14 }}>
@@ -2811,6 +2858,13 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
                     ))}
                   </div>
                 </>
+              )}
+              {segmentMarque === 'mdd' && (
+                <div style={{ marginBottom:14 }}>
+                  <span style={{ display:"inline-block", padding:"7px 14px", background:C.grayLight, borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:C.textLight }}>
+                    Marque distributeur (MDD)
+                  </span>
+                </div>
               )}
 
               {/* Chantier 74 — Format, construit uniquement à partir des champs structurés */}
@@ -2851,7 +2905,7 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
   );
 }
 
-function CatalogTab({ items, onAdd, setTab }) {
+function CatalogTab({ items, onAdd, setTab, prefMarqueGlobale = 'nationale', setPrefMarqueGlobale }) {
   const [categories,      setCategories]      = useState([]);
   const [catLoading,      setCatLoading]      = useState(true);
   const [catError,        setCatError]        = useState(null);
@@ -3205,6 +3259,8 @@ function CatalogTab({ items, onAdd, setTab }) {
           onClose={()=>setOpenProduct(null)}
           onAdd={addItem}
           items={items}
+          prefMarqueGlobale={prefMarqueGlobale}
+          setPrefMarqueGlobale={setPrefMarqueGlobale}
         />
       )}
     </div>
@@ -3524,7 +3580,7 @@ function EditItemSheet({ item, onClose, onSave }) {
 }
 
 // ── LIST TAB ──────────────────────────────────────────────────────────────────
-function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites, saveFavorites, searchRadius, setSearchRadius, userPos, setUserPos, prefsMarqueParItem = {}, setPrefMarque }) {
+function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites, saveFavorites, searchRadius, setSearchRadius, userPos, setUserPos, prefMarqueGlobale = 'nationale', setPrefMarqueGlobale }) {
   const [showAdd,      setShowAdd]      = useState(false);
   const [showFavModal, setShowFavModal] = useState(false);
   const [editItem,     setEditItem]     = useState(null);
@@ -3570,10 +3626,10 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
     setShowFavModal(false);
   };
 
-  // Comparateur — préférence marque par ligne (défaut 'nationale' si absente).
-  const prefDe = item => prefsMarqueParItem[item.id] === 'mdd_ok' ? 'mdd_ok' : 'nationale';
+  // Comparateur — le toggle reflète et édite le PROFIL GLOBAL (même réglage
+  // pour tous les produits, persisté). Plus de préférence par item.
+  const pref = prefMarqueGlobale === 'mdd' ? 'mdd' : 'nationale';
   const ItemRow = ({item, done}) => {
-    const pref = prefDe(item);
     return (
     <div style={{ display:"flex", alignItems:"center", gap:12, background:done?'#F3FAF5':C.white, borderRadius:12, padding:"12px 14px", border:`1px solid ${done?'#C8E6C9':C.grayLight}`, opacity:1, boxShadow:done?'inset 3px 0 0 #4CAF50':'0 1px 4px rgba(0,0,0,0.06)' }}>
       <button onClick={()=>toggleCheck(item.id)} style={{ width:26, height:26, borderRadius:6, border:`2px solid ${done?C.green:C.blue}`, background:done?C.green:C.white, cursor:"pointer", flexShrink:0, color:C.white, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13 }}>
@@ -3586,15 +3642,16 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
         <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.gray, marginTop:1 }}>
           {item.formatDisplay ?? item.format}{item.brand?"":""} {!item.brand&&<span style={{ color:C.orange, fontSize:11 }}>· toutes marques</span>}
         </div>
-        {/* Préférence marque (v1, non persistée) : "nationale" filtre les MDD,
-            "MDD ok" les inclut (affichées en générique dans le comparateur). */}
+        {/* Profil marque GLOBAL (persisté) : "nationale" filtre les MDD (mais
+            garde les produits qui n'existent qu'en MDD), "MDD" les inclut —
+            toujours affichées en générique « MDD » dans le comparateur. */}
         {!done && (
           <div style={{ display:"inline-flex", marginTop:6, borderRadius:8, overflow:"hidden", border:`1px solid ${C.grayLight}` }}>
-            <button onClick={()=>setPrefMarque?.(item.id, 'nationale')} style={{ padding:"3px 9px", border:"none", cursor:"pointer", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:11, background:pref==='nationale'?C.blue:C.white, color:pref==='nationale'?C.white:C.gray }}>
+            <button onClick={()=>setPrefMarqueGlobale?.('nationale')} style={{ padding:"3px 9px", border:"none", cursor:"pointer", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:11, background:pref==='nationale'?C.blue:C.white, color:pref==='nationale'?C.white:C.gray }}>
               Marque nationale
             </button>
-            <button onClick={()=>setPrefMarque?.(item.id, 'mdd_ok')} style={{ padding:"3px 9px", border:"none", cursor:"pointer", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:11, background:pref==='mdd_ok'?C.blue:C.white, color:pref==='mdd_ok'?C.white:C.gray }}>
-              MDD ok
+            <button onClick={()=>setPrefMarqueGlobale?.('mdd')} style={{ padding:"3px 9px", border:"none", cursor:"pointer", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:11, background:pref==='mdd'?C.blue:C.white, color:pref==='mdd'?C.white:C.gray }}>
+              MDD
             </button>
           </div>
         )}
@@ -4310,7 +4367,7 @@ function distanceKm(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.asin(Math.sqrt(a));
 }
 
-function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius, userPos, setUserPos, zoneLabel, setZoneLabel, userId, isAdmin, modeCoreActif, coreActifGlobal, prefsMarqueParItem = {} }) {
+function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius, userPos, setUserPos, zoneLabel, setZoneLabel, userId, isAdmin, modeCoreActif, coreActifGlobal, prefMarqueGlobale = 'nationale' }) {
   const F = "'Nunito',sans-serif";
 
   // Chantier géoloc comparateur — sélecteur de zone (point de référence).
@@ -4534,16 +4591,6 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
       try {
         setCoreChargement(true);
         setCoreErreur(null);
-        // Préférence marque par ligne (défaut 'nationale' si absente).
-        // "nationale" (pragmatique) = tout SAUF les MDD explicites
-        // (est_mdd=true) ; les sans-marque restent visibles. "mdd_ok" = tout.
-        // est_mdd absent (legacy sans marque) => jamais un MDD explicite =>
-        // autorisé. Défini DANS l'effet : la seule dépendance est
-        // prefsMarqueParItem (déjà dans le tableau de deps).
-        const offreAutorisee = (prixRow, itemId) => {
-          if (prefsMarqueParItem[itemId] === 'mdd_ok') return true;
-          return prixRow?.est_mdd !== true;
-        };
         const { cibles, exclusions } = construireCiblesComparaison(items);
 
         // Chantier 75 (révision) — un article ajouté en "toutes marques/tous
@@ -4564,13 +4611,26 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
         const cutoffISO = new Date(Date.now() - STALE_DAYS * 86400000).toISOString();
         const prixBruts = await chargerPrixComparables(produitIds, {});
         if (annule) return;
+
+        // Comparateur v1 — profil marque GLOBAL. "nationale" = tout SAUF les
+        // MDD explicites (est_mdd=true), MAIS on garde les MDD d'un produit qui
+        // n'existe QU'en MDD (bascule auto -> pas de "aucun prix" trompeur).
+        // "mdd" = tout autorisé. est_mdd absent (sans-marque) => national.
+        const produitsAvecOffreNationale = new Set(
+          prixBruts.filter(p => p?.est_mdd !== true && p?.produit_id != null).map(p => p.produit_id)
+        );
+        const offreAutorisee = (prixRow) => {
+          if (prefMarqueGlobale === 'mdd') return true;
+          if (prixRow?.est_mdd !== true) return true; // national / sans-marque
+          return !produitsAvecOffreNationale.has(prixRow?.produit_id); // MDD gardé seulement si produit MDD-only
+        };
+
         const correspondancesFraiches = faireCorrespondrePrix(cibles, prixBruts, { userPos, searchRadius, staleCutoffISO: cutoffISO });
-        // Préférence marque par ligne — post-filtre additif AVANT le
-        // regroupement : une ligne "nationale" écarte les MDD explicites,
-        // "MDD ok" les garde. Ne touche pas comparateurCore.js.
+        // Post-filtre marque additif AVANT le regroupement. Ne touche pas
+        // comparateurCore.js.
         const correspondancesFiltrees = correspondancesFraiches.map(c => ({
           ...c,
-          correspondances: (c.correspondances || []).filter(pr => offreAutorisee(pr, c.itemId)),
+          correspondances: (c.correspondances || []).filter(pr => offreAutorisee(pr)),
         }));
         const regroupement = regrouperParMagasin(correspondancesFiltrees);
 
@@ -4582,8 +4642,8 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
           const candidats = prixBruts.filter(p => {
             if (p.produit_id !== item.produit_id) return false;
             if (p.magasin_id == null) return false;
-            // Préférence marque par ligne (même règle que le post-filtre).
-            if (!offreAutorisee(p, item.id)) return false;
+            // Profil marque global (même règle que le post-filtre).
+            if (!offreAutorisee(p)) return false;
             if (p.observe_le && new Date(p.observe_le) < new Date(cutoffISO)) return false;
             if (userPos && searchRadius != null && p.latitude != null && p.longitude != null) {
               if (distanceKm(userPos.lat, userPos.lng, p.latitude, p.longitude) > searchRadius) return false;
@@ -4621,7 +4681,7 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
       }
     })();
     return () => { annule = true; };
-  }, [utiliserCore, items, userPos, searchRadius, prefsMarqueParItem]);
+  }, [utiliserCore, items, userPos, searchRadius, prefMarqueGlobale]);
 
   // Adaptateur — résultat comparateurCore.js → même forme que analysis/ranked
   // legacy (ci-dessous), pour alimenter les cartes existantes sans les
@@ -6607,11 +6667,19 @@ export default function App() {
   // (ville/adresse saisie, ou "Ma position"/ville retrouvée par reverse-geocoding
   // pour un point GPS). Chargé depuis profiles.zone_label au démarrage.
   const [zoneLabel, setZoneLabel] = useState(null);
-  // Comparateur — préférence "Marque nationale / MDD ok" PAR LIGNE de liste
-  // (clé = item.id). Défaut = 'nationale' (clé absente => nationale). Non
-  // persisté en v1 : état client uniquement, réinitialisé au rechargement.
-  const [prefsMarqueParItem, setPrefsMarqueParItem] = useState({});
-  const setPrefMarque = (itemId, pref) => setPrefsMarqueParItem(prev => ({ ...prev, [itemId]: pref }));
+  // Comparateur — profil GLOBAL "préférence marque" ('nationale' | 'mdd'),
+  // défaut 'nationale'. S'applique à tous les produits et est PERSISTÉ entre
+  // sessions (localStorage). Édité depuis la liste (toggle) et depuis la fiche
+  // produit (Temps 1). Lu par le comparateur (moteur Core).
+  const [prefMarqueGlobale, setPrefMarqueGlobaleState] = useState(() => {
+    try { return localStorage.getItem('prixmalin_prefMarque_v1') === 'mdd' ? 'mdd' : 'nationale'; }
+    catch { return 'nationale'; }
+  });
+  const setPrefMarqueGlobale = (pref) => {
+    const val = pref === 'mdd' ? 'mdd' : 'nationale';
+    setPrefMarqueGlobaleState(val);
+    try { localStorage.setItem('prixmalin_prefMarque_v1', val); } catch { /* mode privé/quota : ignore */ }
+  };
   const [archives, setArchives]   = useState([]);
   // Chantier 1 — libellé officiel du Core (nom_reference) pour une ligne
   // d'historique déjà rattachée à un produit via lignes_ticket.produit_id.
@@ -7421,9 +7489,9 @@ export default function App() {
             </div>
           )}
           {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} onResumeScan={handleResumeScan} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)}/>}
-          {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} prefsMarqueParItem={prefsMarqueParItem} setPrefMarque={setPrefMarque}/>}
-          {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} setTab={setTab}/>}
-          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} prefsMarqueParItem={prefsMarqueParItem}/>}
+          {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} prefMarqueGlobale={prefMarqueGlobale} setPrefMarqueGlobale={setPrefMarqueGlobale}/>}
+          {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} setTab={setTab} prefMarqueGlobale={prefMarqueGlobale} setPrefMarqueGlobale={setPrefMarqueGlobale}/>}
+          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} prefMarqueGlobale={prefMarqueGlobale}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
           {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;
