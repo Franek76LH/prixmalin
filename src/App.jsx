@@ -3590,7 +3590,7 @@ function EditItemSheet({ item, onClose, onSave }) {
 }
 
 // ── LIST TAB ──────────────────────────────────────────────────────────────────
-function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites, saveFavorites, searchRadius, setSearchRadius, prefMarqueGlobale = 'nationale', setPrefMarqueGlobale }) {
+function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites, saveFavorites, prefMarqueGlobale = 'nationale', setPrefMarqueGlobale }) {
   const [showAdd,      setShowAdd]      = useState(false);
   const [showFavModal, setShowFavModal] = useState(false);
   const [editItem,     setEditItem]     = useState(null);
@@ -3698,19 +3698,8 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
           </div>
         </>
       )}
-      {items.length>=1 && (
-        <div style={{ display:"flex", gap:6, marginBottom:10, overflowX:"auto" }}>
-          {[2,5,10,20,50,100].map(r=>(
-            <button key={r} onClick={()=>setSearchRadius(r)} style={{
-              padding:"6px 14px", borderRadius:20, border:"none", cursor:"pointer",
-              fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:13,
-              background: searchRadius===r ? "#CC0000" : "#f0f0f0",
-              color: searchRadius===r ? "#fff" : "#333",
-              whiteSpace:"nowrap", flexShrink:0
-            }}>{r} km</button>
-          ))}
-        </div>
-      )}
+      {/* Chantier 81 — la rangée de rayons a été retirée de l'onglet Liste :
+          le rayon se règle uniquement dans le sélecteur de zone du comparateur. */}
       {items.length>=1 && (
         <button onClick={()=>setTab("compare")} style={{ width:"100%", padding:"15px", marginBottom:10, background:"linear-gradient(135deg,#CC0000,#FF1A1A)", border:"none", borderRadius:14, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 6px 20px rgba(180,0,0,0.45)" }}>
           🏪 Comparer les prix
@@ -4368,7 +4357,7 @@ function distanceKm(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.asin(Math.sqrt(a));
 }
 
-function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius, userPos, setUserPos, zoneLabel, setZoneLabel, userId, isAdmin, modeCoreActif, coreActifGlobal, prefMarqueGlobale = 'nationale' }) {
+function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius, userPos, setUserPos, zoneLabel, setZoneLabel, zonePrete = true, userId, isAdmin, modeCoreActif, coreActifGlobal, prefMarqueGlobale = 'nationale' }) {
   const F = "'Nunito',sans-serif";
 
   // Chantier géoloc comparateur — sélecteur de zone (point de référence).
@@ -4801,7 +4790,37 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
           ))}
         </div>
       )}
+
+      {/* Chantier 81 — le rayon se règle ICI, mais seulement quand on MODIFIE
+          une zone existante (userPos défini). Au tout premier choix de zone,
+          aucun choix de rayon : 10 km par défaut appliqué en silence. */}
+      {userPos && (
+        <div style={{ marginTop:24 }}>
+          <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:C.text, marginBottom:8 }}>Rayon autour du point</div>
+          <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+            {[2,5,10,20,50,100].map(r=>(
+              <button key={r} onClick={()=>setSearchRadius(r)} style={{
+                padding:"6px 14px", borderRadius:20, border:"none", cursor:"pointer",
+                fontFamily:F, fontWeight:700, fontSize:13,
+                background: searchRadius===r ? "#CC0000" : "#f0f0f0",
+                color: searchRadius===r ? "#fff" : "#333",
+                whiteSpace:"nowrap"
+              }}>{r} km</button>
+            ))}
+          </div>
+        </div>
+      )}
     </>
+  );
+
+  // Chantier 81 — écran de chargement neutre le temps que la zone soit résolue
+  // (localStorage + filet Supabase). Évite tout clignotement de l'écran de
+  // zone avant que le point mémorisé ne soit connu.
+  const ecranChargement = (
+    <div style={{ padding:"48px 20px", textAlign:"center", fontFamily:F, color:C.textLight }}>
+      <div style={{ fontSize:26, marginBottom:10 }}>⏳</div>
+      <div style={{ fontSize:14 }}>Chargement de ta zone…</div>
+    </div>
   );
 
   const analysis = useMemo(()=>{
@@ -4909,31 +4928,21 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
   }, [bestAffiche?.id]);
 
   return (
-    <div style={{ padding: zoneManquante ? "24px 20px 100px" : "16px 16px 110px" }}>
-      {zoneManquante ? selecteurZone : (
+    <div style={{ padding: (!zonePrete || zoneManquante) ? "24px 20px 100px" : "16px 16px 110px" }}>
+      {!zonePrete ? ecranChargement : zoneManquante ? selecteurZone : (
       <>
-      {/* Chantier géoloc comparateur — zone active + rayon, toujours visible
-          (même après un GPS réussi) : "modifier" rouvre le sélecteur au-dessus,
-          sans perdre la liste de prix déjà calculée. */}
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10, gap:8 }}>
-        <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+      {/* Chantier 81 — zone active DISCRÈTE : tout l'élément est cliquable et
+          rouvre le sélecteur (changement de point ET de rayon). Plus de rangée
+          de rayons ni de bandeau sur l'écran des prix ; aucune redemande auto. */}
+      <button onClick={()=>setZoneEditOpen(true)}
+        style={{ display:"inline-flex", alignItems:"center", gap:6, marginBottom:16, padding:"6px 12px",
+                 maxWidth:"100%", background:"#f4f4f4", border:"none", borderRadius:20, cursor:"pointer",
+                 fontFamily:F, fontWeight:700, fontSize:13, color:C.text }}>
+        <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
           📍 {zoneLabel || "Ma position"} · {searchRadius} km
-        </div>
-        <button onClick={()=>setZoneEditOpen(true)} style={{ background:"none", border:"none", padding:0, flexShrink:0, fontFamily:F, fontWeight:700, fontSize:12, color:C.blue, cursor:"pointer", textDecoration:"underline" }}>
-          modifier
-        </button>
-      </div>
-      <div style={{ display:"flex", gap:6, marginBottom:16, overflowX:"auto" }}>
-        {[2,5,10,20,50,100].map(r=>(
-          <button key={r} onClick={()=>setSearchRadius(r)} style={{
-            padding:"6px 14px", borderRadius:20, border:"none", cursor:"pointer",
-            fontFamily:F, fontWeight:700, fontSize:13,
-            background: searchRadius===r ? "#CC0000" : "#f0f0f0",
-            color: searchRadius===r ? "#fff" : "#333",
-            whiteSpace:"nowrap", flexShrink:0
-          }}>{r} km</button>
-        ))}
-      </div>
+        </span>
+        <span style={{ color:C.textLight, fontSize:11, flexShrink:0 }}>✏️</span>
+      </button>
 
       {/* Résumé liste */}
       <div style={{ background:C.blue, borderRadius:14, padding:"14px 18px", marginBottom:16, display:"flex", alignItems:"center", gap:12 }}>
@@ -6695,6 +6704,10 @@ export default function App() {
   // (ville/adresse saisie, ou "Ma position"/ville retrouvée par reverse-geocoding
   // pour un point GPS).
   const [zoneLabel, setZoneLabel] = useState(() => lireZoneStockee()?.zoneLabel ?? null);
+  // Chantier 81 — anti-flash : la zone est "prête" dès qu'un point local existe
+  // (hydraté synchronement ci-dessus), sinon on attend la fin du chargement du
+  // profil Supabase (voir l'init, setZonePrete(true) juste avant setLoaded).
+  const [zonePrete, setZonePrete] = useState(() => !!lireZoneStockee()?.userPos);
 
   // Chantier 81 — écrit la zone dans localStorage à chaque changement (point,
   // libellé ou rayon), comme un favori local.
@@ -7005,6 +7018,7 @@ export default function App() {
         } else {
           setCguAcceptedAt(cguAt);
         }
+        setZonePrete(true); // Chantier 81 — zone résolue (profil chargé), fin de l'anti-flash
         setLoaded(true);
       } catch(e){
         console.error("Supabase load:", e);
@@ -7530,9 +7544,9 @@ export default function App() {
             </div>
           )}
           {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} onResumeScan={handleResumeScan} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)}/>}
-          {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} searchRadius={searchRadius} setSearchRadius={setSearchRadius} prefMarqueGlobale={prefMarqueGlobale} setPrefMarqueGlobale={setPrefMarqueGlobale}/>}
+          {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} prefMarqueGlobale={prefMarqueGlobale} setPrefMarqueGlobale={setPrefMarqueGlobale}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} setTab={setTab} prefMarqueGlobale={prefMarqueGlobale} setPrefMarqueGlobale={setPrefMarqueGlobale}/>}
-          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} prefMarqueGlobale={prefMarqueGlobale}/>}
+          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} prefMarqueGlobale={prefMarqueGlobale}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
           {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;
