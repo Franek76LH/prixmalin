@@ -200,6 +200,16 @@ async function reverseGeocodeLabel(lat, lng) {
   } catch { return null; }
 }
 
+// Chantier 81 — zone du comparateur persistée localement (point + libellé +
+// rayon), même esprit que les favoris : réhydratée à l'init pour ne pas
+// repasser par l'écran de choix ni attendre le round-trip Supabase. null si
+// rien de stocké ou JSON illisible.
+const ZONE_STORAGE_KEY = 'prixmalin_zone_v1';
+function lireZoneStockee() {
+  try { return JSON.parse(localStorage.getItem(ZONE_STORAGE_KEY) || 'null'); }
+  catch { return null; }
+}
+
 async function insertStoreInDB(enseigne, address, lat, lng, name = null) {
   const BRANDS = [
     { match: ["super u", "superu"],                 canonical: "Super U"     },
@@ -3580,7 +3590,7 @@ function EditItemSheet({ item, onClose, onSave }) {
 }
 
 // ── LIST TAB ──────────────────────────────────────────────────────────────────
-function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites, saveFavorites, searchRadius, setSearchRadius, userPos, setUserPos, prefMarqueGlobale = 'nationale', setPrefMarqueGlobale }) {
+function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites, saveFavorites, searchRadius, setSearchRadius, prefMarqueGlobale = 'nationale', setPrefMarqueGlobale }) {
   const [showAdd,      setShowAdd]      = useState(false);
   const [showFavModal, setShowFavModal] = useState(false);
   const [editItem,     setEditItem]     = useState(null);
@@ -3702,16 +3712,7 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
         </div>
       )}
       {items.length>=1 && (
-        <button onClick={()=>{
-          if(!userPos && navigator.geolocation){
-            navigator.geolocation.getCurrentPosition(
-              pos=>{ setUserPos({lat:pos.coords.latitude,lng:pos.coords.longitude}); setTab("compare"); },
-              ()=>setTab("compare")
-            );
-          } else {
-            setTab("compare");
-          }
-        }} style={{ width:"100%", padding:"15px", marginBottom:10, background:"linear-gradient(135deg,#CC0000,#FF1A1A)", border:"none", borderRadius:14, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 6px 20px rgba(180,0,0,0.45)" }}>
+        <button onClick={()=>setTab("compare")} style={{ width:"100%", padding:"15px", marginBottom:10, background:"linear-gradient(135deg,#CC0000,#FF1A1A)", border:"none", borderRadius:14, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 6px 20px rgba(180,0,0,0.45)" }}>
           🏪 Comparer les prix
         </button>
       )}
@@ -4375,11 +4376,10 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
   // voir le early-return plus bas, jamais de liste de prix sans point.
   const [zoneEditOpen, setZoneEditOpen] = useState(false);
   const [adresseSaisie, setAdresseSaisie] = useState("");
-  const [geocodingEnCours, setGeocodingEnCours] = useState(false);
+  const [suggestions, setSuggestions] = useState([]);
   const [gpsEnCours, setGpsEnCours] = useState(false);
   const [gpsError, setGpsError] = useState(null);
-  const [geoError, setGeoError] = useState(null);
-  const gpsAutoTente = useRef(false);
+  const inputRef = useRef(null);
 
   // Persiste le point choisi (coords + libellé) sur profiles, même mécanisme
   // que les favoris (table Supabase liée à l'utilisateur) : un point choisi
@@ -4389,7 +4389,7 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
     setUserPos(coords);
     setZoneLabel(label);
     setZoneEditOpen(false);
-    setGeoError(null);
+    setSuggestions([]);
     setGpsError(null);
     if (!userId) return;
     const { error } = await supabase.from('profiles').upsert({
@@ -4413,42 +4413,42 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
         setGpsEnCours(false);
       },
       () => {
-        setGpsError("Impossible d'obtenir ta position — vérifie l'autorisation de localisation.");
+        setGpsError("Position indisponible, saisis une adresse ci-dessous.");
         setGpsEnCours(false);
+        setTimeout(() => inputRef.current?.focus(), 50);
       }
     );
   };
 
-  const validerAdresse = async () => {
-    const saisie = adresseSaisie.trim();
-    if (!saisie || geocodingEnCours) return;
-    setGeocodingEnCours(true);
-    setGeoError(null);
-    const res = await geocodeAddress(saisie);
-    setGeocodingEnCours(false);
-    if (!res) { setGeoError("Adresse introuvable, réessaie."); return; }
-    await definirZone({ lat: res.lat, lng: res.lng }, res.label || saisie);
+  // Chantier 81 — autocomplétion adresse (api-adresse), debounce ~300 ms.
+  // On n'appelle plus de géocodage au "Valider" : les coordonnées sont déjà
+  // dans chaque suggestion (geometry.coordinates), pas de second aller-retour.
+  useEffect(() => {
+    const q = adresseSaisie.trim();
+    if (q.length < 3) { setSuggestions([]); return; }
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=5&autocomplete=1`);
+        const d = await r.json();
+        setSuggestions(d.features || []);
+      } catch { setSuggestions([]); }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [adresseSaisie]);
+
+  const choisirSuggestion = (f) => {
+    const coords = f?.geometry?.coordinates;
+    if (!Array.isArray(coords) || coords.length < 2) return;
+    const [lng, lat] = coords;
+    definirZone({ lat, lng }, f.properties?.label || adresseSaisie.trim());
     setAdresseSaisie("");
+    setSuggestions([]);
   };
 
-  // À l'ouverture du comparateur, sans point mémorisé (chargé en amont
-  // depuis profiles par App), tentative automatique et silencieuse du GPS —
-  // gpsAutoTente empêche de relancer la demande à chaque re-render ou
-  // fermeture du sélecteur. Échec/refus : le sélecteur reste affiché (aucun
-  // prix montré sans point, voir le early-return plus bas).
-  useEffect(() => {
-    if (userPos || gpsAutoTente.current || !navigator.geolocation) return;
-    gpsAutoTente.current = true;
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        const label = await reverseGeocodeLabel(coords.lat, coords.lng);
-        await definirZone(coords, label || "Ma position");
-      },
-      () => {} // refus/échec silencieux : le sélecteur reste affiché
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userPos]);
+  // Chantier 81 — plus AUCUNE demande GPS automatique : la géolocalisation
+  // n'est déclenchée qu'au tap explicite sur "Utiliser ma position" (évite le
+  // popup GPS surprise à l'ouverture et le double popup avec le bouton
+  // "Comparer les prix"). Sans point, l'écran de choix de zone reste affiché.
 
   const [storesGeo, setStoresGeo] = useState([]);
 
@@ -4483,7 +4483,8 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
     const cutoff = Date.now() - STALE_DAYS * 86400000;
     const estRecentShadow = (prix) => new Date(prix.date).getTime() >= cutoff;
     const estDansRayonShadow = (prix, geo) => {
-      if (!userPos || !prix.store_id) return true;
+      if (!userPos) return false; // Chantier 81 — jamais de prix sans point
+      if (!prix.store_id) return true; // prix sans magasin : rien à filtrer
       if (!geo?.latitude || !geo?.longitude) return true;
       return distanceKm(userPos.lat, userPos.lng, geo.latitude, geo.longitude) <= searchRadius;
     };
@@ -4586,6 +4587,11 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
 
   useEffect(() => {
     if (!utiliserCore) { setCoreResultat(null); setCoreErreur(null); return; }
+    // Chantier 81 — verrou de sécurité : jamais de prix sans point de
+    // référence. L'écran de zone empêche déjà d'arriver ici, mais on ne
+    // calcule rien tant que userPos est null (sinon faireCorrespondrePrix
+    // ne filtrerait aucune distance → tous les magasins, toutes villes).
+    if (!userPos) { setCoreResultat(null); setCoreErreur(null); setCoreChargement(false); return; }
     let annule = false;
     (async () => {
       try {
@@ -4774,19 +4780,27 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
 
       <div style={{ textAlign:"center", fontFamily:F, fontSize:12, color:C.textLight, margin:"10px 0" }}>ou</div>
 
-      <div style={{ display:"flex", gap:8 }}>
-        <input
-          value={adresseSaisie}
-          onChange={e=>setAdresseSaisie(e.target.value)}
-          onKeyDown={e=>{ if (e.key === 'Enter') validerAdresse(); }}
-          placeholder="Adresse, ville ou code postal"
-          style={{ flex:1, padding:"12px 14px", borderRadius:12, border:`2px solid ${C.grayLight}`, fontFamily:F, fontSize:14, boxSizing:"border-box" }}
-        />
-        <button onClick={validerAdresse} disabled={!adresseSaisie.trim() || geocodingEnCours} style={{ padding:"12px 18px", border:"none", borderRadius:12, background:(!adresseSaisie.trim()||geocodingEnCours)?C.grayLight:C.orange, fontFamily:F, fontWeight:800, fontSize:14, color:"#111", cursor:(!adresseSaisie.trim()||geocodingEnCours)?"default":"pointer" }}>
-          {geocodingEnCours ? "..." : "Valider"}
-        </button>
-      </div>
-      {geoError && <div style={{ fontFamily:F, fontSize:12, color:C.red, marginTop:10, textAlign:"center" }}>⚠️ {geoError}</div>}
+      <input
+        ref={inputRef}
+        value={adresseSaisie}
+        onChange={e=>setAdresseSaisie(e.target.value)}
+        onKeyDown={e=>{ if (e.key === 'Enter' && suggestions[0]) choisirSuggestion(suggestions[0]); }}
+        placeholder="Adresse, ville ou code postal"
+        autoComplete="off"
+        style={{ width:"100%", padding:"12px 14px", borderRadius:12, border:`2px solid ${C.grayLight}`, fontFamily:F, fontSize:14, boxSizing:"border-box" }}
+      />
+      {suggestions.length > 0 && (
+        <div style={{ marginTop:6, border:`1px solid ${C.grayLight}`, borderRadius:12, overflow:"hidden" }}>
+          {suggestions.map((f, i) => (
+            <button key={f.properties?.id || i} onClick={()=>choisirSuggestion(f)}
+              style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none",
+                       borderTop: i === 0 ? "none" : `1px solid ${C.grayLight}`, background:"#fff",
+                       fontFamily:F, fontSize:14, color:C.text, cursor:"pointer" }}>
+              {f.properties?.label}
+            </button>
+          ))}
+        </div>
+      )}
     </>
   );
 
@@ -4798,7 +4812,8 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
       const cutoff = Date.now() - STALE_DAYS * 86400000;
       matches.forEach(p=>{
         if(new Date(p.date).getTime() < cutoff) return;
-        if(userPos && p.store_id) {
+        if(!userPos) return; // Chantier 81 — jamais de prix sans point de référence
+        if(p.store_id) {
           const geo = storeMap[p.store_id];
           if(geo?.latitude && geo?.longitude && distanceKm(userPos.lat, userPos.lng, geo.latitude, geo.longitude) > searchRadius) return;
         }
@@ -4811,13 +4826,14 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
   const storeTotals = useMemo(()=>{
     const totals={};
 
-    // Filtrer les magasins selon le rayon si GPS disponible
+    // Filtrer les magasins selon le rayon. Chantier 81 — sans point de
+    // référence, aucun magasin (jamais de prix toutes-villes confondues).
     const storesInRange = userPos
       ? storesGeo.filter(s => {
           if(!s.latitude || !s.longitude) return true;
           return distanceKm(userPos.lat, userPos.lng, s.latitude, s.longitude) <= searchRadius;
         })
-      : storesGeo;
+      : [];
 
     // Fallback : si storesGeo pas encore chargé, utiliser toutes les enseignes
     const activeStores = storesGeo.length === 0
@@ -6661,12 +6677,36 @@ export default function App() {
   const [tab, setTab]           = useState("home");
   const [items, setItems]       = useState([]);
   const [priceDB, setPriceDB]     = useState([]);
-  const [searchRadius, setSearchRadius] = useState(10);
-  const [userPos, setUserPos] = useState(null);
+  // Chantier 81 — zone du comparateur (point + rayon + libellé) réhydratée
+  // depuis localStorage à l'init : au retour, l'utilisateur retrouve sa zone
+  // sans repasser par l'écran de choix. Le filet Supabase (profiles) ne sert
+  // plus que de repli cross-device (voir le chargement de profil, gardé pour
+  // ne pas écraser une zone locale déjà hydratée).
+  const [searchRadius, setSearchRadius] = useState(() => {
+    const z = lireZoneStockee();
+    return (z && Number.isFinite(z.searchRadius)) ? z.searchRadius : 10;
+  });
+  const [userPos, setUserPos] = useState(() => {
+    const z = lireZoneStockee();
+    return (z?.userPos?.lat != null && z?.userPos?.lng != null)
+      ? { lat: z.userPos.lat, lng: z.userPos.lng } : null;
+  });
   // Chantier géoloc comparateur — libellé du point de référence actif
   // (ville/adresse saisie, ou "Ma position"/ville retrouvée par reverse-geocoding
-  // pour un point GPS). Chargé depuis profiles.zone_label au démarrage.
-  const [zoneLabel, setZoneLabel] = useState(null);
+  // pour un point GPS).
+  const [zoneLabel, setZoneLabel] = useState(() => lireZoneStockee()?.zoneLabel ?? null);
+
+  // Chantier 81 — écrit la zone dans localStorage à chaque changement (point,
+  // libellé ou rayon), comme un favori local.
+  useEffect(() => {
+    try {
+      localStorage.setItem(ZONE_STORAGE_KEY, JSON.stringify({
+        userPos: userPos ? { lat: userPos.lat, lng: userPos.lng } : null,
+        zoneLabel: zoneLabel ?? null,
+        searchRadius,
+      }));
+    } catch { /* mode privé/quota : ignore */ }
+  }, [userPos, zoneLabel, searchRadius]);
   // Comparateur — profil GLOBAL "préférence marque" ('nationale' | 'mdd'),
   // défaut 'nationale'. S'applique à tous les produits et est PERSISTÉ entre
   // sessions (localStorage). Édité depuis la liste (toggle) et depuis la fiche
@@ -6943,10 +6983,11 @@ export default function App() {
           }
         }
         setPseudo(prof.data?.pseudo ?? null);
-        // Chantier géoloc comparateur — point de référence mémorisé, utilisé
-        // tel quel comme userPos initial (pas de tentative GPS automatique
-        // si un point existe déjà, voir CompareTab).
-        if (prof.data?.zone_lat != null && prof.data?.zone_lng != null) {
+        // Chantier géoloc comparateur / 81 — point de référence mémorisé.
+        // localStorage est prioritaire (hydraté à l'init) : profiles ne sert
+        // que de repli cross-device et n'écrase jamais une zone locale déjà
+        // définie.
+        if (prof.data?.zone_lat != null && prof.data?.zone_lng != null && !lireZoneStockee()?.userPos) {
           setUserPos({ lat: prof.data.zone_lat, lng: prof.data.zone_lng });
           setZoneLabel(prof.data.zone_label ?? null);
         }
@@ -7489,7 +7530,7 @@ export default function App() {
             </div>
           )}
           {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} onResumeScan={handleResumeScan} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)}/>}
-          {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} prefMarqueGlobale={prefMarqueGlobale} setPrefMarqueGlobale={setPrefMarqueGlobale}/>}
+          {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} searchRadius={searchRadius} setSearchRadius={setSearchRadius} prefMarqueGlobale={prefMarqueGlobale} setPrefMarqueGlobale={setPrefMarqueGlobale}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} setTab={setTab} prefMarqueGlobale={prefMarqueGlobale} setPrefMarqueGlobale={setPrefMarqueGlobale}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} prefMarqueGlobale={prefMarqueGlobale}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
