@@ -4474,7 +4474,7 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
     const estDansRayonShadow = (prix, geo) => {
       if (!userPos) return false; // Chantier 81 — jamais de prix sans point
       if (!prix.store_id) return true; // prix sans magasin : rien à filtrer
-      if (!geo?.latitude || !geo?.longitude) return true;
+      if (!geo?.latitude || !geo?.longitude) return false; // Chantier 82 — magasin sans coords → hors zone
       return distanceKm(userPos.lat, userPos.lng, geo.latitude, geo.longitude) <= searchRadius;
     };
 
@@ -4620,12 +4620,22 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
           return !produitsAvecOffreNationale.has(prixRow?.produit_id); // MDD gardé seulement si produit MDD-only
         };
 
+        // Chantier 82 — zone active : un prix dont le magasin n'a pas de
+        // coordonnées valides est traité comme HORS ZONE (jamais affiché).
+        // Ceinture posée ici, en post-filtre, car faireCorrespondrePrix
+        // (comparateurCore.js, non modifié) laisse passer ces prix : sa garde
+        // distance ne s'active que si latitude/longitude sont non nuls.
+        const dansZoneAvecCoords = (prixRow) => {
+          if (!userPos) return true;
+          return prixRow?.latitude != null && prixRow?.longitude != null;
+        };
+
         const correspondancesFraiches = faireCorrespondrePrix(cibles, prixBruts, { userPos, searchRadius, staleCutoffISO: cutoffISO });
-        // Post-filtre marque additif AVANT le regroupement. Ne touche pas
-        // comparateurCore.js.
+        // Post-filtre marque + zone additif AVANT le regroupement. Ne touche
+        // pas comparateurCore.js.
         const correspondancesFiltrees = correspondancesFraiches.map(c => ({
           ...c,
-          correspondances: (c.correspondances || []).filter(pr => offreAutorisee(pr)),
+          correspondances: (c.correspondances || []).filter(pr => offreAutorisee(pr) && dansZoneAvecCoords(pr)),
         }));
         const regroupement = regrouperParMagasin(correspondancesFiltrees);
 
@@ -4639,6 +4649,7 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
             if (p.magasin_id == null) return false;
             // Profil marque global (même règle que le post-filtre).
             if (!offreAutorisee(p)) return false;
+            if (!dansZoneAvecCoords(p)) return false; // Chantier 82 — hors zone si magasin sans coords
             if (p.observe_le && new Date(p.observe_le) < new Date(cutoffISO)) return false;
             if (userPos && searchRadius != null && p.latitude != null && p.longitude != null) {
               if (distanceKm(userPos.lat, userPos.lng, p.latitude, p.longitude) > searchRadius) return false;
@@ -4834,7 +4845,9 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
         if(!userPos) return; // Chantier 81 — jamais de prix sans point de référence
         if(p.store_id) {
           const geo = storeMap[p.store_id];
-          if(geo?.latitude && geo?.longitude && distanceKm(userPos.lat, userPos.lng, geo.latitude, geo.longitude) > searchRadius) return;
+          // Chantier 82 — magasin sans coordonnées valides → hors zone (exclu)
+          if(!geo || geo.latitude == null || geo.longitude == null) return;
+          if(distanceKm(userPos.lat, userPos.lng, geo.latitude, geo.longitude) > searchRadius) return;
         }
         if(!byStore[p.storeId]||p.price<byStore[p.storeId].price) byStore[p.storeId]=p;
       });
@@ -4849,7 +4862,7 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
     // référence, aucun magasin (jamais de prix toutes-villes confondues).
     const storesInRange = userPos
       ? storesGeo.filter(s => {
-          if(!s.latitude || !s.longitude) return true;
+          if(!s.latitude || !s.longitude) return false; // Chantier 82 — magasin sans coords → hors zone
           return distanceKm(userPos.lat, userPos.lng, s.latitude, s.longitude) <= searchRadius;
         })
       : [];
