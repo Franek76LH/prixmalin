@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback, Component } from "react";
 import { scanTicketWithClaude, imageFileToJpegBase64, scanMultipleTicketsWithClaude } from "./scanTicket";
 import { STORES, CATEGORY_META, PRODUCT_SUGGESTIONS, STALE_DAYS, JOURS_MOYENNE } from "./constants";
 import { supabase } from "./lib/supabase";
@@ -4357,6 +4357,15 @@ function distanceKm(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.asin(Math.sqrt(a));
 }
 
+// Chantier 84 — clé de rapprochement stores(legacy)/magasins(Core) par
+// coordonnées arrondies : les deux tables partagent lat/long au magasin près
+// (vérifié), mais leurs id diffèrent. Sert à connaître la catégorie d'un
+// magasin legacy (categorie n'existe que dans la table magasins Core).
+function cleCoords(lat, lng) {
+  if (lat == null || lng == null) return null;
+  return `${Number(lat).toFixed(4)},${Number(lng).toFixed(4)}`;
+}
+
 function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius, userPos, setUserPos, zoneLabel, setZoneLabel, zonePrete = true, userId, isAdmin, modeCoreActif, coreActifGlobal, prefMarqueGlobale = 'nationale', categorieMagasin = 'grande_surface', setCategorieMagasin }) {
   const F = "'Nunito',sans-serif";
 
@@ -4455,6 +4464,18 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
     () => new Map(magasinsCat.map(m => [m.id, m.categorie || 'grande_surface'])),
     [magasinsCat]
   );
+  // Chantier 84 — même catégorie, indexée par coordonnées, pour les moteurs
+  // legacy (analysis/storeTotals) et le diagnostic shadow, qui raisonnent par
+  // stores (id legacy) et non par magasin_id Core. Coords inconnues / magasin
+  // non rapproché -> grande surface par défaut (règle Chantier 83).
+  const categorieParCoords = useMemo(() => {
+    const m = new Map();
+    magasinsCat.forEach(mg => {
+      const k = cleCoords(mg.latitude, mg.longitude);
+      if (k) m.set(k, mg.categorie || 'grande_surface');
+    });
+    return m;
+  }, [magasinsCat]);
 
   // #56.6 — source de vérité : modeCoreActif (tri-état, admin uniquement)
   // prend le dessus s'il est explicitement défini (override de comparaison
@@ -4490,7 +4511,9 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
       if (!userPos) return false; // Chantier 81 — jamais de prix sans point
       if (!prix.store_id) return true; // prix sans magasin : rien à filtrer
       if (!geo?.latitude || !geo?.longitude) return false; // Chantier 82 — magasin sans coords → hors zone
-      return distanceKm(userPos.lat, userPos.lng, geo.latitude, geo.longitude) <= searchRadius;
+      if (distanceKm(userPos.lat, userPos.lng, geo.latitude, geo.longitude) > searchRadius) return false;
+      // Chantier 84 — restriction catégorie aussi dans le diagnostic shadow.
+      return (categorieParCoords.get(cleCoords(geo.latitude, geo.longitude)) || 'grande_surface') === categorieMagasin;
     };
 
     const { panier, magasins } = construirePanierEtMagasins({
@@ -4579,7 +4602,7 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
       } : null,
       nonTrouves: classement.nonTrouves,
     };
-  }, [items, priceDB, storesGeo, userPos, searchRadius, vueDev]);
+  }, [items, priceDB, storesGeo, userPos, searchRadius, vueDev, categorieParCoords, categorieMagasin]);
 
   // #56.4 — vrai pipeline Core (produits/prix/magasins via prix_comparables),
   // uniquement quand utiliserCore est vrai. Séquence reprise à l'identique
@@ -4868,17 +4891,20 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
       matches.forEach(p=>{
         if(new Date(p.date).getTime() < cutoff) return;
         if(!userPos) return; // Chantier 81 — jamais de prix sans point de référence
+        const geo = p.store_id ? storeMap[p.store_id] : null;
         if(p.store_id) {
-          const geo = storeMap[p.store_id];
           // Chantier 82 — magasin sans coordonnées valides → hors zone (exclu)
           if(!geo || geo.latitude == null || geo.longitude == null) return;
           if(distanceKm(userPos.lat, userPos.lng, geo.latitude, geo.longitude) > searchRadius) return;
         }
+        // Chantier 84 — restriction catégorie aussi sur le moteur legacy (magasin
+        // sans coords / sans store => grande surface par défaut).
+        if((categorieParCoords.get(cleCoords(geo?.latitude, geo?.longitude)) || 'grande_surface') !== categorieMagasin) return;
         if(!byStore[p.storeId]||p.price<byStore[p.storeId].price) byStore[p.storeId]=p;
       });
       return { item, byStore };
     });
-  },[items, priceDB, userPos, searchRadius, storesGeo]);
+  },[items, priceDB, userPos, searchRadius, storesGeo, categorieParCoords, categorieMagasin]);
 
   const storeTotals = useMemo(()=>{
     const totals={};
@@ -4888,7 +4914,10 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
     const storesInRange = userPos
       ? storesGeo.filter(s => {
           if(!s.latitude || !s.longitude) return false; // Chantier 82 — magasin sans coords → hors zone
-          return distanceKm(userPos.lat, userPos.lng, s.latitude, s.longitude) <= searchRadius;
+          if(distanceKm(userPos.lat, userPos.lng, s.latitude, s.longitude) > searchRadius) return false;
+          // Chantier 84 — restriction catégorie aussi sur le moteur legacy.
+          if((categorieParCoords.get(cleCoords(s.latitude, s.longitude)) || 'grande_surface') !== categorieMagasin) return false;
+          return true;
         })
       : [];
 
@@ -4907,7 +4936,7 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
       });
     });
     return totals;
-  },[analysis, userPos, searchRadius, storesGeo]);
+  },[analysis, userPos, searchRadius, storesGeo, categorieParCoords, categorieMagasin]);
 
   const ranked          = STORES.map(s=>({...s,...storeTotals[s.id]})).filter(s=>s.found>0).sort((a,b)=>b.found!==a.found?b.found-a.found:a.total-b.total);
   const best            = ranked[0];
@@ -6747,6 +6776,42 @@ function CguRattrapageScreen({ onAccept }) {
   );
 }
 
+// Chantier 84 — filet de sécurité contre une erreur de rendu d'un onglet
+// (ex. donnée inattendue au passage MDD) : au lieu d'une page blanche qui fait
+// « disparaître » toute l'app (et paniquer sur une perte de liste), on isole le
+// crash à l'onglet, on garde l'état de l'app (items/liste préservés, jamais
+// vidés par un plantage d'affichage), et on propose de réessayer. En DEV, le
+// message d'erreur est affiché pour diagnostic.
+class TabErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { erreur: null }; }
+  static getDerivedStateFromError(erreur) { return { erreur }; }
+  componentDidCatch(erreur, info) { console.error("[TabErrorBoundary] plantage de rendu d'un onglet :", erreur, info); }
+  render() {
+    if (this.state.erreur) {
+      const F = "'Nunito',sans-serif";
+      return (
+        <div style={{ padding:"40px 24px 100px", textAlign:"center", fontFamily:F }}>
+          <div style={{ fontSize:44, marginBottom:12 }}>😵</div>
+          <div style={{ fontWeight:900, fontSize:16, color:"#CC0000", marginBottom:8 }}>Cet écran a rencontré un problème</div>
+          <div style={{ fontSize:13, color:"#666", lineHeight:1.6, marginBottom:18 }}>
+            Ta liste de courses est intacte. Réessaie ou change d'onglet.
+          </div>
+          {import.meta.env.DEV && (
+            <pre style={{ textAlign:"left", background:"#FEE", border:"1px solid #F5C6C6", borderRadius:10, padding:"10px 12px", fontSize:11, color:"#900", overflowX:"auto", marginBottom:16 }}>
+              {String(this.state.erreur?.stack || this.state.erreur?.message || this.state.erreur)}
+            </pre>
+          )}
+          <button onClick={()=>this.setState({ erreur: null })}
+            style={{ padding:"12px 22px", border:"none", borderRadius:12, background:"#CC0000", color:"#fff", fontFamily:F, fontWeight:800, fontSize:14, cursor:"pointer" }}>
+            Réessayer
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // ── ROOT ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const [session,   setSession]   = useState(null);
@@ -7649,6 +7714,7 @@ export default function App() {
               )}
             </div>
           )}
+          <TabErrorBoundary key={tab}>
           {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} onResumeScan={handleResumeScan} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)}/>}
           {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} prefMarqueGlobale={prefMarqueGlobale} setPrefMarqueGlobale={setPrefMarqueGlobale}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} setTab={setTab} prefMarqueGlobale={prefMarqueGlobale} setPrefMarqueGlobale={setPrefMarqueGlobale}/>}
@@ -7672,6 +7738,7 @@ export default function App() {
           {loaded && tab==="economies" && <EconomiesTab priceDB={priceDB} archives={archives} items={items} setTab={setTab}/>}
           {/* #56.3b — jamais rendu pour un non-admin, même si tab="rejets" traîne en state */}
           {loaded && isAdmin && tab==="rejets" && <AdminRejetsCorePanel modeCoreActif={modeCoreActif} onToggleModeCore={setModeCoreActif} coreActifGlobal={coreActifGlobal}/>}
+          </TabErrorBoundary>
         </div>
         <TabBar tab={tab} setTab={setTab} isAdmin={isAdmin}/>
         {/* #64.1 — dev uniquement, jamais en prod, jamais sur l'Accueil : reproduit
