@@ -4357,7 +4357,7 @@ function distanceKm(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.asin(Math.sqrt(a));
 }
 
-function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius, userPos, setUserPos, zoneLabel, setZoneLabel, zonePrete = true, userId, isAdmin, modeCoreActif, coreActifGlobal, prefMarqueGlobale = 'nationale' }) {
+function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius, userPos, setUserPos, zoneLabel, setZoneLabel, zonePrete = true, userId, isAdmin, modeCoreActif, coreActifGlobal, prefMarqueGlobale = 'nationale', categorieMagasin = 'grande_surface', setCategorieMagasin }) {
   const F = "'Nunito',sans-serif";
 
   // Chantier géoloc comparateur — sélecteur de zone (point de référence).
@@ -4440,6 +4440,21 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
   // "Comparer les prix"). Sans point, l'écran de choix de zone reste affiché.
 
   const [storesGeo, setStoresGeo] = useState([]);
+
+  // Chantier 83 — catégorie ('grande_surface' | 'proximite') des magasins Core
+  // actifs, pour restreindre les magasins candidats du comparateur. La vue
+  // prix_comparables n'expose pas categorie : on charge une map magasin_id ->
+  // categorie depuis la table magasins (statut actif, non fusionnés).
+  const [magasinsCat, setMagasinsCat] = useState([]);
+  useEffect(() => {
+    supabase.from('magasins').select('id, categorie, latitude, longitude').eq('statut', 'actif')
+      .then(({data})=> setMagasinsCat(data || []));
+  }, []);
+  // categorie null (aucun magasin actif aujourd'hui) traitée comme grande surface.
+  const categorieParMagasin = useMemo(
+    () => new Map(magasinsCat.map(m => [m.id, m.categorie || 'grande_surface'])),
+    [magasinsCat]
+  );
 
   // #56.6 — source de vérité : modeCoreActif (tri-état, admin uniquement)
   // prend le dessus s'il est explicitement défini (override de comparaison
@@ -4630,12 +4645,21 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
           return prixRow?.latitude != null && prixRow?.longitude != null;
         };
 
+        // Chantier 83 — restreint les magasins candidats à la catégorie
+        // sélectionnée (grandes surfaces / proximité), EN PLUS de la zone.
+        // categorie null -> grande surface (règle par défaut). Si la map n'est
+        // pas encore chargée, on ne filtre pas (l'effet re-tourne au chargement).
+        const bonneCategorie = (magId) => {
+          if (categorieParMagasin.size === 0) return true;
+          return (categorieParMagasin.get(magId) || 'grande_surface') === categorieMagasin;
+        };
+
         const correspondancesFraiches = faireCorrespondrePrix(cibles, prixBruts, { userPos, searchRadius, staleCutoffISO: cutoffISO });
-        // Post-filtre marque + zone additif AVANT le regroupement. Ne touche
-        // pas comparateurCore.js.
+        // Post-filtre marque + zone + catégorie additif AVANT le regroupement.
+        // Ne touche pas comparateurCore.js.
         const correspondancesFiltrees = correspondancesFraiches.map(c => ({
           ...c,
-          correspondances: (c.correspondances || []).filter(pr => offreAutorisee(pr) && dansZoneAvecCoords(pr)),
+          correspondances: (c.correspondances || []).filter(pr => offreAutorisee(pr) && dansZoneAvecCoords(pr) && bonneCategorie(pr.magasin_id)),
         }));
         const regroupement = regrouperParMagasin(correspondancesFiltrees);
 
@@ -4650,6 +4674,7 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
             // Profil marque global (même règle que le post-filtre).
             if (!offreAutorisee(p)) return false;
             if (!dansZoneAvecCoords(p)) return false; // Chantier 82 — hors zone si magasin sans coords
+            if (!bonneCategorie(p.magasin_id)) return false; // Chantier 83 — catégorie sélectionnée
             if (p.observe_le && new Date(p.observe_le) < new Date(cutoffISO)) return false;
             if (userPos && searchRadius != null && p.latitude != null && p.longitude != null) {
               if (distanceKm(userPos.lat, userPos.lng, p.latitude, p.longitude) > searchRadius) return false;
@@ -4687,7 +4712,7 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
       }
     })();
     return () => { annule = true; };
-  }, [utiliserCore, items, userPos, searchRadius, prefMarqueGlobale]);
+  }, [utiliserCore, items, userPos, searchRadius, prefMarqueGlobale, categorieMagasin, categorieParMagasin]);
 
   // Adaptateur — résultat comparateurCore.js → même forme que analysis/ranked
   // legacy (ci-dessous), pour alimenter les cartes existantes sans les
@@ -4923,6 +4948,25 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
   const maxSavingsAffiche   = bestAffiche ? worstTotalAffiche - bestAffiche.total : 0;
   const missingGlobalAffiche = utiliserCore ? (coreAdapte?.missingGlobal ?? []) : missingGlobal;
 
+  // Chantier 83 — magasins de chaque catégorie réellement présents dans la zone
+  // (rayon), indépendamment des produits : distingue « aucun magasin de cette
+  // catégorie ici » d'un simple « pas de prix ». categorie null -> grande surface.
+  // Calcul simple (≤ 14 magasins), pas un hook : évite d'ajouter un useMemo
+  // après le early return items.length===0 ci-dessus.
+  const comptesCategorieEnZone = (() => {
+    if (!userPos) return { choisie: 0, autre: 0 };
+    let choisie = 0, autre = 0;
+    magasinsCat.forEach(m => {
+      if (m.latitude == null || m.longitude == null) return;
+      if (distanceKm(userPos.lat, userPos.lng, m.latitude, m.longitude) > searchRadius) return;
+      if ((m.categorie || 'grande_surface') === categorieMagasin) choisie++; else autre++;
+    });
+    return { choisie, autre };
+  })();
+  const categorieVideEnZone = magasinsCat.length > 0 && comptesCategorieEnZone.choisie === 0;
+  const autreCategorie = categorieMagasin === 'grande_surface' ? 'proximite' : 'grande_surface';
+  const libelleCategorie = (c) => c === 'proximite' ? 'proximité' : 'grandes surfaces';
+
   const [lastVerified, setLastVerified] = useState(null);
   useEffect(() => {
     if (!bestAffiche) { setLastVerified(null); return; }
@@ -4956,6 +5000,22 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
         </span>
         <span style={{ color:C.textLight, fontSize:11, flexShrink:0 }}>✏️</span>
       </button>
+
+      {/* Chantier 83 — toggle catégorie de magasins (grandes surfaces /
+          proximité), même modèle visuel que le toggle Marque nationale/MDD.
+          Indépendant du profil marque ; défaut auto selon la taille de la liste
+          (< 6 -> proximité, >= 6 -> grandes surfaces), respecté si l'utilisateur
+          bascule manuellement. */}
+      <div style={{ marginBottom:16 }}>
+        <div style={{ display:"inline-flex", borderRadius:8, overflow:"hidden", border:`1px solid ${C.grayLight}` }}>
+          <button onClick={()=>setCategorieMagasin?.('grande_surface')} style={{ padding:"6px 14px", border:"none", cursor:"pointer", fontFamily:F, fontWeight:800, fontSize:12, background:categorieMagasin==='grande_surface'?C.blue:C.white, color:categorieMagasin==='grande_surface'?C.white:C.gray }}>
+            Grandes surfaces
+          </button>
+          <button onClick={()=>setCategorieMagasin?.('proximite')} style={{ padding:"6px 14px", border:"none", cursor:"pointer", fontFamily:F, fontWeight:800, fontSize:12, background:categorieMagasin==='proximite'?C.blue:C.white, color:categorieMagasin==='proximite'?C.white:C.gray }}>
+            Proximité
+          </button>
+        </div>
+      </div>
 
       {/* Résumé liste */}
       <div style={{ background:C.blue, borderRadius:14, padding:"14px 18px", marginBottom:16, display:"flex", alignItems:"center", gap:12 }}>
@@ -5008,8 +5068,33 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
 
       {vueDev === 'actuelle' && !(utiliserCore && coreChargement) && (
         <>
+      {/* Chantier 83 — aucun magasin de la catégorie choisie dans la zone :
+          message clair + bascule vers l'autre catégorie / élargir le rayon
+          (jamais un comparatif vide sans explication). */}
+      {categorieVideEnZone && (
+        <div style={{ background:C.orangeLight, borderRadius:14, padding:"22px 20px", textAlign:"center", border:`2px dashed ${C.orange}`, marginBottom:14 }}>
+          <div style={{ fontSize:36, marginBottom:8 }}>🏪</div>
+          <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:C.orange, marginBottom:6 }}>
+            Aucun magasin de {libelleCategorie(categorieMagasin)} dans ta zone
+          </div>
+          <div style={{ fontFamily:F, fontSize:13, color:C.textLight, marginBottom:14 }}>
+            Rayon actuel : {searchRadius} km.{comptesCategorieEnZone.autre>0 ? ` Il y a des magasins de ${libelleCategorie(autreCategorie)} à proximité.` : ''}
+          </div>
+          <div style={{ display:"flex", gap:8, justifyContent:"center", flexWrap:"wrap" }}>
+            {comptesCategorieEnZone.autre>0 && (
+              <button onClick={()=>setCategorieMagasin?.(autreCategorie)} style={{ padding:"9px 16px", border:"none", borderRadius:12, background:C.blue, color:"#fff", fontFamily:F, fontWeight:800, fontSize:13, cursor:"pointer" }}>
+                Voir les {libelleCategorie(autreCategorie)}
+              </button>
+            )}
+            <button onClick={()=>setZoneEditOpen(true)} style={{ padding:"9px 16px", border:`2px solid ${C.grayLight}`, borderRadius:12, background:"#fff", color:C.text, fontFamily:F, fontWeight:800, fontSize:13, cursor:"pointer" }}>
+              Élargir le rayon
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Aucun prix */}
-      {rankedAffiche.length===0 && (
+      {rankedAffiche.length===0 && !categorieVideEnZone && (
         <div style={{ background:C.orangeLight, borderRadius:14, padding:"24px 20px", textAlign:"center", border:`2px dashed ${C.orange}` }}>
           <div style={{ fontSize:40, marginBottom:10 }}>💰</div>
           <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:C.orange, marginBottom:6 }}>Aucun prix correspondant</div>
@@ -6746,6 +6831,14 @@ export default function App() {
     setPrefMarqueGlobaleState(val);
     try { localStorage.setItem('prixmalin_prefMarque_v1', val); } catch { /* mode privé/quota : ignore */ }
   };
+  // Chantier 83 — catégorie de magasins du comparateur ('grande_surface' |
+  // 'proximite'). NON persisté : défaut automatique selon la taille de la liste
+  // (< 6 articles -> proximité, >= 6 -> grandes surfaces). categorieChoix null
+  // = suit le défaut ; dès que l'utilisateur bascule, son choix est respecté et
+  // le défaut n'est plus re-forcé. Indépendant du profil marque (les deux se
+  // combinent dans le comparateur).
+  const [categorieChoix, setCategorieChoix] = useState(null);
+  const categorieMagasin = categorieChoix ?? (items.length >= 6 ? 'grande_surface' : 'proximite');
   const [archives, setArchives]   = useState([]);
   // Chantier 1 — libellé officiel du Core (nom_reference) pour une ligne
   // d'historique déjà rattachée à un produit via lignes_ticket.produit_id.
@@ -7559,7 +7652,7 @@ export default function App() {
           {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} onResumeScan={handleResumeScan} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)}/>}
           {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} prefMarqueGlobale={prefMarqueGlobale} setPrefMarqueGlobale={setPrefMarqueGlobale}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} setTab={setTab} prefMarqueGlobale={prefMarqueGlobale} setPrefMarqueGlobale={setPrefMarqueGlobale}/>}
-          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} prefMarqueGlobale={prefMarqueGlobale}/>}
+          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} prefMarqueGlobale={prefMarqueGlobale} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
           {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;
