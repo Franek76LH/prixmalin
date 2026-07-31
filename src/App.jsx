@@ -2762,7 +2762,9 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
 
       const ok = await onAdd(item);
 
-      if (ok === true) {
+      if (ok === true || ok === 'duplicate') {
+        // 'duplicate' : déjà dans la liste, message affiché par App — on ferme
+        // simplement la fiche, sans erreur.
         ajoutReussi = true;
       } else {
         setSubmitError("Ajout impossible, réessaie.");
@@ -3023,15 +3025,25 @@ function CatalogTab({ items, onAdd, setTab, prefMarqueGlobale = 'nationale', set
     setSearching(true);
     setSearchError(null);
     try {
+      // Chantier 83 (finition) — recherche accent-insensible : on réutilise le
+      // RPC tolérant (extensions.unaccent, multi-mots) déjà employé pour la
+      // correction de ticket ("biere" trouve "Bière"). Il ne renvoie que
+      // produit_id + nom_reference : on recharge ensuite la catégorie/sous-
+      // catégorie pour garder la forme attendue par l'affichage et la navigation.
+      const { data: matches, error: errRpc } = await supabase
+        .rpc('rechercher_produits_pour_correction', { p_terme: q });
+      if (mySeq !== searchSeq.current) return; // réponse obsolète, ignorée
+      if (errRpc) { setSearchError("Recherche impossible."); setSearching(false); return; }
+      const ids = (matches || []).map(m => m.produit_id);
+      if (ids.length === 0) { setSearchResults([]); setSearching(false); return; }
       const { data, error } = await supabase.from('produits')
         .select('id, nom_reference, sous_categorie_id, sous_categories(id, nom, categorie_id, categories(id, nom, slug, icone))')
-        .eq('actif', true)
-        .ilike('nom_reference', `%${q}%`)
-        .order('nom_reference')
-        .limit(20);
-      if (mySeq !== searchSeq.current) return; // réponse obsolète, ignorée
+        .in('id', ids);
+      if (mySeq !== searchSeq.current) return;
       if (error) { setSearchError("Recherche impossible."); setSearching(false); return; }
-      setSearchResults(data || []);
+      // Conserve l'ordre de pertinence renvoyé par le RPC.
+      const parId = new Map((data || []).map(p => [p.id, p]));
+      setSearchResults(ids.map(id => parId.get(id)).filter(Boolean));
       setSearching(false);
     } catch (e) {
       if (mySeq !== searchSeq.current) return;
@@ -3591,13 +3603,13 @@ function EditItemSheet({ item, onClose, onSave }) {
 
 // ── LIST TAB ──────────────────────────────────────────────────────────────────
 function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites, saveFavorites, prefMarqueGlobale = 'nationale', setPrefMarqueGlobale }) {
-  const [showAdd,      setShowAdd]      = useState(false);
   const [showFavModal, setShowFavModal] = useState(false);
   const [editItem,     setEditItem]     = useState(null);
-  const [toast,        setToast]        = useState(null);
 
-  const showToast = (msg, ok=true) => { setToast({msg,ok}); setTimeout(()=>setToast(null),2500); };
-  const addItem       = item => { onAdd(item); showToast(`✓ ${item.product} ajouté`); };
+  // Chantier 83 (finition) — l'ajout d'un produit se fait UNIQUEMENT via le
+  // Catalogue (recherche unique). Le formulaire in-line et son toast local ont
+  // été retirés ; le bouton « + Ajouter un produit » bascule sur l'onglet
+  // Catalogue, d'où l'utilisateur revient à Ma liste par la barre du bas.
   const toggleCheck   = id  => onToggle(id);
   const removeItem    = id  => onRemove(id);
   const updateItem    = updated => onUpdate(updated);
@@ -3712,7 +3724,7 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
         </button>
       )}
 
-      <button onClick={()=>setShowAdd(true)} style={{ width:"100%", padding:"15px", background:C.orange, border:"none", borderRadius:14, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:"#111111", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 6px 16px rgba(200,160,0,0.4)" }}>
+      <button onClick={()=>setTab("catalog")} style={{ width:"100%", padding:"15px", background:C.orange, border:"none", borderRadius:14, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:"#111111", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 6px 16px rgba(200,160,0,0.4)" }}>
         + Ajouter un produit
       </button>
 
@@ -3723,9 +3735,7 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
         </button>
       )}
 
-      {showAdd && <AddItemSheet onClose={()=>setShowAdd(false)} onAdd={addItem}/>}
       {editItem && <EditItemSheet item={editItem} onClose={()=>setEditItem(null)} onSave={updateItem}/>}
-      {toast && <Toast msg={toast.msg} ok={toast.ok}/>}
 
       {/* Modal favoris */}
       {showFavModal && (
@@ -4366,7 +4376,7 @@ function cleCoords(lat, lng) {
   return `${Number(lat).toFixed(4)},${Number(lng).toFixed(4)}`;
 }
 
-function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius, userPos, setUserPos, zoneLabel, setZoneLabel, zonePrete = true, userId, isAdmin, modeCoreActif, coreActifGlobal, prefMarqueGlobale = 'nationale', categorieMagasin = 'grande_surface', setCategorieMagasin }) {
+function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearchRadius, userPos, setUserPos, zoneLabel, setZoneLabel, zonePrete = true, userId, isAdmin, modeCoreActif, coreActifGlobal, prefMarqueGlobale = 'nationale', categorieMagasin = 'grande_surface', setCategorieMagasin }) {
   const F = "'Nunito',sans-serif";
 
   // Chantier géoloc comparateur — sélecteur de zone (point de référence).
@@ -5015,6 +5025,12 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
 
   return (
     <div style={{ padding: (!zonePrete || zoneManquante) ? "24px 20px 100px" : "16px 16px 110px" }}>
+      {/* Chantier 83 (finition) — retour à la liste : bouton plein bien visible
+          (‹ + libellé), cohérent avec les accents de l'app. */}
+      <button onClick={()=>setTab?.('list')} aria-label="Retour à la liste"
+        style={{ display:"inline-flex", alignItems:"center", gap:6, marginBottom:14, padding:"9px 16px 9px 12px", background:C.orange, border:"none", borderRadius:12, fontFamily:F, fontWeight:900, fontSize:15, color:"#111111", cursor:"pointer", boxShadow:"0 3px 10px rgba(0,0,0,0.15)" }}>
+        <span style={{ fontSize:24, lineHeight:1, marginTop:-2 }}>‹</span> Ma liste
+      </button>
       {!zonePrete ? ecranChargement : zoneManquante ? selecteurZone : (
       <>
       {/* Chantier 81 — zone active DISCRÈTE : tout l'élément est cliquable et
@@ -5172,6 +5188,17 @@ function CompareTab({ items, priceDB, onValidate, searchRadius, setSearchRadius,
                 <span style={{ fontSize:26 }}>{bestAffiche.logo}</span>
                 <div>
                   <div style={{ fontFamily:F, fontWeight:900, fontSize:20, color:C.white }}>{bestAffiche.name}</div>
+                  {/* Chantier 83 (finition) — adresse + code postal (et ville) du
+                      magasin, discret, sous le nom. Le CP est un champ à part de
+                      prix_comparables (adresse_magasin = rue seule). */}
+                  {bestStoreEntryAffiche?.store_address && (
+                    <div style={{ fontFamily:F, fontSize:11, color:"rgba(255,255,255,0.6)", marginTop:2 }}>
+                      {bestStoreEntryAffiche.store_address}
+                      {bestStoreEntryAffiche.code_postal
+                        ? `, ${bestStoreEntryAffiche.code_postal}${bestStoreEntryAffiche.ville ? ' ' + bestStoreEntryAffiche.ville : ''}`
+                        : ''}
+                    </div>
+                  )}
                   <div style={{ fontFamily:F, fontSize:12, color:"rgba(255,255,255,0.6)" }}>
                     {bestAffiche.found}/{items.length} produit{items.length>1?"s":""} trouvé{bestAffiche.found>1?"s":""}
                     {bestAffiche.missing.length>0 && <span style={{ color:"#FFD700" }}> · {bestAffiche.missing.length} manquant{bestAffiche.missing.length>1?"s":""}</span>}
@@ -7231,7 +7258,20 @@ export default function App() {
     return true;
   };
 
+  // Chantier 83 (finition) — identité d'un article, alignée sur ce qui distingue
+  // une ligne dans le comparateur : produit_id + variante_produit_id (Core) ;
+  // repli sur le texte normalisé pour un article libre sans produit_id.
+  const cleArticle = (it) => it?.produit_id != null
+    ? `p:${it.produit_id}|v:${it.variante_produit_id ?? ''}`
+    : `t:${normName(it?.product || '')}`;
+
   const addItem = async (item) => {
+    // Dédoublonnage : ne pas ajouter deux fois la même ligne (corrige le bug où
+    // un doublon était compté "manquant" à tort dans le comparateur).
+    if (items.some(i => cleArticle(i) === cleArticle(item))) {
+      showAppToast("Article déjà dans la liste", false);
+      return 'duplicate';
+    }
     const optimistic = { ...item, id: item.id ?? (Date.now() + Math.random()) };
     setItems(prev => [...prev, optimistic]);
 
@@ -7718,7 +7758,7 @@ export default function App() {
           {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} onResumeScan={handleResumeScan} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)}/>}
           {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} prefMarqueGlobale={prefMarqueGlobale} setPrefMarqueGlobale={setPrefMarqueGlobale}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} setTab={setTab} prefMarqueGlobale={prefMarqueGlobale} setPrefMarqueGlobale={setPrefMarqueGlobale}/>}
-          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} prefMarqueGlobale={prefMarqueGlobale} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix}/>}
+          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} prefMarqueGlobale={prefMarqueGlobale} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
           {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;
