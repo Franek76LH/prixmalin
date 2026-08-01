@@ -2619,7 +2619,7 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
 
 
 // ── CATALOG TAB ───────────────────────────────────────────────────────────────
-function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, items, prefMarqueGlobale = 'nationale', setPrefMarqueGlobale }) {
+function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, items }) {
   const [variantes,        setVariantes]        = useState([]);
   const [varianteId,       setVarianteId]       = useState(null);
   const [variantesLoading, setVariantesLoading] = useState(true);
@@ -2631,10 +2631,10 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
   // 'all' = "Toutes les marques" / "Tous les formats", sélectionné par défaut.
   const [marqueSelectionnee, setMarqueSelectionnee] = useState('all');
   const [formatSelectionne,  setFormatSelectionne]  = useState('all');
-  // Comparateur v1 — Temps 1 : segment Nationale/MDD. Défaut = profil global,
-  // sauf produit qui n'existe QU'en MDD -> bascule auto en 'mdd' (note affichée),
-  // sans modifier le profil global.
-  const [segmentMarque, setSegmentMarque] = useState(prefMarqueGlobale === 'mdd' ? 'mdd' : 'nationale');
+  // Chantier 84 — Temps 1 : segment Marques Nationales / Marque Distributeur de
+  // l'article qu'on ajoute. Défaut 'nationale' ; sauf produit qui n'existe QU'en
+  // marque distributeur -> bascule auto en 'mdd' (note affichée).
+  const [segmentMarque, setSegmentMarque] = useState('nationale');
   const [basculeAutoMdd, setBasculeAutoMdd] = useState(false);
 
   const loadVariantes = async () => {
@@ -2651,7 +2651,7 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
       const aUneNationale = data.some(v => v.marques?.est_mdd !== true);
       const aUneMdd = data.some(v => v.marques?.est_mdd === true);
       if (!aUneNationale && aUneMdd) { setSegmentMarque('mdd'); setBasculeAutoMdd(true); }
-      else { setSegmentMarque(prefMarqueGlobale === 'mdd' ? 'mdd' : 'nationale'); setBasculeAutoMdd(false); }
+      else { setSegmentMarque('nationale'); setBasculeAutoMdd(false); }
     } catch (e) {
       console.error("Erreur chargement variantes :", e);
       setVariantes([]);
@@ -2662,14 +2662,14 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
     }
   };
 
-  // Temps 1 — choix explicite du segment : édite le PROFIL GLOBAL (persisté) et
-  // annule l'état "bascule auto". Repart propre côté marque/format.
+  // Temps 1 — choix explicite du segment pour l'article en cours d'ajout et
+  // annule l'état "bascule auto". Repart propre côté marque/format. La valeur
+  // sera écrite sur la ligne (marque_pref) à la validation.
   const choisirSegment = (seg) => {
     const s = seg === 'mdd' ? 'mdd' : 'nationale';
     setSegmentMarque(s);
     setBasculeAutoMdd(false);
     setMarqueSelectionnee('all');
-    setPrefMarqueGlobale?.(s);
   };
 
   useEffect(() => {
@@ -2758,6 +2758,9 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
         // l'ancien "Format indifférent").
         variante_produit_id:
           varianteId === 'any' ? null : (variantesResolues.length === 1 ? variantesResolues[0].id : null),
+        // Chantier 84 — préférence marque de CET article (défaut 'nationale',
+        // ou 'mdd' si produit uniquement en marque distributeur / choix explicite).
+        marque_pref: segmentMarque === 'mdd' ? 'mdd' : 'nationale',
       };
 
       const ok = await onAdd(item);
@@ -2835,21 +2838,21 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
 
           {!variantesLoading && !varianteError && variantes.length > 0 && (
             <>
-              {/* Comparateur v1 — Temps 1 : segment Nationale / MDD (édite le
-                  profil global). Défaut = profil global, ou MDD auto si le
-                  produit n'existe qu'en MDD. */}
+              {/* Chantier 84 — Temps 1 : préférence marque de CET article
+                  (écrite sur la ligne à la validation). Défaut Marques Nationales,
+                  ou Marque Distributeur auto si le produit n'existe qu'en MDD. */}
               <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Préférence marque</div>
               <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom: basculeAutoMdd ? 6 : 14 }}>
                 <button onClick={()=>choisirSegment('nationale')} style={pillStyle(segmentMarque==='nationale')}>
                   Marques nationales
                 </button>
                 <button onClick={()=>choisirSegment('mdd')} style={pillStyle(segmentMarque==='mdd')}>
-                  MDD
+                  Marque Distributeur
                 </button>
               </div>
               {basculeAutoMdd && (
                 <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.orange, fontWeight:700, marginBottom:14 }}>
-                  Ce produit n'existe qu'en MDD — affiché en MDD.
+                  Ce produit n'existe qu'en Marque Distributeur.
                 </div>
               )}
 
@@ -2871,13 +2874,8 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
                   </div>
                 </>
               )}
-              {segmentMarque === 'mdd' && (
-                <div style={{ marginBottom:14 }}>
-                  <span style={{ display:"inline-block", padding:"7px 14px", background:C.grayLight, borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:C.textLight }}>
-                    Marque distributeur (MDD)
-                  </span>
-                </div>
-              )}
+              {/* Chantier 84 — plus de bulle « Marque distributeur (MDD) » : le
+                  bouton Temps 1 « Marque Distributeur » suffit (redondant). */}
 
               {/* Chantier 74 — Format, construit uniquement à partir des champs structurés */}
               <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Format</div>
@@ -2917,7 +2915,7 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
   );
 }
 
-function CatalogTab({ items, onAdd, setTab, prefMarqueGlobale = 'nationale', setPrefMarqueGlobale }) {
+function CatalogTab({ items, onAdd, setTab }) {
   const [categories,      setCategories]      = useState([]);
   const [catLoading,      setCatLoading]      = useState(true);
   const [catError,        setCatError]        = useState(null);
@@ -3281,8 +3279,6 @@ function CatalogTab({ items, onAdd, setTab, prefMarqueGlobale = 'nationale', set
           onClose={()=>setOpenProduct(null)}
           onAdd={addItem}
           items={items}
-          prefMarqueGlobale={prefMarqueGlobale}
-          setPrefMarqueGlobale={setPrefMarqueGlobale}
         />
       )}
     </div>
@@ -3602,7 +3598,7 @@ function EditItemSheet({ item, onClose, onSave }) {
 }
 
 // ── LIST TAB ──────────────────────────────────────────────────────────────────
-function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites, saveFavorites, prefMarqueGlobale = 'nationale', setPrefMarqueGlobale }) {
+function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites, saveFavorites, onSetMarquePref }) {
   const [showFavModal, setShowFavModal] = useState(false);
   const [editItem,     setEditItem]     = useState(null);
 
@@ -3650,8 +3646,9 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
 
   // Comparateur — le toggle reflète et édite le PROFIL GLOBAL (même réglage
   // pour tous les produits, persisté). Plus de préférence par item.
-  const pref = prefMarqueGlobale === 'mdd' ? 'mdd' : 'nationale';
   const ItemRow = ({item, done}) => {
+    // Chantier 84 — préférence marque PAR ARTICLE (défaut 'nationale' si NULL).
+    const pref = item.marque_pref === 'mdd' ? 'mdd' : 'nationale';
     return (
     <div style={{ display:"flex", alignItems:"center", gap:12, background:done?'#F3FAF5':C.white, borderRadius:12, padding:"12px 14px", border:`1px solid ${done?'#C8E6C9':C.grayLight}`, opacity:1, boxShadow:done?'inset 3px 0 0 #4CAF50':'0 1px 4px rgba(0,0,0,0.06)' }}>
       <button onClick={()=>toggleCheck(item.id)} style={{ width:26, height:26, borderRadius:6, border:`2px solid ${done?C.green:C.blue}`, background:done?C.green:C.white, cursor:"pointer", flexShrink:0, color:C.white, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13 }}>
@@ -3664,16 +3661,17 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
         <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.gray, marginTop:1 }}>
           {item.formatDisplay ?? item.format}{item.brand?"":""} {!item.brand&&<span style={{ color:C.orange, fontSize:11 }}>· toutes marques</span>}
         </div>
-        {/* Profil marque GLOBAL (persisté) : "nationale" filtre les MDD (mais
-            garde les produits qui n'existent qu'en MDD), "MDD" les inclut —
-            toujours affichées en générique « MDD » dans le comparateur. */}
+        {/* Chantier 84 — préférence marque PAR ARTICLE : chaque bouton écrit
+            liste_courses.marque_pref de CETTE ligne. "nationale" écarte les
+            marques distributeur (sauf produit qui n'existe qu'en distributeur),
+            "distributeur" les inclut — affichées en générique dans le comparateur. */}
         {!done && (
           <div style={{ display:"inline-flex", marginTop:6, borderRadius:8, overflow:"hidden", border:`1px solid ${C.grayLight}` }}>
-            <button onClick={()=>setPrefMarqueGlobale?.('nationale')} style={{ padding:"3px 9px", border:"none", cursor:"pointer", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:11, background:pref==='nationale'?C.blue:C.white, color:pref==='nationale'?C.white:C.gray }}>
+            <button onClick={()=>onSetMarquePref?.(item.id, 'nationale')} style={{ padding:"3px 9px", border:"none", cursor:"pointer", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:11, background:pref==='nationale'?C.blue:C.white, color:pref==='nationale'?C.white:C.gray }}>
               Marque nationale
             </button>
-            <button onClick={()=>setPrefMarqueGlobale?.('mdd')} style={{ padding:"3px 9px", border:"none", cursor:"pointer", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:11, background:pref==='mdd'?C.blue:C.white, color:pref==='mdd'?C.white:C.gray }}>
-              MDD
+            <button onClick={()=>onSetMarquePref?.(item.id, 'mdd')} style={{ padding:"3px 9px", border:"none", cursor:"pointer", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:11, background:pref==='mdd'?C.blue:C.white, color:pref==='mdd'?C.white:C.gray }}>
+              Marque Distributeur
             </button>
           </div>
         )}
@@ -4376,7 +4374,7 @@ function cleCoords(lat, lng) {
   return `${Number(lat).toFixed(4)},${Number(lng).toFixed(4)}`;
 }
 
-function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearchRadius, userPos, setUserPos, zoneLabel, setZoneLabel, zonePrete = true, userId, isAdmin, modeCoreActif, coreActifGlobal, prefMarqueGlobale = 'nationale', categorieMagasin = 'grande_surface', setCategorieMagasin }) {
+function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearchRadius, userPos, setUserPos, zoneLabel, setZoneLabel, zonePrete = true, userId, isAdmin, modeCoreActif, coreActifGlobal, categorieMagasin = 'grande_surface', setCategorieMagasin }) {
   const F = "'Nunito',sans-serif";
 
   // Chantier géoloc comparateur — sélecteur de zone (point de référence).
@@ -4662,10 +4660,14 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
         const produitsAvecOffreNationale = new Set(
           prixBruts.filter(p => p?.est_mdd !== true && p?.produit_id != null).map(p => p.produit_id)
         );
-        const offreAutorisee = (prixRow) => {
-          if (prefMarqueGlobale === 'mdd') return true;
+        // Chantier 84 — préférence marque PAR ARTICLE (item.marque_pref, défaut
+        // 'nationale'). Le fallback MDD-only est conservé et reste par produit
+        // (produitsAvecOffreNationale, ci-dessus).
+        const marquePrefDe = (item) => item?.marque_pref === 'mdd' ? 'mdd' : 'nationale';
+        const offreAutorisee = (prixRow, marquePref) => {
+          if (marquePref === 'mdd') return true;
           if (prixRow?.est_mdd !== true) return true; // national / sans-marque
-          return !produitsAvecOffreNationale.has(prixRow?.produit_id); // MDD gardé seulement si produit MDD-only
+          return !produitsAvecOffreNationale.has(prixRow?.produit_id); // marque distributeur gardée seulement si produit sans nationale
         };
 
         // Chantier 82 — zone active : un prix dont le magasin n'a pas de
@@ -4690,10 +4692,13 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
         const correspondancesFraiches = faireCorrespondrePrix(cibles, prixBruts, { userPos, searchRadius, staleCutoffISO: cutoffISO });
         // Post-filtre marque + zone + catégorie additif AVANT le regroupement.
         // Ne touche pas comparateurCore.js.
-        const correspondancesFiltrees = correspondancesFraiches.map(c => ({
-          ...c,
-          correspondances: (c.correspondances || []).filter(pr => offreAutorisee(pr) && dansZoneAvecCoords(pr) && bonneCategorie(pr.magasin_id)),
-        }));
+        const correspondancesFiltrees = correspondancesFraiches.map(c => {
+          const mp = marquePrefDe(c.item); // préférence de CET article
+          return {
+            ...c,
+            correspondances: (c.correspondances || []).filter(pr => offreAutorisee(pr, mp) && dansZoneAvecCoords(pr) && bonneCategorie(pr.magasin_id)),
+          };
+        });
         const regroupement = regrouperParMagasin(correspondancesFiltrees);
 
         const ciblesSansFormat = [];
@@ -4701,11 +4706,12 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
         itemsSansFormat.forEach(item => {
           ciblesSansFormat.push({ itemId: item.id, produit_id: item.produit_id, item });
 
+          const marquePrefItem = marquePrefDe(item); // préférence de CET article
           const candidats = prixBruts.filter(p => {
             if (p.produit_id !== item.produit_id) return false;
             if (p.magasin_id == null) return false;
-            // Profil marque global (même règle que le post-filtre).
-            if (!offreAutorisee(p)) return false;
+            // Préférence marque de l'article (même règle que le post-filtre).
+            if (!offreAutorisee(p, marquePrefItem)) return false;
             if (!dansZoneAvecCoords(p)) return false; // Chantier 82 — hors zone si magasin sans coords
             if (!bonneCategorie(p.magasin_id)) return false; // Chantier 83 — catégorie sélectionnée
             if (p.observe_le && new Date(p.observe_le) < new Date(cutoffISO)) return false;
@@ -4745,7 +4751,7 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
       }
     })();
     return () => { annule = true; };
-  }, [utiliserCore, items, userPos, searchRadius, prefMarqueGlobale, categorieMagasin, categorieParMagasin]);
+  }, [utiliserCore, items, userPos, searchRadius, categorieMagasin, categorieParMagasin]);
 
   // Adaptateur — résultat comparateurCore.js → même forme que analysis/ranked
   // legacy (ci-dessous), pour alimenter les cartes existantes sans les
@@ -5226,10 +5232,11 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
                     <div style={{ flex:1, minWidth:0 }}>
                       <div style={{ fontFamily:F, fontWeight:700, fontSize:13, color:"rgba(255,255,255,0.92)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                         {item.brand?`${item.brand} · `:""}{item.product}
-                        {/* Badge générique MDD quand l'offre retenue est un MDD
-                            (est_mdd). On n'affiche JAMAIS le nom de la sous-marque. */}
+                        {/* Chantier 84 — badge générique « Marque Distributeur »
+                            quand l'offre retenue en est une (est_mdd). Jamais le
+                            nom de la sous-marque distributeur. */}
                         {utiliserCore && p?.est_mdd === true && (
-                          <span style={{ marginLeft:6, background:"rgba(255,255,255,0.22)", color:"#fff", borderRadius:5, padding:"1px 5px", fontSize:9, fontWeight:900, verticalAlign:"middle" }}>MDD</span>
+                          <span style={{ marginLeft:6, background:"rgba(255,255,255,0.22)", color:"#fff", borderRadius:5, padding:"1px 5px", fontSize:9, fontWeight:900, verticalAlign:"middle", whiteSpace:"nowrap" }}>Marque Distributeur</span>
                         )}
                       </div>
                       <div style={{ fontFamily:F, fontSize:11, color:"rgba(255,255,255,0.45)", marginTop:1 }}>
@@ -6910,18 +6917,17 @@ export default function App() {
       }));
     } catch { /* mode privé/quota : ignore */ }
   }, [userPos, zoneLabel, searchRadius]);
-  // Comparateur — profil GLOBAL "préférence marque" ('nationale' | 'mdd'),
-  // défaut 'nationale'. S'applique à tous les produits et est PERSISTÉ entre
-  // sessions (localStorage). Édité depuis la liste (toggle) et depuis la fiche
-  // produit (Temps 1). Lu par le comparateur (moteur Core).
-  const [prefMarqueGlobale, setPrefMarqueGlobaleState] = useState(() => {
-    try { return localStorage.getItem('prixmalin_prefMarque_v1') === 'mdd' ? 'mdd' : 'nationale'; }
-    catch { return 'nationale'; }
-  });
-  const setPrefMarqueGlobale = (pref) => {
+  // Chantier 84 — la préférence marque est désormais PAR ARTICLE
+  // (liste_courses.marque_pref), plus de profil global ni de localStorage.
+  // Met à jour la ligne en base + l'état local (défaut 'nationale').
+  const setMarquePrefItem = async (itemId, pref) => {
     const val = pref === 'mdd' ? 'mdd' : 'nationale';
-    setPrefMarqueGlobaleState(val);
-    try { localStorage.setItem('prixmalin_prefMarque_v1', val); } catch { /* mode privé/quota : ignore */ }
+    setItems(prev => prev.map(i => i.id === itemId ? { ...i, marque_pref: val } : i));
+    const { error } = await supabase.from('liste_courses').update({ marque_pref: val }).eq('id', itemId);
+    if (error) {
+      console.error("Erreur maj marque_pref :", error);
+      showAppToast("⚠️ Préférence marque non sauvegardée, vérifie ta connexion", false);
+    }
   };
   // Chantier 83 — catégorie de magasins du comparateur ('grande_surface' |
   // 'proximite'). NON persisté : défaut automatique selon la taille de la liste
@@ -7133,7 +7139,7 @@ export default function App() {
           // LEGACY - shopping_list conservé temporairement
           // supabase.from('shopping_list').select('id, items').order('id').limit(1),
           supabase.from('liste_courses')
-            .select(`id, texte_libre, libelle_saisi, quantite, format_selectionne, statut, produit_id, variante_produit_id,
+            .select(`id, texte_libre, libelle_saisi, quantite, format_selectionne, statut, produit_id, variante_produit_id, marque_pref,
               produit:produits(id, nom_reference),
               variante:variantes_produit(id, libelle, quantite_nette, unite_quantite, nombre_unites)`)
             .eq('utilisateur_id', session?.user?.id)
@@ -7245,7 +7251,7 @@ export default function App() {
 
   const chargerListe = async () => {
     const { data, error } = await supabase.from('liste_courses')
-      .select(`id, texte_libre, libelle_saisi, quantite, format_selectionne, statut, produit_id, variante_produit_id,
+      .select(`id, texte_libre, libelle_saisi, quantite, format_selectionne, statut, produit_id, variante_produit_id, marque_pref,
         produit:produits(id, nom_reference),
         variante:variantes_produit(id, libelle, quantite_nette, unite_quantite, nombre_unites)`)
       .eq('utilisateur_id', session?.user?.id)
@@ -7304,6 +7310,8 @@ export default function App() {
       produit_id:          produit_id,
       variante_produit_id: item.variante_produit_id ?? null,
       libelle_saisi:       libelle_saisi,
+      // Chantier 84 — préférence marque de l'article (défaut 'nationale' à l'ajout).
+      marque_pref:         item.marque_pref === 'mdd' ? 'mdd' : 'nationale',
     };
 
     // Phase 1 : insertion — seule cette phase déclenche un rollback de l'optimiste.
@@ -7341,7 +7349,9 @@ export default function App() {
 
   const updateItem = async (updated) => {
     const previous = items.find(i => i.id === updated.id);
-    setItems(prev => prev.map(i => i.id === updated.id ? updated : i));
+    // Fusion (et non remplacement) pour ne pas perdre des champs non gérés par
+    // l'édition — notamment marque_pref (Chantier 84).
+    setItems(prev => prev.map(i => i.id === updated.id ? { ...i, ...updated } : i));
 
     const payload = updated.produit_id
       ? {
@@ -7756,9 +7766,9 @@ export default function App() {
           )}
           <TabErrorBoundary key={tab}>
           {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} onResumeScan={handleResumeScan} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)}/>}
-          {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} prefMarqueGlobale={prefMarqueGlobale} setPrefMarqueGlobale={setPrefMarqueGlobale}/>}
-          {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} setTab={setTab} prefMarqueGlobale={prefMarqueGlobale} setPrefMarqueGlobale={setPrefMarqueGlobale}/>}
-          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} prefMarqueGlobale={prefMarqueGlobale} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix}/>}
+          {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} onSetMarquePref={setMarquePrefItem}/>}
+          {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} setTab={setTab}/>}
+          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
           {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;

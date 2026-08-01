@@ -48,6 +48,9 @@ export function mapperLigneListeCourses(row) {
     checked:             row.statut === 'achete',
     produit_id:          row.produit_id,
     variante_produit_id: row.variante_produit_id,
+    // Chantier 84 — préférence marque PAR ARTICLE ('nationale' | 'mdd').
+    // NULL en base => traité comme 'nationale' (défaut) à la lecture.
+    marque_pref:         row.marque_pref === 'mdd' ? 'mdd' : 'nationale',
     produit:             row.produit ?? null,
     variante:            row.variante ?? null,
   };
