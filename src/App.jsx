@@ -5560,22 +5560,37 @@ function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onCl
     setRechercheBarcode(true);
     setBarcodeMessage(null);
     setCodeBarresEnAttente(null);
-    const { data, error: errBc } = await supabase
-      .from('variantes_produit')
-      .select('id, produit_id, libelle, quantite_nette, unite_quantite, url_image, produits(nom_reference), marques(nom)')
+
+    // Étape 4a — source de vérité = codes_barres_variante (multi-codes par
+    // variante, principal + secondaires). Le code y est UNIQUE : 0 ou 1
+    // variante. Le cas "plusieurs candidats" n'existe donc plus.
+    const { data: cbv, error: errCbv } = await supabase
+      .from('codes_barres_variante')
+      .select('variante_produit_id')
       .eq('code_barres', code)
-      .eq('actif', true);
-    setRechercheBarcode(false);
-    if (errBc) { setBarcodeMessage("Recherche impossible, réessaie."); return; }
-    if (!data || data.length === 0) {
-      // Bout 2 — code inconnu : on le garde en mémoire, la recherche
-      // catalogue juste en dessous devient le moyen de l'apprendre.
+      .maybeSingle();
+    if (errCbv) { setRechercheBarcode(false); setBarcodeMessage("Recherche impossible, réessaie."); return; }
+
+    // Code inconnu (ou rattaché à une variante inactive) : on le garde en
+    // mémoire, la recherche catalogue juste en dessous devient le moyen de
+    // l'apprendre (bout 2, écriture traitée en 4b).
+    const inconnu = () => {
       setCodeBarresEnAttente(code);
       setBarcodeMessage(`Code-barres inconnu (${code}). Cherche le bon produit ci-dessous pour l'enregistrer dessus.`);
-      return;
-    }
-    if (data.length === 1) { setBarcodeConfirmation(data[0]); return; }
-    setBarcodeCandidats(data);
+    };
+
+    if (!cbv) { setRechercheBarcode(false); inconnu(); return; }
+
+    const { data: variante, error: errV } = await supabase
+      .from('variantes_produit')
+      .select('id, produit_id, libelle, quantite_nette, unite_quantite, url_image, produits(nom_reference), marques(nom)')
+      .eq('id', cbv.variante_produit_id)
+      .eq('actif', true)
+      .maybeSingle();
+    setRechercheBarcode(false);
+    if (errV) { setBarcodeMessage("Recherche impossible, réessaie."); return; }
+    if (!variante) { inconnu(); return; }
+    setBarcodeConfirmation(variante);
   };
 
   const annulerBarcode = () => {
