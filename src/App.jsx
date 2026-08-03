@@ -5439,15 +5439,23 @@ function BarcodeScannerSheet({ onDetected, onClose }) {
     (async () => {
       try {
         const hints = new Map();
-        hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.EAN_13, BarcodeFormat.EAN_8, BarcodeFormat.UPC_A]);
+        // Formats : EAN/UPC courants + UPC-E (sûr). Code 128 / ITF volontairement
+        // EXCLUS pour l'instant (faux positifs). TRY_HARDER = décodage plus robuste
+        // (codes mats, petits, légèrement bombés) pour lire les vrais emballages.
+        hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.EAN_13, BarcodeFormat.EAN_8, BarcodeFormat.UPC_A, BarcodeFormat.UPC_E]);
+        hints.set(DecodeHintType.TRY_HARDER, true);
         const reader = new BrowserMultiFormatReader(hints);
         controls = await reader.decodeFromConstraints(
-          { video: { facingMode: { ideal: 'environment' } } },
+          // Contraintes en IDEAL (souples, jamais 'exact' -> pas d'OverconstrainedError) :
+          // meilleure résolution pour résoudre les fines barres + autofocus continu
+          // (best-effort, ignoré si l'appareil ne le supporte pas).
+          { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, advanced: [{ focusMode: 'continuous' }] } },
           videoRef.current,
           (result) => {
             if (annule || !result) return;
             controls?.stop();
-            onDetected(result.getText());
+            // Remonte le texte ET le format détecté (nom lisible via BarcodeFormat).
+            onDetected(result.getText(), BarcodeFormat[result.getBarcodeFormat()]);
           }
         );
         if (!annule) setPret(true);
@@ -5521,6 +5529,10 @@ function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onCl
   // déjà un AUTRE code -> confirmation explicite avant tout remplacement.
   const [codeBarresEnAttente, setCodeBarresEnAttente] = useState(null);
   const [conflitCodeBarres, setConflitCodeBarres] = useState(null);
+  // Diagnostic scan (shadow estFrancois) — remonte à l'écran ce que le lecteur a
+  // réellement décodé + le déroulé de la recherche, pour ne jamais avoir d'écran
+  // muet : { brut, format, normalise, rechercheLancee, resultat }.
+  const [scanDiag, setScanDiag] = useState(null);
 
   useEffect(() => {
     if (query.trim().length < 2) { setResults([]); setError(null); return; }
@@ -5554,42 +5566,58 @@ function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onCl
   // pas le même code sans ce zéro). 0 résultat -> message clair, pas d'erreur
   // ni de blocage (le lot suivant gèrera ce cas). Plusieurs résultats -> choix
   // explicite, jamais une variante prise au hasard.
-  const rechercherParCodeBarres = async (codeBrut) => {
-    const code = codeBrut.replace(/\s+/g, '');
+  const rechercherParCodeBarres = async (codeBrut, format = null) => {
+    const code = (codeBrut || '').replace(/\s+/g, '');   // espaces retirés, zéros initiaux CONSERVÉS
     setScanOuvert(false);
     setRechercheBarcode(true);
     setBarcodeMessage(null);
     setCodeBarresEnAttente(null);
+    // Diagnostic (shadow) : on trace ce qui a été décodé + le déroulé.
+    setScanDiag({ brut: codeBrut ?? '—', format: format ?? '—', normalise: code, rechercheLancee: true, resultat: '…' });
 
-    // Étape 4a — source de vérité = codes_barres_variante (multi-codes par
-    // variante, principal + secondaires). Le code y est UNIQUE : 0 ou 1
-    // variante. Le cas "plusieurs candidats" n'existe donc plus.
+    // Rattrapage UPC-A(12 chiffres) <-> EAN-13(13, préfixe 0) : un code stocké en
+    // EAN-13 doit matcher un UPC-A scanné (et inversement).
+    const candidats = [code];
+    if (/^\d{12}$/.test(code)) candidats.push('0' + code);
+    if (/^0\d{12}$/.test(code)) candidats.push(code.slice(1));
+
+    // Source de vérité = codes_barres_variante (multi-codes ; code UNIQUE -> 0/1).
     const { data: cbv, error: errCbv } = await supabase
       .from('codes_barres_variante')
-      .select('variante_produit_id')
-      .eq('code_barres', code)
-      .maybeSingle();
-    if (errCbv) { setRechercheBarcode(false); setBarcodeMessage("Recherche impossible, réessaie."); return; }
+      .select('variante_produit_id, code_barres')
+      .in('code_barres', candidats)
+      .limit(1);
+    if (errCbv) {
+      setRechercheBarcode(false);
+      setScanDiag(d => ({ ...(d || {}), resultat: 'erreur' }));
+      setBarcodeMessage("Recherche impossible, réessaie.");
+      return;
+    }
 
-    // Code inconnu (ou rattaché à une variante inactive) : on le garde en
-    // mémoire, la recherche catalogue juste en dessous devient le moyen de
-    // l'apprendre (bout 2, écriture traitée en 4b).
+    // Code décodé mais absent (ou variante inactive) : gardé pour apprentissage.
     const inconnu = () => {
+      setScanDiag(d => ({ ...(d || {}), resultat: 'non trouvé' }));
       setCodeBarresEnAttente(code);
-      setBarcodeMessage(`Code-barres inconnu (${code}). Cherche le bon produit ci-dessous pour l'enregistrer dessus.`);
+      setBarcodeMessage(`Code-barres ${code} détecté, mais aucun article correspondant n'existe encore.`);
     };
 
-    if (!cbv) { setRechercheBarcode(false); inconnu(); return; }
+    const trouve = cbv && cbv[0];
+    if (!trouve) { setRechercheBarcode(false); inconnu(); return; }
 
     const { data: variante, error: errV } = await supabase
       .from('variantes_produit')
       .select('id, produit_id, libelle, quantite_nette, unite_quantite, url_image, produits(nom_reference), marques(nom)')
-      .eq('id', cbv.variante_produit_id)
+      .eq('id', trouve.variante_produit_id)
       .eq('actif', true)
       .maybeSingle();
     setRechercheBarcode(false);
-    if (errV) { setBarcodeMessage("Recherche impossible, réessaie."); return; }
+    if (errV) {
+      setScanDiag(d => ({ ...(d || {}), resultat: 'erreur' }));
+      setBarcodeMessage("Recherche impossible, réessaie.");
+      return;
+    }
     if (!variante) { inconnu(); return; }
+    setScanDiag(d => ({ ...(d || {}), resultat: 'trouvé' }));
     setBarcodeConfirmation(variante);
   };
 
@@ -5703,6 +5731,19 @@ function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onCl
           </button>
         </div>
 
+        {/* Diagnostic scan (shadow estFrancois) — visible dans toutes les branches
+            dès qu'un code a été décodé. Ne s'affiche jamais pour les autres. */}
+        {estFrancois && scanDiag && (
+          <div style={{ fontFamily:"ui-monospace, Menlo, monospace", fontSize:11, lineHeight:1.5, background:"#F4F6F8", border:`1px solid ${C.grayLight}`, borderRadius:8, padding:"8px 10px", marginBottom:12, color:"#333", whiteSpace:"pre-line" }}>
+            {`🔎 Diagnostic scan
+Code brut détecté : ${scanDiag.brut}
+Format détecté : ${scanDiag.format}
+Code normalisé : ${scanDiag.normalise}
+Recherche lancée : ${scanDiag.rechercheLancee ? 'oui' : 'non'}
+Résultat : ${scanDiag.resultat}`}
+          </div>
+        )}
+
         {confirmation ? (
           <div style={{ textAlign:"center", padding:"24px 0", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.green }}>
             {confirmation}
@@ -5781,7 +5822,7 @@ function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onCl
               style={{ width:"100%", padding:"11px 14px", borderRadius:10, border:`2px solid ${query?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:12 }}
             />
             {estFrancois && (
-              <button onClick={()=>{ setBarcodeMessage(null); setScanOuvert(true); }} disabled={rechercheBarcode} style={{ width:"100%", padding:"10px", marginBottom:12, border:`1.5px dashed ${C.blue}`, borderRadius:10, background:"transparent", color:C.blue, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, cursor:"pointer" }}>
+              <button onClick={()=>{ setBarcodeMessage(null); setScanDiag(null); setScanOuvert(true); }} disabled={rechercheBarcode} style={{ width:"100%", padding:"10px", marginBottom:12, border:`1.5px dashed ${C.blue}`, borderRadius:10, background:"transparent", color:C.blue, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, cursor:"pointer" }}>
                 📷 Scanner le code-barres
               </button>
             )}
