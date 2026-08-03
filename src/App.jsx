@@ -5614,14 +5614,15 @@ function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onCl
     setBarcodeMessage(null);
   };
 
-  // Chantier "Scan code-barres" bout 2 — enregistre codeBarresEnAttente sur
-  // la variante choisie (RLS admin déjà en place sur variantes_produit,
-  // aucune nouvelle RPC nécessaire) puis relie via le même chemin que le
-  // bout 1 (relier_variante_scan_code_barres). Vérifie d'abord qu'aucune
-  // AUTRE variante ne porte déjà ce code (contrainte UNIQUE en base de toute
-  // façon, mais message clair plutôt qu'une erreur brute), et demande
-  // confirmation avant d'écraser un code déjà présent et différent.
-  const procederApprentissage = async (produit, varianteId, forcerRemplacement = false) => {
+  // Chantier "Scan code-barres" bout 2 / étape 4b — apprentissage : on AJOUTE le
+  // code scanné comme code SECONDAIRE de la variante dans codes_barres_variante
+  // (multi-codes), puis on relie la ligne via le même chemin que le bout 1
+  // (relier_variante_scan_code_barres, appelé par finaliser). On ne touche plus
+  // à variantes_produit.code_barres (retrait prévu en 4c). L'unicité globale du
+  // code est garantie par UNIQUE(code_barres) : si le code appartient déjà à une
+  // autre variante, l'INSERT échoue (23505) -> message clair, rien n'est créé.
+  // Accès inchangé (bouton scanner gated estFrancois ; policy INSERT admin).
+  const procederApprentissage = async (produit, varianteId) => {
     if (!varianteId) {
       setError("Ce produit n'a pas de variante précise à associer à ce code-barres.");
       return;
@@ -5629,43 +5630,18 @@ function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onCl
     setSaving(true);
     setError(null);
 
-    const { data: autre, error: errAutre } = await supabase
-      .from('variantes_produit')
-      .select('id, libelle, produits(nom_reference)')
-      .eq('code_barres', codeBarresEnAttente)
-      .neq('id', varianteId)
-      .maybeSingle();
-    if (errAutre) { setSaving(false); setError("Vérification impossible, réessaie."); return; }
-    if (autre) {
+    const { error: errInsert } = await supabase
+      .from('codes_barres_variante')
+      .insert({ variante_produit_id: varianteId, code_barres: codeBarresEnAttente, est_principal: false, source: 'scan' });
+    if (errInsert) {
       setSaving(false);
-      setError(`Ce code-barres est déjà enregistré sur « ${autre.produits?.nom_reference ?? autre.libelle ?? 'un autre produit'} » — impossible de l'enregistrer aussi ici.`);
+      setError(errInsert.code === '23505'
+        ? "Ce code-barres est déjà rattaché à un autre produit."
+        : "Enregistrement du code-barres impossible, réessaie.");
       return;
-    }
-
-    const { data: varianteActuelle, error: errV } = await supabase
-      .from('variantes_produit').select('code_barres').eq('id', varianteId).maybeSingle();
-    if (errV) { setSaving(false); setError("Vérification impossible, réessaie."); return; }
-
-    if (varianteActuelle?.code_barres && varianteActuelle.code_barres !== codeBarresEnAttente && !forcerRemplacement) {
-      setSaving(false);
-      setConflitCodeBarres({ produit, varianteId, ancienCode: varianteActuelle.code_barres });
-      return;
-    }
-
-    if (varianteActuelle?.code_barres !== codeBarresEnAttente) {
-      const { error: errMaj } = await supabase
-        .from('variantes_produit')
-        .update({ code_barres: codeBarresEnAttente })
-        .eq('id', varianteId);
-      if (errMaj) {
-        setSaving(false);
-        setError(errMaj.code === '23505' ? "Ce code-barres est déjà utilisé par un autre produit." : "Enregistrement du code-barres impossible, réessaie.");
-        return;
-      }
     }
 
     setSaving(false);
-    setConflitCodeBarres(null);
     await finaliser(produit, varianteId, 'scan_code_barres', `✓ Code-barres enregistré sur « ${produit.nom_reference} » + ligne reliée`);
     setCodeBarresEnAttente(null);
   };
