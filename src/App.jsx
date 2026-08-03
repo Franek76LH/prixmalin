@@ -1119,7 +1119,7 @@ function etapeLisibleScan(status) {
 }
 
 // ── IMPORT TICKET SHEET ───────────────────────────────────────────────────────
-function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera = false, autoOpenGallery = false, onManualEntry, initialResult = null, resumeDraft = null }) {
+function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera = false, autoOpenGallery = false, onManualEntry, initialResult = null, resumeDraft = null, estFrancois = false }) {
   const [jsonText, setJsonText] = useState("");
   const [status,   setStatus]   = useState(directCamera ? "camera" : "idle");
   const [error,    setError]    = useState("");
@@ -1147,6 +1147,14 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   const [showEnseigneSearch, setShowEnseigneSearch] = useState(false);
   const [showManualAddress, setShowManualAddress] = useState(false);
   const [savedGpsCoords,    setSavedGpsCoords]    = useState(null);
+  // LOT 1 « reconnaissance magasin au scan » (shadow estFrancois) : catégorie du
+  // magasin (1 tap, pré-sélection heuristique) + gestion de la zone grise
+  // anti-doublon (candidat proche -> l'utilisateur tranche). magasinAmbigu porte
+  // le candidat renvoyé par la RPC ; ambiguResolverRef débloque l'await une fois
+  // le choix fait.
+  const [categorieMagasin,  setCategorieMagasin]  = useState(null);
+  const [magasinAmbigu,     setMagasinAmbigu]     = useState(null);
+  const ambiguResolverRef = useRef(null);
   const fileInputRef    = useRef(null);
   const galleryInputRef = useRef(null);
 
@@ -1167,7 +1175,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     setSelectedStore(enseigne);
     setEditableProducts(initialResult.products.map((p, i) => ({ ...p, id: i, keep: true })));
     setStoreNameEdit(initialResult.store || "");
-    setStoreLocation(initialResult.address || "");
+    setStoreLocation(estFrancois ? "" : (initialResult.address || ""));
     fetchKnownStores(enseigne, initialResult.address || null);
     setStatus("store");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1231,16 +1239,73 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     setKnownStoresLoading(false);
   };
 
+  // LOT 1 « reconnaissance magasin au scan » — heuristique de catégorie :
+  // les enseignes/format de proximité -> 'proximite', sinon 'grande_surface'.
+  // Sert de PRÉ-sélection (l'utilisateur peut changer d'un tap).
+  const devinerCategorieMagasin = (nom) => {
+    const t = (nom || '').toLowerCase();
+    return /express|city|contact|proximit|market|vival|utile|spar|franprix/.test(t)
+      ? 'proximite' : 'grande_surface';
+  };
+
+  // LOT 1 — appel de la RPC Core. Renvoie l'objet {statut, magasin_id?, candidat?}.
+  // Fire-and-forget côté erreur technique : on n'interrompt jamais le flux legacy.
+  const appelerCreationMagasinCore = async (legacyId, enseigne, adresse, lat, lng, nom, extra = {}) => {
+    const cp = (adresse && adresse.match(/\b\d{5}\b/)) ? adresse.match(/\b\d{5}\b/)[0] : null;
+    let ville = null;
+    if (cp) {
+      const apres = (adresse.split(cp)[1] || '').replace(/^[,\s]+/, '').trim();
+      ville = apres && apres.toLowerCase() !== 'france' ? apres.replace(/,?\s*france$/i, '').trim() : null;
+    }
+    try {
+      const { data, error } = await supabase.rpc('resoudre_ou_creer_magasin_core', {
+        p_store_legacy_id: legacyId,
+        p_nom:             nom || null,
+        p_adresse:         adresse || null,
+        p_code_postal:     cp,
+        p_ville:           ville,
+        p_latitude:        lat ?? null,
+        p_longitude:       lng ?? null,
+        p_enseigne_slug:   enseigne || null,
+        p_categorie:       categorieMagasin || devinerCategorieMagasin(nom),
+        p_forcer_creation: extra.forcerCreation ?? false,
+        p_rattacher_magasin_id: extra.rattacherMagasinId ?? null,
+      });
+      if (error) { console.error('[LOT1] resoudre_ou_creer_magasin_core', error); return null; }
+      return data ?? null;
+    } catch (e) { console.error('[LOT1] resoudre_ou_creer_magasin_core (exception)', e); return null; }
+  };
+
+  // Zone grise anti-doublon : suspend jusqu'au choix utilisateur dans la modale.
+  const demanderChoixMagasinAmbigu = (candidat) =>
+    new Promise((resolve) => { ambiguResolverRef.current = resolve; setMagasinAmbigu(candidat); });
+
   // #54 — évite de créer une fiche `stores` dupliquée : réutilise une fiche
   // existante de la même enseigne (déjà chargée dans knownStores) si son
   // adresse correspond, une fois normalisée (casse/accents/espaces via
   // normName, déjà utilisé ailleurs dans ce fichier pour ce genre de
   // comparaison). Sinon, comportement inchangé : insertStoreInDB crée la
   // fiche.
+  //
+  // LOT 1 (shadow estFrancois) : une fois la fiche legacy obtenue, on crée AUSSI
+  // la fiche Core (magasins + correspondance) via la RPC, pour qu'un magasin
+  // inconnu aboutisse enfin à un ticket. La zone grise (candidat proche mais
+  // incertain) est tranchée par l'utilisateur. Hors François : comportement
+  // strictement inchangé.
   const resoudreOuCreerStore = async (enseigne, adresse, lat, lng, nom) => {
     const existant = knownStores.find(s => s.address && normName(s.address) === normName(adresse));
-    if (existant) return existant.id;
-    return insertStoreInDB(enseigne, adresse, lat, lng, nom);
+    const legacyId = existant ? existant.id : await insertStoreInDB(enseigne, adresse, lat, lng, nom);
+    if (!legacyId || !estFrancois) return legacyId;
+
+    const res = await appelerCreationMagasinCore(legacyId, enseigne, adresse, lat, lng, nom);
+    if (res && res.statut === 'ambigu' && res.candidat) {
+      const choix = await demanderChoixMagasinAmbigu(res.candidat);
+      await appelerCreationMagasinCore(legacyId, enseigne, adresse, lat, lng, nom,
+        choix === 'rattacher'
+          ? { rattacherMagasinId: res.candidat.magasin_id }
+          : { forcerCreation: true });
+    }
+    return legacyId;
   };
 
   const EXAMPLE = `{
@@ -1264,7 +1329,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
       setSelectedStore(enseigne);
       setEditableProducts(parsed.products.map((p,i)=>({...p,id:i,keep:true,share:true})));
       setStoreNameEdit(parsed.store||"");
-      setStoreLocation(parsed.address||"");
+      setStoreLocation(estFrancois ? "" : (parsed.address||""));
       setError("");
       await fetchKnownStores(enseigne, parsed.address || null);
       setStatus("store");
@@ -1378,8 +1443,37 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     setStatus("share");
   };
 
+  const repondreAmbigu = (choix) => {
+    const resolve = ambiguResolverRef.current;
+    ambiguResolverRef.current = null;
+    setMagasinAmbigu(null);
+    resolve?.(choix);
+  };
+
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", zIndex:200, animation:"fadeIn 0.2s ease" }} onClick={(status==="idle"||status==="camera")?onClose:undefined}>
+      {/* LOT 1 (shadow estFrancois) — zone grise anti-doublon : un magasin proche
+          existe déjà, mais sans certitude. L'utilisateur tranche. */}
+      {magasinAmbigu && (
+        <div onClick={e=>e.stopPropagation()} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:400, padding:20 }}>
+          <div style={{ background:C.white, borderRadius:18, padding:"22px 20px", maxWidth:360, width:"100%", boxShadow:"0 20px 60px rgba(0,0,0,0.25)" }}>
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.text, marginBottom:8 }}>Ce magasin existe peut-être déjà</div>
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight, marginBottom:6 }}>Un magasin proche est déjà connu :</div>
+            <div style={{ background:C.grayLight, borderRadius:10, padding:"10px 12px", marginBottom:16 }}>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{magasinAmbigu.nom}</div>
+              {magasinAmbigu.adresse && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, marginTop:2 }}>{magasinAmbigu.adresse}</div>}
+            </div>
+            <button onClick={()=>repondreAmbigu('rattacher')}
+              style={{ width:"100%", padding:"14px", border:"none", borderRadius:12, background:C.orange, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.white, cursor:"pointer", marginBottom:10 }}>
+              C'est ce magasin
+            </button>
+            <button onClick={()=>repondreAmbigu('nouveau')}
+              style={{ width:"100%", padding:"13px", border:`2px solid ${C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, cursor:"pointer" }}>
+              Non, en créer un nouveau
+            </button>
+          </div>
+        </div>
+      )}
       <div onClick={e=>e.stopPropagation()} style={{ background:C.white, borderRadius:"20px 20px 0 0", width:"100%", maxHeight:"92vh", display:"flex", flexDirection:"column", animation:"slideUp 0.3s ease", overflow:"hidden" }}>
         <div style={{ background:C.orange, padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0 }}>
           <div>
@@ -1416,7 +1510,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   setResult(parsed); setSelectedStore(enseigne);
                   setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true})));
                   setStoreNameEdit(parsed.store||"");
-                  setStoreLocation(parsed.address||"");
+                  setStoreLocation(estFrancois ? "" : (parsed.address||""));
                   await fetchKnownStores(enseigne, parsed.address || null);
                   setStatus("store");
                 } catch(e) { setError("Erreur scan : " + e.message); }
@@ -1435,7 +1529,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   setResult(parsed); setSelectedStore(enseigne);
                   setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true, share:true})));
                   setStoreNameEdit(parsed.store || "");
-                  setStoreLocation(parsed.address || "");
+                  setStoreLocation(estFrancois ? "" : (parsed.address || ""));
                   await fetchKnownStores(enseigne, parsed.address || null);
                   setStatus("store");
                 } catch(e) { setError("Erreur scan : " + e.message); }
@@ -1467,7 +1561,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   setResult(parsed); setSelectedStore(enseigne);
                   setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true})));
                   setStoreNameEdit(parsed.store||"");
-                  setStoreLocation(parsed.address||"");
+                  setStoreLocation(estFrancois ? "" : (parsed.address||""));
                   await fetchKnownStores(enseigne, parsed.address || null);
                   setStatus("store");
                 } catch(e) { setError("Erreur scan : " + e.message); }
@@ -1652,6 +1746,30 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                       </div>
                     </div>
                   )}
+
+                  {/* LOT 1 (shadow estFrancois) — Catégorie du magasin, 1 tap.
+                      Pré-sélection heuristique sur le nom ; l'utilisateur peut
+                      basculer. Transmise à la RPC de création Core. */}
+                  {estFrancois && (()=>{
+                    const cat = categorieMagasin || devinerCategorieMagasin(storeNameEdit);
+                    const opts = [
+                      { id:'grande_surface', label:'🛒 Grande surface' },
+                      { id:'proximite',      label:'🏪 Proximité' },
+                    ];
+                    return (
+                      <div style={{ marginBottom:16 }}>
+                        <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Catégorie</div>
+                        <div style={{ display:"flex", gap:8 }}>
+                          {opts.map(o => (
+                            <button key={o.id} onClick={()=>setCategorieMagasin(o.id)}
+                              style={{ flex:1, padding:"11px 8px", borderRadius:12, border:`2px solid ${cat===o.id?C.orange:C.grayLight}`, background:cat===o.id?"#FFF6F0":C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:cat===o.id?C.orange:"#555", cursor:"pointer" }}>
+                              {o.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Adresse */}
                   <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Adresse (optionnel)</div>
@@ -3654,7 +3772,7 @@ function EconomiesTab({ priceDB, archives, items, setTab }) {
 }
 
 // ── PRICES TAB ────────────────────────────────────────────────────────────────
-function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValidated, onCreateArchive, userId, produitsRef = [], autoOpenCamera = false, onAutoOpenConsumed, autoResumeScan = false, onAutoResumeConsumed, initialScanResult = null, onInitialScanConsumed, hideActions = false, coreActifGlobal = false }) {
+function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValidated, onCreateArchive, userId, produitsRef = [], autoOpenCamera = false, onAutoOpenConsumed, autoResumeScan = false, onAutoResumeConsumed, initialScanResult = null, onInitialScanConsumed, hideActions = false, coreActifGlobal = false, estFrancois = false }) {
   const [showImport,    setShowImport]    = useState(false);
   const [capturedResult] = useState(initialScanResult);
   // Chantier 79 — brouillon de scan reprenable. scanDraft : détecté au montage
@@ -4046,7 +4164,7 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
         </div>
       )}
 
-      {showImport    && <ImportTicketSheet onClose={()=>{setShowImport(false);setResumeDraft(null);setScanDraft(lireScanDraft());onAutoOpenConsumed?.();onInitialScanConsumed?.();}} onImport={importPrices} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))} directCamera={autoOpenCamera} onManualEntry={()=>{ setShowImport(false); setShowEntry(true); }} initialResult={capturedResult} resumeDraft={resumeDraft}/>}
+      {showImport    && <ImportTicketSheet onClose={()=>{setShowImport(false);setResumeDraft(null);setScanDraft(lireScanDraft());onAutoOpenConsumed?.();onInitialScanConsumed?.();}} onImport={importPrices} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))} directCamera={autoOpenCamera} onManualEntry={()=>{ setShowImport(false); setShowEntry(true); }} initialResult={capturedResult} resumeDraft={resumeDraft} estFrancois={estFrancois}/>}
       {showEntry     && <PriceEntrySheet  onClose={()=>{setShowEntry(false);setEditPrice(null);}} onSave={savePrice} existingPrice={editPrice}/>}
       {toast && <Toast msg={toast.msg} ok={toast.ok}/>}
     </div>
@@ -5235,7 +5353,7 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
         <button onClick={()=>setShowEntry(true)} style={{ position:"fixed", bottom:72, right:16, background:"linear-gradient(135deg,#CC0000,#FF1A1A)", border:"none", borderRadius:99, padding:"13px 18px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", gap:6, boxShadow:"0 6px 20px rgba(180,0,0,0.45)", zIndex:40 }}>
           ✏️ Saisie manuelle
         </button>
-        {showImport && <ImportTicketSheet onClose={()=>setShowImport(false)} onImport={onImport} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))}/>}
+        {showImport && <ImportTicketSheet onClose={()=>setShowImport(false)} onImport={onImport} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))} estFrancois={estFrancois}/>}
         {showEntry  && <PriceEntrySheet  onClose={()=>setShowEntry(false)} onSave={onSavePrice}/>}
       </div>
     );
@@ -5399,7 +5517,7 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
         </>
       )}
       </>)}
-      {showImport && <ImportTicketSheet onClose={()=>setShowImport(false)} onImport={onImport} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))} onManualEntry={()=>setShowEntry(true)}/>}
+      {showImport && <ImportTicketSheet onClose={()=>setShowImport(false)} onImport={onImport} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))} onManualEntry={()=>setShowEntry(true)} estFrancois={estFrancois}/>}
       {showEntry  && <PriceEntrySheet  onClose={()=>setShowEntry(false)} onSave={onSavePrice}/>}
       {correctionCible && (
         <CorrigerProduitSheet
@@ -7499,7 +7617,7 @@ export default function App() {
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} setTab={setTab}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
-          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
+          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} estFrancois={estFrancois} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;
             const {data,error}=await supabase.from('archives').insert({...rest,user_id:session?.user?.id}).select('id').single();
             if(error){ console.error("Erreur création archive ticket :",error); showAppToast("⚠️ Archive non sauvegardée, vérifie ta connexion",false); }
@@ -7593,6 +7711,7 @@ export default function App() {
             onImport={handleImportPrices}
             refProducts={produitsRef.map(p => ({ nom: p.produit_generique, categorie: p.sous_categorie }))}
             autoOpenGallery
+            estFrancois={estFrancois}
           />
         )}
         {loaded && pseudo === null && <PseudoModal onSave={savePseudo}/>}
