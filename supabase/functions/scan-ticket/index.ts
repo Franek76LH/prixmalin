@@ -43,7 +43,7 @@ serve(async (req) => {
     const refSection = refProducts.length > 0
       ? `\n\nCatalogue de référence (${refProducts.length} produits génériques) :\n` +
         refProducts.map((p: { nom: string; categorie: string }) => `- ${p.nom} (${p.categorie})`).join("\n") +
-        `\n\nPour chaque article du ticket, cherche dans ce catalogue le nom générique le plus proche (ex : "LT DEMI ECR" → "Lait demi-écrémé", "POULET ROT" → "Poulet rôti"). Utilise ce nom officiel dans le champ "name". Si aucune correspondance n'est évidente, normalise le nom du ticket (majuscules → minuscules, abréviations développées).`
+        `\n\nPour chaque article du ticket, cherche dans ce catalogue le nom générique le plus proche (ex : "LT DEMI ECR" → "Lait demi-écrémé", "POULET ROT" → "Poulet rôti"). Utilise ce nom officiel dans le champ "name" UNIQUEMENT si la correspondance est franche. Si aucune correspondance n'est évidente, NE force PAS un rapprochement approximatif : laisse "name" vide ou recopie simplement le libellé du ticket normalisé (majuscules → minuscules, abréviations développées), et mets confiance="faible".`
       : `\nNormalise les noms abrégés (ex: LT DEMI ECR → Lait demi-écrémé).`;
 
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -70,10 +70,25 @@ serve(async (req) => {
   "date": "YYYY-MM-DD",
   "address": "adresse complète du magasin si présente sur le ticket (numéro, rue, code postal, ville), sinon chaîne vide",
   "products": [
-    { "brand": "marque ou vide", "name": "nom du produit normalisé", "libelle_ticket": "texte du ticket recopié tel quel", "format": "format ou vide", "qty": 1, "unit_price": 0.00, "price": 0.00, "total": 0.00 }
+    { "brand": "marque ou vide", "name": "nom du produit normalisé", "libelle_ticket": "texte du ticket recopié tel quel", "confiance": "haute", "format": "format ou vide", "quantite_nette": null, "unite_quantite": null, "nombre_unites": null, "qty": 1, "unit_price": 0.00, "price": 0.00, "total": 0.00 }
   ]
 }
 Pour chaque ligne article, retourne aussi libelle_ticket : le texte tel qu'il est imprimé sur le ticket, recopié au plus proche, sans correction, sans reformulation, sans interprétation produit. Si le texte exact est partiellement illisible, conserve ce qui est visible et n'invente pas.
+CONFIANCE (champ "confiance", obligatoire, valeur "haute" ou "faible") :
+- Mets "haute" UNIQUEMENT quand le rattachement du "name" est franc : le libellé du ticket correspond clairement à un produit (idéalement une entrée du catalogue de référence), sans ambiguïté.
+- Mets "faible" dès qu'il n'y a PAS de correspondance franche : libellé trop vague, abréviation ambiguë, ou tu dois deviner. Ne force JAMAIS une devinette pour éviter "faible" : dans le doute, c'est "faible".
+NE PAS FORCER UN RATTACHEMENT (règle la plus importante) : si AUCUN produit du catalogue ne correspond franchement au libellé du ticket, tu NE forces PAS un rapprochement approximatif. Dans ce cas : laisse "name" VIDE (ou recopie le libellé brut simplement normalisé) et mets confiance="faible". Rattacher FAUX est PIRE que ne pas rattacher : mieux vaut une ligne non rattachée et signalée "faible" qu'un faux rattachement silencieux. Exemple : "DRP LOW CERISE PET 1.5L" est un sirop — il ne doit SURTOUT PAS devenir "eau de source plate" juste parce que ce serait la moins mauvaise entrée du catalogue ; laisse "name" vide/brut et confiance="faible".
+NE JAMAIS INVENTER D'ATTRIBUT : n'ajoute JAMAIS au "name" une caractéristique qui n'est pas ÉCRITE LITTÉRALEMENT dans le libellé du ticket. Exemples d'attributs à ne pas inférer : plate vs gazeuse, entier vs demi-écrémé vs écrémé, nature vs aromatisé, bio, etc.
+- Exemple ANCRÉ (EAU GAZEUSE) : un "G" ISOLÉ dans un libellé d'eau, séparé du reste (pas collé à un nombre), signifie EAU GAZEUSE. "EAU MINERALE NATURELLE G 6X1L" = eau minérale GAZEUSE (le "G" = Gazeuse), format 6×1 L -> name du type "Eau minérale gazeuse". À l'inverse, "EAU MINERALE NATURELLE 6X1L" SANS "G", ou "CRISTALINE", = eau PLATE. Quand tu vois un "G" isolé après un libellé d'eau, traite-la comme gazeuse ; si tu hésites entre plate et gazeuse, mets confiance="faible" plutôt que de deviner.
+- Règle générale : si l'attribut n'est pas dans le texte, soit tu l'omets, soit (si l'omettre rend le rattachement incertain) tu mets confiance="faible". Jamais d'invention.
+FORMAT STRUCTURÉ : en plus du champ "format" (texte brut recopié, ex "6X1L", "125G"), décompose-le en trois champs :
+- "quantite_nette" (nombre) : la quantité d'UNE unité. Ex "6X1L" -> 1 ; "125G" -> 125 ; "1,5L" -> 1.5.
+- "unite_quantite" (texte) : l'unité, parmi "g", "kg", "ml", "cl", "L", "piece".
+- "nombre_unites" (nombre) : le nombre d'unités du conditionnement. Ex "6X1L" -> 6 ; "125G" -> 1 ; "lot de 3" -> 3.
+- UNITÉS — respecte LITTÉRALEMENT l'unité imprimée, ne JAMAIS convertir une unité en une autre : "CL" = centilitres (unite_quantite "cl"), "L" = litres ("L"), "ML" = millilitres ("ml"), "G" suivant un nombre = grammes ("g"), "KG" = kilos ("kg"). Ex : "50CL" -> quantite_nette 50, unite_quantite "cl" (surtout PAS 50 "ml" ni 0,5 "L"). "25CL" ou "25C" -> 25, "cl". Un format qui finit par "C" seul après un nombre est une abréviation de "cl" ("25C" = 25 cl ; "25" seul sur une boisson canette = 25 cl).
+- ATTENTION à ne pas confondre le "G" : collé à un nombre ("125G") c'est l'unité grammes ; mais un "G" ISOLÉ après un libellé d'eau ("EAU MINERALE NATURELLE G") n'est PAS une unité, c'est l'abréviation de Gazeuse (voir la règle NE JAMAIS INVENTER ci-dessus) — ne l'utilise pas comme unité de poids.
+- Exemples complets : "6X1L" -> quantite_nette 1, unite_quantite "L", nombre_unites 6. "125G" -> quantite_nette 125, unite_quantite "g", nombre_unites 1. "2x500ml" -> quantite_nette 500, unite_quantite "ml", nombre_unites 2. "50CL" -> quantite_nette 50, unite_quantite "cl", nombre_unites 1.
+- Si le format est absent, illisible ou non interprétable en quantité : mets les TROIS champs (quantite_nette, unite_quantite, nombre_unites) à null. N'invente aucune quantité.
 CODES TVA Carrefour : chaque ligne produit commence par UN SEUL chiffre isolé (1, 2, 4, 6, 8…) suivi d'un espace puis du nom du produit. Ce chiffre est TOUJOURS un code TVA, jamais une quantité. La quantité est TOUJOURS 1 sauf si la ligne contient explicitement un multiplicateur 'x' (ex: 1,95x2). Ne jamais utiliser le code TVA comme quantité, même si aucun multiplicateur n'est présent.
 Règles pour qty, unit_price, price et total (IMPORTANT — lis chaque ligne entièrement avant de décider) :
 - Un multiplicateur peut s'écrire "x" OU "×" (signe multiplication), avec ou sans espaces : "1,95x2", "1,29 × 2", "10,13 x2". Le nombre À GAUCHE du x/× est le PRIX UNITAIRE (le prix d'UN seul article). Le nombre À DROITE du x/× est la QUANTITÉ.
@@ -94,7 +109,13 @@ RÈGLE ABSOLUE : extraire CHAQUE article du ticket sans exception.
     });
 
     const data = await response.json();
-    if (!response.ok) throw new Error(data?.error?.message || `Erreur HTTP ${response.status}`);
+    if (!response.ok) {
+      // Journalisation seule (aucun changement de comportement) : on trace le
+      // statut HTTP et le corps complet renvoyés par OpenRouter, pour lire la
+      // cause exacte dans les logs Supabase de la fonction.
+      console.error("[scan-ticket] OpenRouter non-2xx", response.status, JSON.stringify(data));
+      throw new Error(data?.error?.message || `Erreur HTTP ${response.status}`);
+    }
 
     const text = data.choices?.[0]?.message?.content || "";
     const clean = text.replace(/```json|```/g, "").trim();
@@ -122,6 +143,9 @@ RÈGLE ABSOLUE : extraire CHAQUE article du ticket sans exception.
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
+    // Journalisation seule : trace le message complet de l'échec (y compris
+    // celui remonté d'OpenRouter) dans les logs Supabase. Réponse inchangée.
+    console.error("[scan-ticket] echec", err?.message, err);
     return new Response(JSON.stringify({ error: err.message }), {
       status: 400,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

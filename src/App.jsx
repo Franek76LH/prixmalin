@@ -105,6 +105,19 @@ function normFormat(s) {
 // Clé unique d'un article de prix : marque+produit+format+magasin
 function priceKey(p){ return `${normName(p.brand)}_${normName(p.product)}_${normFormat(p.format)}_${p.storeId}`; }
 
+// A.1 — rend lisible le format structuré lu par l'IA (quantite_nette /
+// unite_quantite / nombre_unites), ex "6 × 1 L", "125 g", "2 × 500 ml".
+// Retourne "" si l'IA n'a pas su décomposer (champs à null) : l'appelant
+// retombe alors sur le format brut.
+function formatStructureLu(p) {
+  if (!p) return "";
+  const q = p.quantite_nette, u = p.unite_quantite, n = p.nombre_unites;
+  if (q == null || !u) return "";
+  const qStr = String(q).replace(".", ",");
+  const base = `${qStr} ${u}`;
+  return (n && Number(n) > 1) ? `${n} × ${base}` : base;
+}
+
 // Prix à l'unité (€/kg ou €/L) à partir du format texte
 function calcUnitPrice(price, format) {
   if (!price || !format) return null;
@@ -1409,6 +1422,13 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
       product:      p.name,
       libelle_ticket: p.libelle_ticket||null,
       format:       p.format||"",
+      // A.1 — transportés depuis le scan (voyagent mais NON écrits en base : ce
+      // sera A.2). confiance sert au badge « à vérifier » ; quantite_nette /
+      // unite_quantite / nombre_unites au format affiché.
+      confiance:      p.confiance||null,
+      quantite_nette: p.quantite_nette ?? null,
+      unite_quantite: p.unite_quantite ?? null,
+      nombre_unites:  p.nombre_unites ?? null,
       qty:          p.qty||1,
       storeId:      selectedStore||"autre",
       store_name:   storeNameEdit.trim() || result?.store || "",
@@ -1916,7 +1936,14 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                       <button onClick={()=>toggleProduct(p.id)} style={{ width:24, height:24, borderRadius:6, flexShrink:0, cursor:"pointer", border:`2px solid ${p.keep?C.blue:C.gray}`, background:p.keep?C.blue:C.white, color:C.white, fontSize:13, display:"flex", alignItems:"center", justifyContent:"center" }}>{p.keep?"✓":""}</button>
                       <div style={{ flex:1 }}>
                         <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{p.brand?`${p.brand} · `:""}{p.name}</div>
-                        <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>{p.format}</div>
+                        <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap", marginTop:2 }}>
+                          {(formatStructureLu(p) || p.format) && (
+                            <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>{formatStructureLu(p) || p.format}</span>
+                          )}
+                          {p.confiance === "faible" && (
+                            <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:900, color:"#B25900", background:"#FFE7C2", borderRadius:99, padding:"2px 8px" }}>⚠ à vérifier</span>
+                          )}
+                        </div>
                       </div>
                       <input type="number" step="0.01" min="0" value={p.price} onChange={e=>updatePrice(p.id,e.target.value)}
                         style={{ width:68, padding:"6px 8px", textAlign:"right", borderRadius:8, border:`2px solid ${C.orange}`, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.orange, outline:"none" }} />
@@ -1976,7 +2003,14 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                           <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                             {p.brand ? `${p.brand} · ` : ""}{p.name}
                           </div>
-                          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>{p.format}</div>
+                          <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap", marginTop:2 }}>
+                            {(formatStructureLu(p) || p.format) && (
+                              <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>{formatStructureLu(p) || p.format}</span>
+                            )}
+                            {p.confiance === "faible" && (
+                              <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:900, color:"#B25900", background:"#FFE7C2", borderRadius:99, padding:"2px 8px" }}>⚠ à vérifier</span>
+                            )}
+                          </div>
                         </div>
                         <div style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0 }}>
                           <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.orange }}>{p.price.toFixed(2)} €</div>
