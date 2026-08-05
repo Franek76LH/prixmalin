@@ -2764,6 +2764,173 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
   );
 }
 
+// Chantier « famille » — rendu INLINE (dans l'accordéon Catalogue) des sélecteurs
+// d'une fiche : MARQUE + FORMAT en menus déroulants (style filtre Excel), avec la
+// MÊME logique que ProductPickerSheet (préférence nationale/MDD conservée,
+// résolution de variante, ajout à la liste). Ne modifie pas la modale existante,
+// qui reste utilisée pour les résultats à plat et la navigation par rayons.
+function FicheInline({ produit, onAdd, items }) {
+  const [variantes,        setVariantes]        = useState([]);
+  const [varianteId,       setVarianteId]       = useState(null);
+  const [variantesLoading, setVariantesLoading] = useState(true);
+  const [varianteError,    setVarianteError]    = useState(null);
+  const [qty,              setQty]              = useState(1);
+  const [submitting,       setSubmitting]       = useState(false);
+  const [submitError,      setSubmitError]      = useState(null);
+  const [justAdded,        setJustAdded]        = useState(false);
+  const [marqueSelectionnee, setMarqueSelectionnee] = useState('all');
+  const [formatSelectionne,  setFormatSelectionne]  = useState('all');
+  const [segmentMarque,    setSegmentMarque]    = useState('nationale');
+  const [basculeAutoMdd,   setBasculeAutoMdd]   = useState(false);
+
+  const loadVariantes = async () => {
+    setVarianteError(null); setVariantesLoading(true);
+    setMarqueSelectionnee('all'); setFormatSelectionne('all');
+    try {
+      const data = await chargerVariantes(produit.id);
+      setVariantes(data);
+      setVarianteId(data.length === 0 ? 'any' : null);
+      const aUneNationale = data.some(v => v.marques?.est_mdd !== true);
+      const aUneMdd = data.some(v => v.marques?.est_mdd === true);
+      if (!aUneNationale && aUneMdd) { setSegmentMarque('mdd'); setBasculeAutoMdd(true); }
+      else { setSegmentMarque('nationale'); setBasculeAutoMdd(false); }
+    } catch (e) {
+      console.error("Erreur chargement variantes :", e);
+      setVariantes([]); setVarianteId(null);
+      setVarianteError("Impossible de charger les formats.");
+    } finally { setVariantesLoading(false); }
+  };
+
+  const choisirSegment = (seg) => {
+    setSegmentMarque(seg === 'mdd' ? 'mdd' : 'nationale');
+    setBasculeAutoMdd(false); setMarqueSelectionnee('all');
+  };
+
+  useEffect(() => {
+    loadVariantes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [produit.id]);
+
+  const variantesSegment = useMemo(
+    () => segmentMarque === 'mdd'
+      ? variantes.filter(v => v.marques?.est_mdd === true)
+      : variantes.filter(v => v.marques?.est_mdd !== true),
+    [variantes, segmentMarque]
+  );
+  const marquesListe = useMemo(() => {
+    if (segmentMarque !== 'nationale') return [];
+    const pertinentes = formatSelectionne === 'all'
+      ? variantesSegment
+      : variantesSegment.filter(v => formatFormatStructure(v) === formatSelectionne);
+    const map = new Map();
+    pertinentes.forEach(v => { if (v.marque_id && v.marques?.nom && v.marques?.est_mdd !== true) map.set(v.marque_id, v.marques.nom); });
+    return [...map.entries()].map(([id, nom]) => ({ id, nom })).sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
+  }, [variantesSegment, formatSelectionne, segmentMarque]);
+  const formatsListe = useMemo(() => {
+    const base = (segmentMarque === 'nationale' && marqueSelectionnee !== 'all')
+      ? variantesSegment.filter(v => v.marque_id === marqueSelectionnee)
+      : variantesSegment;
+    const labels = new Set();
+    base.forEach(v => { const l = formatFormatStructure(v); if (l) labels.add(l); });
+    return [...labels];
+  }, [variantesSegment, marqueSelectionnee, segmentMarque]);
+  const variantesResolues = useMemo(() => variantesSegment.filter(v =>
+    (segmentMarque !== 'nationale' || marqueSelectionnee === 'all' || v.marque_id === marqueSelectionnee) &&
+    (formatSelectionne === 'all' || formatFormatStructure(v) === formatSelectionne)
+  ), [variantesSegment, marqueSelectionnee, formatSelectionne, segmentMarque]);
+
+  const alreadyInList = items.some(i => i.product.toLowerCase().trim() === produit.nom_reference.toLowerCase().trim());
+  const canSubmit = !variantesLoading && !varianteError && !submitting;
+
+  const submit = async () => {
+    if (!canSubmit || submitting) return;
+    setSubmitting(true); setSubmitError(null);
+    let ajoutReussi = false;
+    try {
+      const item = {
+        id: Date.now() + Math.random(),
+        product: produit.nom_reference, format: '', brand: '', qty, checked: false,
+        produit_id: produit.id,
+        variante_produit_id: varianteId === 'any' ? null : (variantesResolues.length === 1 ? variantesResolues[0].id : null),
+        marque_pref: segmentMarque === 'mdd' ? 'mdd' : 'nationale',
+      };
+      const ok = await onAdd(item);
+      if (ok === true || ok === 'duplicate') { ajoutReussi = true; setJustAdded(true); }
+      else setSubmitError("Ajout impossible, réessaie.");
+    } catch (error) {
+      console.error("Erreur ajout depuis le Catalogue :", error);
+      setSubmitError("Ajout impossible, réessaie.");
+    } finally { setSubmitting(false); }
+    if (ajoutReussi) { setQty(1); setTimeout(() => setJustAdded(false), 2500); }
+  };
+
+  const pillStyle = (actif) => ({ padding:"7px 14px", background: actif?C.green:C.grayLight, border:`2px solid ${actif?C.green:"transparent"}`, borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:actif?C.white:C.textLight, cursor:"pointer" });
+  const selectStyle = { width:"100%", padding:"10px 12px", borderRadius:10, border:`2px solid ${C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:14, color:C.text, outline:"none", boxSizing:"border-box" };
+
+  return (
+    <div style={{ background:C.white, border:`1px solid ${C.grayLight}`, borderRadius:12, padding:"12px 14px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+      <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.text, marginBottom:10 }}>{produit.nom_reference}</div>
+
+      {variantesLoading && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.gray, marginBottom:10 }}>Chargement des formats…</div>}
+      {varianteError && !variantesLoading && (
+        <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", marginBottom:10 }}>
+          <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.red }}>⚠️ {varianteError}</span>
+          <button onClick={loadVariantes} style={{ background:"none", border:"none", color:C.blue, fontWeight:700, cursor:"pointer", fontSize:13, textDecoration:"underline" }}>Réessayer</button>
+        </div>
+      )}
+      {!variantesLoading && !varianteError && variantes.length === 0 && (
+        <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.gray, marginBottom:10 }}>Format indifférent (aucun autre format référencé).</div>
+      )}
+
+      {!variantesLoading && !varianteError && variantes.length > 0 && (
+        <>
+          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Préférence marque</div>
+          <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom: basculeAutoMdd ? 6 : 12 }}>
+            <button onClick={()=>choisirSegment('nationale')} style={pillStyle(segmentMarque==='nationale')}>Marques nationales</button>
+            <button onClick={()=>choisirSegment('mdd')} style={pillStyle(segmentMarque==='mdd')}>Marque Distributeur</button>
+          </div>
+          {basculeAutoMdd && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.orange, fontWeight:700, marginBottom:12 }}>Ce produit n'existe qu'en Marque Distributeur.</div>}
+
+          {segmentMarque === 'nationale' && marquesListe.length > 0 && (
+            <div style={{ marginBottom:12 }}>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Marque</div>
+              <select value={marqueSelectionnee} onChange={e=>setMarqueSelectionnee(e.target.value)} style={selectStyle}>
+                <option value="all">Toutes les marques</option>
+                {marquesListe.map(m => <option key={m.id} value={m.id}>{m.nom}</option>)}
+              </select>
+            </div>
+          )}
+
+          <div style={{ marginBottom:12 }}>
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Format</div>
+            <select value={formatSelectionne} onChange={e=>setFormatSelectionne(e.target.value)} style={selectStyle}>
+              <option value="all">Tous les formats</option>
+              {formatsListe.map(label => <option key={label} value={label}>{label}</option>)}
+            </select>
+          </div>
+        </>
+      )}
+
+      <div style={{ display:"flex", alignItems:"center", background:C.grayLight, borderRadius:12, padding:"8px 14px", marginBottom:10 }}>
+        <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, flex:1 }}>Quantité</span>
+        <div style={{ display:"flex", alignItems:"center", gap:14 }}>
+          <button onClick={()=>setQty(q=>Math.max(1,q-1))} style={{ width:30, height:30, borderRadius:99, border:"2px solid #CC0000", background:C.white, cursor:"pointer", color:"#CC0000", fontWeight:900, fontSize:18, display:"flex", alignItems:"center", justifyContent:"center" }}>−</button>
+          <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:18, color:"#CC0000", minWidth:22, textAlign:"center" }}>{qty}</span>
+          <button onClick={()=>setQty(q=>q+1)} style={{ width:30, height:30, borderRadius:99, border:"none", background:"#CC0000", cursor:"pointer", color:C.white, fontSize:18, display:"flex", alignItems:"center", justifyContent:"center" }}>+</button>
+        </div>
+      </div>
+
+      {submitError && <div style={{ color:C.red, fontSize:13, fontFamily:"'Nunito',sans-serif", fontWeight:700, marginBottom:8 }}>⚠️ {submitError}</div>}
+      {justAdded && <div style={{ color:C.green, fontSize:13, fontFamily:"'Nunito',sans-serif", fontWeight:800, marginBottom:8 }}>✓ Ajouté à ta liste</div>}
+      {alreadyInList && !justAdded && <div style={{ color:C.green, fontSize:12, fontFamily:"'Nunito',sans-serif", fontWeight:700, marginBottom:8 }}>✓ Déjà dans ta liste</div>}
+
+      <button onClick={submit} disabled={!canSubmit} style={{ width:"100%", padding:"13px", border:"none", borderRadius:12, background:canSubmit?C.orange:C.grayLight, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:canSubmit?"#111111":C.gray, cursor:canSubmit?"pointer":"default", boxShadow:canSubmit?"0 6px 16px rgba(200,160,0,0.4)":"none" }}>
+        + Ajouter à ma liste
+      </button>
+    </div>
+  );
+}
+
 function CatalogTab({ items, onAdd, setTab }) {
   const [categories,      setCategories]      = useState([]);
   const [catLoading,      setCatLoading]      = useState(true);
@@ -2785,7 +2952,48 @@ function CatalogTab({ items, onAdd, setTab }) {
   const [searchResults,   setSearchResults]   = useState([]);
   const [searching,       setSearching]       = useState(false);
   const [searchError,     setSearchError]     = useState(null);
+  // Chantier « famille » — familles dépliées dans les résultats de recherche.
+  const [openFamilles,    setOpenFamilles]    = useState(new Set());
+  // Chantier « sous-famille » — filtre local à chaque famille (famille -> valeur
+  // sélectionnée ; absent = '__tout__' par défaut).
+  const [filtresSousFamille, setFiltresSousFamille] = useState({});
   const searchSeq = useRef(0);
+
+  const toggleFamille = (fam) => {
+    setOpenFamilles(prev => {
+      const next = new Set(prev);
+      next.has(fam) ? next.delete(fam) : next.add(fam);
+      return next;
+    });
+    // Réinitialise le filtre de CETTE famille (no-op à l'ouverture, reset au repli).
+    setFiltresSousFamille(prev => { const c = { ...prev }; delete c[fam]; return c; });
+  };
+  const setFiltreFamille = (fam, val) => setFiltresSousFamille(prev => ({ ...prev, [fam]: val }));
+
+  // Une nouvelle recherche réinitialise tous les filtres sous-famille à « Tout ».
+  useEffect(() => { setFiltresSousFamille({}); }, [searchResults]);
+
+  // Chantier « famille » — regroupe les résultats de recherche : les fiches qui
+  // partagent une même valeur de `famille` non nulle sont rassemblées sous une
+  // seule entrée « accordéon » (générique, aucune famille codée en dur). Les
+  // fiches sans famille (null/vide) restent des entrées individuelles, à plat.
+  // L'ordre de pertinence du RPC est préservé (une famille prend la position de
+  // sa 1re fiche rencontrée).
+  const resultatsGroupes = useMemo(() => {
+    const out = [];
+    const indexFamille = new Map();
+    for (const r of searchResults) {
+      const fam = (r.famille && r.famille.trim()) ? r.famille.trim() : null;
+      if (!fam) { out.push({ type: 'produit', produit: r }); continue; }
+      if (indexFamille.has(fam)) {
+        out[indexFamille.get(fam)].membres.push(r);
+      } else {
+        indexFamille.set(fam, out.length);
+        out.push({ type: 'famille', famille: fam, membres: [r] });
+      }
+    }
+    return out;
+  }, [searchResults]);
 
   const totalInList = items.filter(i=>!i.checked).length;
 
@@ -2884,7 +3092,7 @@ function CatalogTab({ items, onAdd, setTab }) {
       const ids = (matches || []).map(m => m.produit_id);
       if (ids.length === 0) { setSearchResults([]); setSearching(false); return; }
       const { data, error } = await supabase.from('produits')
-        .select('id, nom_reference, sous_categorie_id, sous_categories(id, nom, categorie_id, categories(id, nom, slug, icone))')
+        .select('id, nom_reference, famille, sous_famille, sous_categorie_id, sous_categories(id, nom, categorie_id, categories(id, nom, slug, icone))')
         .in('id', ids);
       if (mySeq !== searchSeq.current) return;
       if (error) { setSearchError("Recherche impossible."); setSearching(false); return; }
@@ -2956,18 +3164,76 @@ function CatalogTab({ items, onAdd, setTab }) {
       )}
       {!searching && !searchError && searchResults.length > 0 && (
         <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:20 }}>
-          {searchResults.map((r) => {
-            const pres = getCategoryPresentation(r.sous_categories?.categories || {});
+          {resultatsGroupes.map((entry) => {
+            // Fiche individuelle (famille null/vide) — affichage à plat, inchangé.
+            if (entry.type === 'produit') {
+              const r = entry.produit;
+              const pres = getCategoryPresentation(r.sous_categories?.categories || {});
+              return (
+                <button key={r.id} onClick={()=>pickSearchResult(r)}
+                  style={{ display:"flex", alignItems:"center", gap:12, background:C.white, border:`1px solid ${C.grayLight}`, borderRadius:12, padding:"12px 14px", cursor:"pointer", textAlign:"left", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+                  <span style={{ fontSize:22 }}>{pres.emoji}</span>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{r.nom_reference}</div>
+                    {r.sous_categories?.categories && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:pres.color, fontWeight:700, marginTop:2 }}>{r.sous_categories.categories.nom}</div>}
+                  </div>
+                  <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:20, color:C.blue }}>+</span>
+                </button>
+              );
+            }
+            // Entrée « famille » — une seule ligne accordéon (ex. « Chips (25) »)
+            // qui se déplie sur ses fiches membres.
+            const ouvert = openFamilles.has(entry.famille);
+            const presFam = getCategoryPresentation(entry.membres[0]?.sous_categories?.categories || {});
+            // Sous-familles : valeurs réelles distinctes (générique), triées A→Z
+            // avec « Autres » toujours en dernier. Rangée affichée seulement s'il
+            // y a au moins 2 valeurs (sinon inutile).
+            // Types = valeurs réelles de sous_famille (générique), triées A→Z,
+            // « Autres » toujours en dernier. Pas de bouton « Tout ». Le 1er type
+            // est sélectionné par défaut ; la rangée est masquée s'il y a 0 ou 1
+            // type (inutile). Les fiches sans sous_famille (aucun type) sont
+            // rendues directement en cascade.
+            const typesSF = [...new Set(entry.membres.map(m => (m.sous_famille || '').trim()).filter(Boolean))]
+              .sort((a, b) => (a === 'Autres') - (b === 'Autres') || a.localeCompare(b, 'fr'));
+            const afficherTypes = typesSF.length >= 2;
+            const selType = typesSF.length > 0 ? (filtresSousFamille[entry.famille] || typesSF[0]) : null;
+            const fichesAffichees = typesSF.length === 0
+              ? entry.membres
+              : entry.membres.filter(m => (m.sous_famille || '').trim() === selType);
             return (
-              <button key={r.id} onClick={()=>pickSearchResult(r)}
-                style={{ display:"flex", alignItems:"center", gap:12, background:C.white, border:`1px solid ${C.grayLight}`, borderRadius:12, padding:"12px 14px", cursor:"pointer", textAlign:"left", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
-                <span style={{ fontSize:22 }}>{pres.emoji}</span>
-                <div style={{ flex:1 }}>
-                  <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{r.nom_reference}</div>
-                  {r.sous_categories?.categories && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:pres.color, fontWeight:700, marginTop:2 }}>{r.sous_categories.categories.nom}</div>}
-                </div>
-                <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:20, color:C.blue }}>+</span>
-              </button>
+              <div key={`fam-${entry.famille}`} style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                <button onClick={()=>toggleFamille(entry.famille)}
+                  style={{ display:"flex", alignItems:"center", gap:12, background:C.white, border:`1px solid ${ouvert?C.blue:C.grayLight}`, borderRadius:12, padding:"12px 14px", cursor:"pointer", textAlign:"left", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+                  <span style={{ fontSize:22 }}>{presFam.emoji}</span>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.text }}>{entry.famille}</div>
+                    <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:presFam.color, fontWeight:700, marginTop:2 }}>{ouvert ? "Masquer les sortes" : "Voir les sortes"}</div>
+                  </div>
+                  <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:16, color:C.gray, transform: ouvert?"rotate(90deg)":"none", transition:"transform 0.15s" }}>›</span>
+                </button>
+                {ouvert && (
+                  <div style={{ display:"flex", flexDirection:"column", gap:8, paddingLeft:14, borderLeft:`2px solid ${C.grayLight}`, marginLeft:6 }}>
+                    {/* Rangée des TYPES (sous_famille) — sans « Tout », 1er sélectionné par défaut */}
+                    {afficherTypes && (
+                      <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:2 }}>
+                        {typesSF.map(v => {
+                          const actif = selType === v;
+                          return (
+                            <button key={v} onClick={()=>setFiltreFamille(entry.famille, v)}
+                              style={{ padding:"5px 12px", borderRadius:99, border:`1.5px solid ${actif?C.blue:C.grayLight}`, background:actif?C.blue:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, color:actif?C.white:C.textLight, cursor:"pointer" }}>
+                              {v}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {/* Cascade : un bloc Marque/Format (menus déroulants) par fiche du type */}
+                    {fichesAffichees.map(r => (
+                      <FicheInline key={r.id} produit={r} onAdd={addItem} items={items} />
+                    ))}
+                  </div>
+                )}
+              </div>
             );
           })}
         </div>
