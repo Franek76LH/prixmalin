@@ -35,6 +35,7 @@ export function initPostHog() {
       api_host: HOST,
       capture_pageview: true,          // suit les écrans/pages
       autocapture: true,               // clics/boutons
+      capture_exceptions: true,        // erreurs non gérées + rejets de promesses -> $exception (Error Tracking)
       disable_session_recording: true, // RGPD : jamais d'enregistrement d'écran
       person_profiles: 'identified_only',
     });
