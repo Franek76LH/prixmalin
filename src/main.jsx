@@ -4,6 +4,11 @@ import { registerSW } from 'virtual:pwa-register'
 import './index.css'
 import App from './App.jsx'
 import { setUpdateSW, notifyNeedRefresh } from './lib/swUpdate'
+import { initPostHog } from './lib/posthog'
+
+// Analytics produit (PostHog) en shadow : initialisé tôt, avant le rendu.
+// Invisible pour l'utilisateur ; no-op si VITE_POSTHOG_KEY est absente.
+initPostHog()
 
 // #65 — enregistrement contrôlé du service worker (registerType:'prompt',
 // injectRegister:false dans vite.config.js). onNeedRefresh prévient App.jsx
