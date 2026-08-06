@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PrixMalin — maquette</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#F1F3F5; --card:#FFFFFF; --ink:#16191D; --ink-2:#5C646E; --ink-3:#98A0A9;
+  --line:#E6E9EC; --green:#12854B; --green-soft:#E7F5ED;
+  --amber:#F5C13B; --amber-deep:#B8860B; --brand:#9B1C1C; --brand-soft:#FBEDED;
+  --radius:14px; --radius-lg:18px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:'Nunito',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  background:#D8DCE0; color:var(--ink);
+  display:flex; justify-content:center; align-items:flex-start;
+  min-height:100vh; padding:24px 12px;
+}
+.phone{
+  width:100%; max-width:412px; background:var(--bg);
+  border-radius:28px; overflow:hidden; position:relative;
+  box-shadow:0 12px 40px rgba(0,0,0,.18);
+  min-height:820px; display:flex; flex-direction:column;
+}
+.screen{display:none; flex:1; flex-direction:column}
+.screen.on{display:flex}
+
+.top{padding:16px 16px 8px; background:var(--bg); position:sticky; top:0; z-index:5}
+.search{
+  width:100%; border:2px solid var(--line); background:#fff;
+  border-radius:var(--radius); padding:14px 16px; font:inherit; font-size:17px; color:var(--ink);
+}
+.search:focus{outline:none; border-color:var(--brand)}
+
+.cathead{
+  display:flex; align-items:center; gap:12px; background:#fff;
+  border:1px solid var(--line); border-radius:var(--radius);
+  padding:12px 16px; margin:10px 16px 0;
+}
+.cathead h1{font-size:19px; font-weight:800}
+.cathead .sub{font-size:13px; color:var(--brand); font-weight:600}
+.disclaimer{font-size:12.5px; color:var(--ink-2); font-style:italic; padding:12px 20px 4px; line-height:1.45}
+
+.scroll{flex:1; overflow-y:auto; padding:4px 16px 130px}
+.sectitle{font-size:17px; font-weight:800; margin:16px 0 10px}
+.sectitle span{font-size:13px; font-weight:600; color:var(--ink-3)}
+
+.brand-row{
+  display:flex; align-items:center; justify-content:space-between;
+  background:#fff; border:1px solid var(--line); border-radius:var(--radius);
+  padding:15px 16px; margin-bottom:8px; cursor:pointer;
+  width:100%; font:inherit; text-align:left; color:var(--ink);
+}
+.brand-row.open{border-color:var(--brand); border-width:1.5px}
+.brand-row .nm{font-size:16px; font-weight:800}
+.brand-row .rg{font-size:14px; font-weight:700; color:var(--green); display:flex; align-items:center; gap:8px}
+.chev{color:var(--ink-3); font-size:12px}
+.formats{padding:0 0 8px 12px; display:none}
+.formats.open{display:block}
+
+.fmt{
+  display:flex; align-items:center; gap:11px; background:#fff;
+  border:1px solid var(--line); border-radius:var(--radius);
+  padding:13px 12px 13px 14px; margin-bottom:7px; transition:border-color .18s;
+}
+.fmt.best{border-color:var(--green); background:var(--green-soft)}
+.fmt.picked{border-color:var(--green); border-width:1.5px}
+.thumb{
+  width:42px; height:42px; border-radius:9px; background:#F6F2E9;
+  display:grid; place-items:center; flex:0 0 auto;
+}
+.ico{width:27px; height:27px; display:block}
+.fmt-main{flex:1; min-width:0}
+.price{font-size:19px; font-weight:800; letter-spacing:-.3px}
+.price .unit{font-size:13px; font-weight:700; color:var(--ink-2)}
+.meta{font-size:12.5px; color:var(--ink-2); margin-top:2px; line-height:1.35}
+.tags{display:flex; gap:6px; margin-top:6px; flex-wrap:wrap}
+.tag{font-size:10.5px; font-weight:700; padding:3px 7px; border-radius:6px; background:#F1F3F5; color:var(--ink-2); letter-spacing:.2px}
+.tag.fresh{background:var(--green-soft); color:var(--green)}
+.tag.stale{background:#FFF4E0; color:var(--amber-deep)}
+.tag.gap{background:var(--brand-soft); color:var(--brand)}
+.tag.best{background:var(--green); color:#fff}
+
+/* --- compteur de quantité --- */
+.qty{flex:0 0 auto}
+.add{
+  width:44px; height:44px; border-radius:50%; border:none;
+  background:var(--amber); color:#4A3800; font-size:22px; font-weight:700;
+  cursor:pointer; display:grid; place-items:center; transition:transform .12s; font-family:inherit;
+}
+.add:hover{transform:scale(1.07)}
+.add.hide{display:none}
+.step{display:none; align-items:center; background:var(--green); border-radius:99px; padding:3px}
+.step.on{display:flex}
+.step button{
+  width:36px; height:36px; border:none; background:transparent; color:#fff;
+  font-size:21px; font-weight:800; cursor:pointer; border-radius:50%;
+  display:grid; place-items:center; font-family:inherit; line-height:1;
+}
+.step button:hover{background:rgba(255,255,255,.2)}
+.step .n{min-width:24px; text-align:center; color:#fff; font-weight:800; font-size:16px}
+.add:focus-visible,.step button:focus-visible,.brand-row:focus-visible,.b-summary:focus-visible{outline:2.5px solid var(--brand); outline-offset:2px}
+
+.basket{
+  position:absolute; left:0; right:0; bottom:0; z-index:10;
+  background:var(--bg); border-top:1px solid var(--line);
+  padding:11px 16px 16px; box-shadow:0 -6px 20px rgba(0,0,0,.06);
+}
+.b-summary{
+  width:100%; display:flex; align-items:center; justify-content:space-between;
+  background:#fff; border:1px solid var(--line); border-radius:var(--radius);
+  padding:12px 14px; font:inherit; color:var(--ink); cursor:pointer; text-align:left;
+}
+.b-summary:hover{border-color:var(--brand)}
+.b-left{display:flex; flex-direction:column; gap:1px}
+.b-title{font-size:15px; font-weight:800}
+.b-count{font-size:12.5px; font-weight:600; color:var(--ink-2)}
+.b-right{display:flex; align-items:center; gap:9px}
+.b-range{font-size:17px; font-weight:800; letter-spacing:-.4px}
+.b-chev{color:var(--ink-3); font-size:19px; font-weight:700}
+
+.rev{padding:28px 20px; flex:1; display:flex; flex-direction:column}
+.rev-eyebrow{font-size:12px; font-weight:800; letter-spacing:1.4px; color:var(--ink-3); text-transform:uppercase}
+.rev-h{font-size:26px; font-weight:800; line-height:1.2; margin:8px 0 22px; letter-spacing:-.6px}
+.winner{background:#fff; border:2px solid var(--green); border-radius:var(--radius-lg); padding:22px 20px; text-align:center; margin-bottom:14px}
+.winner .lbl{font-size:12px; font-weight:800; color:var(--green); letter-spacing:1px; text-transform:uppercase}
+.winner .name{font-size:27px; font-weight:800; margin:6px 0 2px; letter-spacing:-.5px}
+.winner .addr{font-size:13px; color:var(--ink-2); margin-bottom:16px}
+.winner .tot{font-size:40px; font-weight:800; letter-spacing:-1.5px}
+.save{display:inline-block; background:var(--green); color:#fff; font-size:14px; font-weight:800; padding:8px 16px; border-radius:99px; margin-top:12px}
+.others{background:#fff; border:1px solid var(--line); border-radius:var(--radius); padding:6px 16px; margin-bottom:14px}
+.orow{display:flex; justify-content:space-between; align-items:center; padding:12px 0; font-size:15px; border-bottom:1px solid var(--line)}
+.orow:last-child{border-bottom:none}
+.orow .rank{color:var(--ink-3); font-weight:800; margin-right:10px; font-size:13px}
+.orow .diff{font-size:13px; color:var(--ink-2); font-weight:700}
+.levers{background:var(--brand-soft); border-radius:var(--radius); padding:16px}
+.levers h3{font-size:14px; font-weight:800; margin-bottom:10px; color:var(--brand)}
+.levers li{list-style:none; font-size:13.5px; padding:5px 0; display:flex; justify-content:space-between}
+.levers li b{color:var(--green); font-weight:800}
+.back{margin-top:auto; padding-top:18px; background:none; border:none; color:var(--ink-2); font:inherit; font-size:14px; font-weight:700; cursor:pointer; text-decoration:underline}
+
+.scan{flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:18px; padding:40px}
+.scan .dots{display:flex; gap:9px}
+.scan .dots i{width:11px; height:11px; border-radius:50%; background:var(--brand); animation:bounce 1s infinite}
+.scan .dots i:nth-child(2){animation-delay:.15s}
+.scan .dots i:nth-child(3){animation-delay:.3s}
+.scan .dots i:nth-child(4){animation-delay:.45s}
+@keyframes bounce{0%,100%{opacity:.25;transform:translateY(0)}50%{opacity:1;transform:translateY(-7px)}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important; transition:none!important}}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" aria-hidden="true" style="position:absolute">
+  <symbol id="chip" viewBox="0 0 24 24">
+    <g fill="#E3A038">
+      <circle cx="12" cy="12" r="7.4"/>
+      <circle cx="19.6" cy="12" r="2.5"/><circle cx="17.37" cy="6.63" r="2.5"/>
+      <circle cx="12" cy="4.4" r="2.5"/><circle cx="6.63" cy="6.63" r="2.5"/>
+      <circle cx="4.4" cy="12" r="2.5"/><circle cx="6.63" cy="17.37" r="2.5"/>
+      <circle cx="12" cy="19.6" r="2.5"/><circle cx="17.37" cy="17.37" r="2.5"/>
+    </g>
+    <g fill="#A8641F" opacity=".5">
+      <circle cx="9.6" cy="10.2" r="1"/><circle cx="14.4" cy="12.6" r=".85"/>
+      <circle cx="11.2" cy="14.8" r=".9"/><circle cx="13.6" cy="8.9" r=".6"/>
+    </g>
+  </symbol>
+</svg>
+
+<div class="phone">
+
+  <section class="screen on" id="s-list">
+    <div class="top">
+      <input class="search" value="chips" aria-label="Rechercher un produit">
+    </div>
+    <div class="cathead">
+      <span class="thumb" style="width:38px;height:38px"><svg class="ico"><use href="#chip"/></svg></span>
+      <div style="flex:1">
+        <h1>Chips</h1>
+        <div class="sub">Masquer les variétés</div>
+      </div>
+      <span class="chev">▾</span>
+    </div>
+    <p class="disclaimer">Prix au kilo relevés en magasin par la communauté. Ils varient d'une enseigne à l'autre — vérifie en rayon.</p>
+
+    <div class="scroll">
+      <div class="sectitle">Aromatisé <span>· 6 marques</span></div>
+
+      <button class="brand-row open" onclick="toggle(this)">
+        <span class="nm">Lay's</span>
+        <span class="rg">4,40 – 6,10 €/kg <span class="chev">▾</span></span>
+      </button>
+
+      <div class="formats open">
+        <div class="fmt best">
+          <div class="thumb"><svg class="ico"><use href="#chip"/></svg></div>
+          <div class="fmt-main">
+            <div class="price">4,40 – 5,20 <span class="unit">€/kg</span></div>
+            <div class="meta">Lay's Barbecue · 250 g · le paquet 1,10 – 1,30 €</div>
+            <div class="tags"><span class="tag best">Meilleur rapport</span><span class="tag fresh">Relevé il y a 2 j</span></div>
+          </div>
+          <div class="qty" data-lo="1.10" data-hi="1.30" data-q="0">
+            <button class="add" onclick="bump(this,1)" aria-label="Ajouter à ma liste">＋</button>
+            <div class="step">
+              <button onclick="bump(this,-1)" aria-label="Retirer un paquet">−</button>
+              <span class="n">0</span>
+              <button onclick="bump(this,1)" aria-label="Ajouter un paquet">＋</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="fmt">
+          <div class="thumb"><svg class="ico"><use href="#chip"/></svg></div>
+          <div class="fmt-main">
+            <div class="price">8,37 – 11,90 <span class="unit">€/kg</span></div>
+            <div class="meta">Lay's Nature · 135 g · le paquet 1,13 – 1,61 €</div>
+            <div class="tags"><span class="tag gap">Gros écart selon magasin</span><span class="tag fresh">Relevé il y a 4 j</span></div>
+          </div>
+          <div class="qty" data-lo="1.13" data-hi="1.61" data-q="0">
+            <button class="add" onclick="bump(this,1)" aria-label="Ajouter à ma liste">＋</button>
+            <div class="step">
+              <button onclick="bump(this,-1)" aria-label="Retirer un paquet">−</button>
+              <span class="n">0</span>
+              <button onclick="bump(this,1)" aria-label="Ajouter un paquet">＋</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="fmt">
+          <div class="thumb"><svg class="ico"><use href="#chip"/></svg></div>
+          <div class="fmt-main">
+            <div class="price">9,77 – 10,40 <span class="unit">€/kg</span></div>
+            <div class="meta">Lay's Paprika · 130 g · le paquet 1,27 – 1,35 €</div>
+            <div class="tags"><span class="tag stale">Relevé il y a 3 sem.</span></div>
+          </div>
+          <div class="qty" data-lo="1.27" data-hi="1.35" data-q="0">
+            <button class="add" onclick="bump(this,1)" aria-label="Ajouter à ma liste">＋</button>
+            <div class="step">
+              <button onclick="bump(this,-1)" aria-label="Retirer un paquet">−</button>
+              <span class="n">0</span>
+              <button onclick="bump(this,1)" aria-label="Ajouter un paquet">＋</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="fmt">
+          <div class="thumb"><svg class="ico"><use href="#chip"/></svg></div>
+          <div class="fmt-main">
+            <div class="price">11,83 – 13,25 <span class="unit">€/kg</span></div>
+            <div class="meta">Lay's Bolognaise · 120 g · le paquet 1,42 – 1,59 €</div>
+            <div class="tags"><span class="tag">2,7× le meilleur prix</span><span class="tag fresh">Relevé hier</span></div>
+          </div>
+          <div class="qty" data-lo="1.42" data-hi="1.59" data-q="0">
+            <button class="add" onclick="bump(this,1)" aria-label="Ajouter à ma liste">＋</button>
+            <div class="step">
+              <button onclick="bump(this,-1)" aria-label="Retirer un paquet">−</button>
+              <span class="n">0</span>
+              <button onclick="bump(this,1)" aria-label="Ajouter un paquet">＋</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <button class="brand-row" onclick="toggle(this)">
+        <span class="nm">Sans marque</span>
+        <span class="rg">6,30 – 7,80 €/kg <span class="chev">›</span></span>
+      </button>
+      <div class="formats">
+        <div class="fmt">
+          <div class="thumb"><svg class="ico"><use href="#chip"/></svg></div>
+          <div class="fmt-main">
+            <div class="price">6,30 – 7,80 <span class="unit">€/kg</span></div>
+            <div class="meta">Chips nature · 200 g · le paquet 1,26 – 1,56 €</div>
+            <div class="tags"><span class="tag fresh">Relevé il y a 5 j</span></div>
+          </div>
+          <div class="qty" data-lo="1.26" data-hi="1.56" data-q="0">
+            <button class="add" onclick="bump(this,1)" aria-label="Ajouter à ma liste">＋</button>
+            <div class="step">
+              <button onclick="bump(this,-1)" aria-label="Retirer un paquet">−</button>
+              <span class="n">0</span>
+              <button onclick="bump(this,1)" aria-label="Ajouter un paquet">＋</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <button class="brand-row" onclick="toggle(this)">
+        <span class="nm">Pom'Lisse</span>
+        <span class="rg">6,37 – 6,90 €/kg <span class="chev">›</span></span>
+      </button>
+      <div class="formats">
+        <div class="fmt">
+          <div class="thumb"><svg class="ico"><use href="#chip"/></svg></div>
+          <div class="fmt-main">
+            <div class="price">6,37 – 6,90 <span class="unit">€/kg</span></div>
+            <div class="meta">Pom'Lisse Nature · 150 g · le paquet 0,96 – 1,04 €</div>
+            <div class="tags"><span class="tag fresh">Relevé il y a 6 j</span></div>
+          </div>
+          <div class="qty" data-lo="0.96" data-hi="1.04" data-q="0">
+            <button class="add" onclick="bump(this,1)" aria-label="Ajouter à ma liste">＋</button>
+            <div class="step">
+              <button onclick="bump(this,-1)" aria-label="Retirer un paquet">−</button>
+              <span class="n">0</span>
+              <button onclick="bump(this,1)" aria-label="Ajouter un paquet">＋</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <button class="brand-row" onclick="toggle(this)">
+        <span class="nm">Brets</span>
+        <span class="rg">8,32 – 9,15 €/kg <span class="chev">›</span></span>
+      </button>
+      <div class="formats">
+        <div class="fmt">
+          <div class="thumb"><svg class="ico"><use href="#chip"/></svg></div>
+          <div class="fmt-main">
+            <div class="price">8,32 – 9,15 <span class="unit">€/kg</span></div>
+            <div class="meta">Brets Poulet rôti · 125 g · le paquet 1,04 – 1,14 €</div>
+            <div class="tags"><span class="tag stale">Relevé il y a 2 sem.</span></div>
+          </div>
+          <div class="qty" data-lo="1.04" data-hi="1.14" data-q="0">
+            <button class="add" onclick="bump(this,1)" aria-label="Ajouter à ma liste">＋</button>
+            <div class="step">
+              <button onclick="bump(this,-1)" aria-label="Retirer un paquet">−</button>
+              <span class="n">0</span>
+              <button onclick="bump(this,1)" aria-label="Ajouter un paquet">＋</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="basket">
+      <button class="b-summary" onclick="reveal()">
+        <span class="b-left">
+          <span class="b-title">Ma liste</span>
+          <span class="b-count" id="bc">8 articles</span>
+        </span>
+        <span class="b-right">
+          <span class="b-range" id="br">21,30 – 28,90 €</span>
+          <span class="b-chev">›</span>
+        </span>
+      </button>
+    </div>
+  </section>
+
+  <section class="screen" id="s-scan">
+    <div class="scan">
+      <div class="dots"><i></i><i></i><i></i><i></i></div>
+      <p id="scanmsg">On compare ton panier dans 6 magasins…</p>
+    </div>
+  </section>
+
+  <section class="screen" id="s-rev">
+    <div class="rev">
+      <div class="rev-eyebrow" id="revcount">Ton panier · 8 articles</div>
+      <h2 class="rev-h">Le moins cher, c'est&nbsp;:</h2>
+      <div class="winner">
+        <div class="lbl">🏆 Magasin gagnant</div>
+        <div class="name">Leclerc</div>
+        <div class="addr">Saint-Loup · à 2,4 km</div>
+        <div class="tot" id="revtot">22,60 €</div>
+        <div class="save" id="revsave">Tu économises 6,30 €</div>
+      </div>
+      <div class="others">
+        <div class="orow"><span><span class="rank">2</span>Super U</span><span class="diff">+1,50 €</span></div>
+        <div class="orow"><span><span class="rank">3</span>Intermarché</span><span class="diff">+2,80 €</span></div>
+        <div class="orow"><span><span class="rank">4</span>Carrefour</span><span class="diff">+4,15 €</span></div>
+        <div class="orow"><span><span class="rank">5</span>Casino</span><span class="diff">+6,30 €</span></div>
+      </div>
+      <div class="levers">
+        <h3>Où se joue l'économie</h3>
+        <ul>
+          <li><span>Lay's Nature 135 g</span><b>−2,10 €</b></li>
+          <li><span>Café moulu 250 g</span><b>−1,80 €</b></li>
+          <li><span>Lessive liquide 2 L</span><b>−1,40 €</b></li>
+        </ul>
+      </div>
+      <button class="back" onclick="show('s-list')">← Modifier mon panier</button>
+    </div>
+  </section>
+
+</div>
+
+<script>
+var BASE_N = 8, BASE_LO = 21.30, BASE_HI = 28.90;
+
+function eur(v){ return v.toFixed(2).replace('.', ',') + ' €'; }
+
+function toggle(btn){
+  var box = btn.nextElementSibling;
+  var open = box.classList.toggle('open');
+  btn.classList.toggle('open', open);
+  btn.querySelector('.chev').textContent = open ? '▾' : '›';
+}
+
+function bump(el, d){
+  var node = el.closest('.qty');
+  var q = parseInt(node.dataset.q, 10) + d;
+  if (q < 0) q = 0;
+  if (q > 20) q = 20;
+  node.dataset.q = q;
+  node.querySelector('.n').textContent = q;
+  node.querySelector('.add').classList.toggle('hide', q > 0);
+  node.querySelector('.step').classList.toggle('on', q > 0);
+  node.closest('.fmt').classList.toggle('picked', q > 0);
+  recompute();
+}
+
+function recompute(){
+  var n = BASE_N, lo = BASE_LO, hi = BASE_HI;
+  document.querySelectorAll('.qty').forEach(function(q){
+    var k = parseInt(q.dataset.q, 10);
+    n += k;
+    lo += k * parseFloat(q.dataset.lo);
+    hi += k * parseFloat(q.dataset.hi);
+  });
+  var gap = hi - lo;
+  document.getElementById('bc').textContent = n + (n > 1 ? ' articles' : ' article');
+  document.getElementById('br').textContent = eur(lo).replace(' €','') + ' – ' + eur(hi);
+  document.getElementById('revcount').textContent = 'Ton panier · ' + n + (n > 1 ? ' articles' : ' article');
+  document.getElementById('revtot').textContent = eur(lo + gap * 0.18);
+  document.getElementById('revsave').textContent = 'Tu économises ' + eur(gap * 0.82);
+}
+
+function show(id){
+  document.querySelectorAll('.screen').forEach(function(s){ s.classList.remove('on'); });
+  document.getElementById(id).classList.add('on');
+}
+
+function reveal(){
+  show('s-scan');
+  var msgs = ['On compare ton panier dans 6 magasins…', 'Chaque article, chaque enseigne…', 'On garde le meilleur…'];
+  var i = 0;
+  var t = setInterval(function(){
+    i++;
+    if (i < msgs.length) document.getElementById('scanmsg').textContent = msgs[i];
+    else { clearInterval(t); show('s-rev'); }
+  }, 900);
+}
+
+recompute();
+</script>
+</body>
+</html>

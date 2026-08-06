@@ -3,6 +3,7 @@ import { scanTicketWithClaude, imageFileToJpegBase64, scanMultipleTicketsWithCla
 import { STORES, STALE_DAYS, JOURS_MOYENNE } from "./constants";
 import { supabase } from "./lib/supabase";
 import { mapperLigneListeCourses, chargerVariantes, getCategoryPresentation, formatFormatStructure, calculerPrixUnitaire } from "./lib/catalogueCore";
+import { calculerPrixReferenceParUnite } from "./lib/unitesCore";
 import { nomComposeVariante, formatEtiquetteVariante } from "./lib/nomProduit";
 import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
 import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
@@ -2764,174 +2765,285 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
   );
 }
 
-// Chantier « famille » — rendu INLINE (dans l'accordéon Catalogue) des sélecteurs
-// d'une fiche : MARQUE + FORMAT en menus déroulants (style filtre Excel), avec la
-// MÊME logique que ProductPickerSheet (préférence nationale/MDD conservée,
-// résolution de variante, ajout à la liste). Ne modifie pas la modale existante,
-// qui reste utilisée pour les résultats à plat et la navigation par rayons.
-function FicheInline({ produit, onAdd, items }) {
-  const [variantes,        setVariantes]        = useState([]);
-  const [varianteId,       setVarianteId]       = useState(null);
-  const [variantesLoading, setVariantesLoading] = useState(true);
-  const [varianteError,    setVarianteError]    = useState(null);
-  const [qty,              setQty]              = useState(1);
-  const [submitting,       setSubmitting]       = useState(false);
-  const [submitError,      setSubmitError]      = useState(null);
-  const [justAdded,        setJustAdded]        = useState(false);
-  const [marqueSelectionnee, setMarqueSelectionnee] = useState('all');
-  const [formatSelectionne,  setFormatSelectionne]  = useState('all');
-  const [segmentMarque,    setSegmentMarque]    = useState('nationale');
-  const [basculeAutoMdd,   setBasculeAutoMdd]   = useState(false);
 
-  const loadVariantes = async () => {
-    setVarianteError(null); setVariantesLoading(true);
-    setMarqueSelectionnee('all'); setFormatSelectionne('all');
-    try {
-      const data = await chargerVariantes(produit.id);
-      setVariantes(data);
-      setVarianteId(data.length === 0 ? 'any' : null);
-      const aUneNationale = data.some(v => v.marques?.est_mdd !== true);
-      const aUneMdd = data.some(v => v.marques?.est_mdd === true);
-      if (!aUneNationale && aUneMdd) { setSegmentMarque('mdd'); setBasculeAutoMdd(true); }
-      else { setSegmentMarque('nationale'); setBasculeAutoMdd(false); }
-    } catch (e) {
-      console.error("Erreur chargement variantes :", e);
-      setVariantes([]); setVarianteId(null);
-      setVarianteError("Impossible de charger les formats.");
-    } finally { setVariantesLoading(false); }
-  };
+// Chantier « Catalogue épuré » — contenu déplié d'une famille : liste scrollable
+// groupée par SORTE (sous_famille), puis par MARQUE (repliée, triée du meilleur
+// €/kg au pire), qui se déplie sur ses FORMATS (triés du meilleur €/kg au pire).
+// Le €/kg vient des relevés (prix_comparables) : min prix relevé par format,
+// converti au kilo/litre via calculerPrixReferenceParUnite (robuste aux unités).
+// Aucune valeur en dur ; une seule marque ouverte à la fois.
+function FamilleDepliee({ membres, items, onAdd, onUpdate, onRemove }) {
+  const [prix,       setPrix]       = useState([]);
+  const [loading,    setLoading]    = useState(true);
+  const [error,      setError]      = useState(null);
+  const [openMarque, setOpenMarque] = useState(null);   // clé "sorte||marque" (une seule ouverte)
+  const [maintenant] = useState(() => Date.now());       // instant figé au montage (fraîcheur, pur au rendu)
 
-  const choisirSegment = (seg) => {
-    setSegmentMarque(seg === 'mdd' ? 'mdd' : 'nationale');
-    setBasculeAutoMdd(false); setMarqueSelectionnee('all');
-  };
+  const produitIds = useMemo(() => membres.map(m => m.id), [membres]);
+  const sousFamilleParProduit = useMemo(() => {
+    const m = new Map();
+    membres.forEach(p => m.set(p.id, (p.sous_famille || '').trim() || 'Autres'));
+    return m;
+  }, [membres]);
 
+  // Monté à neuf à chaque ouverture de famille (état initial loading=true) : pas
+  // de setState synchrone ici, uniquement le chargement asynchrone.
   useEffect(() => {
-    loadVariantes();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [produit.id]);
+    let cancelled = false;
+    chargerPrixComparables(produitIds, {})
+      .then(rows => { if (!cancelled) { setPrix(rows || []); setLoading(false); } })
+      .catch(e => { if (!cancelled) { console.error('Erreur chargement prix famille :', e); setError("Impossible de charger les prix."); setLoading(false); } });
+    return () => { cancelled = true; };
+  }, [produitIds]);
 
-  const variantesSegment = useMemo(
-    () => segmentMarque === 'mdd'
-      ? variantes.filter(v => v.marques?.est_mdd === true)
-      : variantes.filter(v => v.marques?.est_mdd !== true),
-    [variantes, segmentMarque]
-  );
-  const marquesListe = useMemo(() => {
-    if (segmentMarque !== 'nationale') return [];
-    const pertinentes = formatSelectionne === 'all'
-      ? variantesSegment
-      : variantesSegment.filter(v => formatFormatStructure(v) === formatSelectionne);
-    const map = new Map();
-    pertinentes.forEach(v => { if (v.marque_id && v.marques?.nom && v.marques?.est_mdd !== true) map.set(v.marque_id, v.marques.nom); });
-    return [...map.entries()].map(([id, nom]) => ({ id, nom })).sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
-  }, [variantesSegment, formatSelectionne, segmentMarque]);
-  const formatsListe = useMemo(() => {
-    const base = (segmentMarque === 'nationale' && marqueSelectionnee !== 'all')
-      ? variantesSegment.filter(v => v.marque_id === marqueSelectionnee)
-      : variantesSegment;
-    const labels = new Set();
-    base.forEach(v => { const l = formatFormatStructure(v); if (l) labels.add(l); });
-    return [...labels];
-  }, [variantesSegment, marqueSelectionnee, segmentMarque]);
-  const variantesResolues = useMemo(() => variantesSegment.filter(v =>
-    (segmentMarque !== 'nationale' || marqueSelectionnee === 'all' || v.marque_id === marqueSelectionnee) &&
-    (formatSelectionne === 'all' || formatFormatStructure(v) === formatSelectionne)
-  ), [variantesSegment, marqueSelectionnee, formatSelectionne, segmentMarque]);
+  // Arbre sorte -> marque -> formats. Par format (variante) : min/max €/kg,
+  // min/max prix du paquet (sur TOUS les magasins, pas de filtre zone), et la
+  // date du relevé LE PLUS ANCIEN composant la fourchette (décision : la
+  // fourchette ne vaut que par sa donnée la plus périmée).
+  const arbre = useMemo(() => {
+    const parFormat = new Map();
+    for (const row of prix) {
+      if (!row.variante_produit_id) continue;
+      const ref = calculerPrixReferenceParUnite({
+        prix_total:     row.prix_total,
+        quantite_nette: row.quantite_nette,
+        unite_quantite: row.unite_quantite,
+        nombre_unites:  row.nombre_unites,
+      });
+      if (!ref) continue; // pas de €/kg (pièce, unité inconnue, donnée manquante) -> exclu
+      const paq = Number(row.prix_total);
+      const dateMs = row.observe_le ? new Date(row.observe_le).getTime() : null;
+      const e = parFormat.get(row.variante_produit_id);
+      if (!e) {
+        parFormat.set(row.variante_produit_id, {
+          varianteId: row.variante_produit_id, produitId: row.produit_id,
+          nomProduit: row.nom_produit, estMdd: !!row.est_mdd,
+          // Masquage MDD (AFFICHAGE seul) : toutes les variantes est_mdd=true sont
+          // regroupées sous une marque virtuelle unique « Marques distributeurs »
+          // (fusion, pas renommage). La vraie marque en base reste intacte.
+          marqueNom: row.est_mdd ? 'Marques distributeurs'
+            : ((row.nom_marque && row.nom_marque.trim()) ? row.nom_marque.trim() : 'Sans marque'),
+          // Signature de format (quantité + unité + conditionnement) pour fusionner
+          // les formats identiques de MDD différentes une fois le groupe déplié.
+          sig: `${row.quantite_nette}|${(row.unite_quantite || '').toLowerCase().trim()}|${Number(row.nombre_unites) || 1}`,
+          label: formatFormatStructure(row) || row.libelle_variante || 'Format',
+          uniteRef: ref.unite,
+          kgMin: ref.valeur, kgMax: ref.valeur, paqMin: paq, paqMax: paq, dateAncienne: dateMs,
+        });
+      } else {
+        if (ref.valeur < e.kgMin) e.kgMin = ref.valeur;
+        if (ref.valeur > e.kgMax) e.kgMax = ref.valeur;
+        if (paq < e.paqMin) e.paqMin = paq;
+        if (paq > e.paqMax) e.paqMax = paq;
+        if (dateMs != null && (e.dateAncienne == null || dateMs < e.dateAncienne)) e.dateAncienne = dateMs;
+      }
+    }
 
-  const alreadyInList = items.some(i => i.product.toLowerCase().trim() === produit.nom_reference.toLowerCase().trim());
-  const canSubmit = !variantesLoading && !varianteError && !submitting;
+    const sortes = new Map(); // sorte -> Map(marque -> [formats])
+    for (const f of parFormat.values()) {
+      const sorte = sousFamilleParProduit.get(f.produitId) || 'Autres';
+      if (!sortes.has(sorte)) sortes.set(sorte, new Map());
+      const marques = sortes.get(sorte);
+      if (!marques.has(f.marqueNom)) marques.set(f.marqueNom, []);
+      marques.get(f.marqueNom).push(f);
+    }
 
-  const submit = async () => {
-    if (!canSubmit || submitting) return;
-    setSubmitting(true); setSubmitError(null);
-    let ajoutReussi = false;
-    try {
-      const item = {
-        id: Date.now() + Math.random(),
-        product: produit.nom_reference, format: '', brand: '', qty, checked: false,
-        produit_id: produit.id,
-        variante_produit_id: varianteId === 'any' ? null : (variantesResolues.length === 1 ? variantesResolues[0].id : null),
-        marque_pref: segmentMarque === 'mdd' ? 'mdd' : 'nationale',
-      };
-      const ok = await onAdd(item);
-      if (ok === true || ok === 'duplicate') { ajoutReussi = true; setJustAdded(true); }
-      else setSubmitError("Ajout impossible, réessaie.");
-    } catch (error) {
-      console.error("Erreur ajout depuis le Catalogue :", error);
-      setSubmitError("Ajout impossible, réessaie.");
-    } finally { setSubmitting(false); }
-    if (ajoutReussi) { setQty(1); setTimeout(() => setJustAdded(false), 2500); }
+    const ordreSorte = (a, b) => (a === 'Autres') - (b === 'Autres') || a.localeCompare(b, 'fr');
+    return [...sortes.entries()].sort((x, y) => ordreSorte(x[0], y[0])).map(([sorte, marques]) => ({
+      sorte,
+      marques: [...marques.entries()].map(([nom, fmts]) => {
+        const estGroupeMdd = nom === 'Marques distributeurs';
+        let formats;
+        if (estGroupeMdd) {
+          // Fusion par format identique : plusieurs MDD au même (quantité+unité)
+          // deviennent UNE ligne dont la fourchette couvre toutes ces MDD.
+          const parSig = new Map();
+          for (const f of fmts) {
+            const e = parSig.get(f.sig);
+            if (!e) { parSig.set(f.sig, { ...f, mddMerged: true }); }
+            else {
+              e.kgMin = Math.min(e.kgMin, f.kgMin);
+              e.kgMax = Math.max(e.kgMax, f.kgMax);
+              e.paqMin = Math.min(e.paqMin, f.paqMin);
+              e.paqMax = Math.max(e.paqMax, f.paqMax);
+              if (f.dateAncienne != null && (e.dateAncienne == null || f.dateAncienne < e.dateAncienne)) e.dateAncienne = f.dateAncienne;
+            }
+          }
+          formats = [...parSig.values()].sort((a, b) => a.kgMin - b.kgMin);
+        } else {
+          formats = fmts.slice().sort((a, b) => a.kgMin - b.kgMin);
+        }
+        return {
+          nom, formats,
+          best:  formats[0]?.kgMin ?? Infinity,           // meilleur €/kg de la marque (ou du groupe MDD)
+          kgMin: Math.min(...formats.map(f => f.kgMin)),
+          kgMax: Math.max(...formats.map(f => f.kgMax)),
+          uniteRef: formats[0]?.uniteRef || 'kg',
+        };
+      }).sort((a, b) => a.best - b.best),   // classée par prix, jamais fixée en tête
+    }));
+  }, [prix, sousFamilleParProduit]);
+
+  const fmtEur = (n) => Number(n).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // Fourchette : une seule valeur si min == max (au centime), sinon "lo – hi".
+  const rng = (lo, hi) => (Math.round(lo * 100) === Math.round(hi * 100)) ? fmtEur(lo) : `${fmtEur(lo)} – ${fmtEur(hi)}`;
+  const labelUnite = (u) => (u === 'L' ? '€/L' : '€/kg');
+  const fraicheur = (dateMs) => {
+    if (dateMs == null) return null;
+    const jours = Math.max(0, Math.floor((maintenant - dateMs) / 86400000));
+    if (jours <= 14) {
+      const t = jours === 0 ? "Relevé aujourd'hui" : jours === 1 ? 'Relevé hier' : `Relevé il y a ${jours} j`;
+      return { texte: t, type: 'fresh' };
+    }
+    return { texte: `Relevé il y a ${Math.round(jours / 7)} sem.`, type: 'stale' };
   };
 
-  const pillStyle = (actif) => ({ padding:"7px 14px", background: actif?C.green:C.grayLight, border:`2px solid ${actif?C.green:"transparent"}`, borderRadius:99, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:actif?C.white:C.textLight, cursor:"pointer" });
-  const selectStyle = { width:"100%", padding:"10px 12px", borderRadius:10, border:`2px solid ${C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:14, color:C.text, outline:"none", boxSizing:"border-box" };
+  // Compteur relié à la liste de courses (colonne quantite). Quantité lue depuis
+  // `items`. 0->1 = ajout, +/- = update, retour à 0 = suppression de l'article.
+  const itemDeFormat = (f) => items.find(i => i.produit_id === f.produitId && i.variante_produit_id === f.varianteId);
+  const changerQty = async (f, delta) => {
+    const it = itemDeFormat(f);
+    const cur = it?.qty ?? 0;
+    const next = cur + delta;
+    if (next <= 0) { if (it) await onRemove(it.id); return; }
+    if (!it) {
+      await onAdd({ product: f.nomProduit, format: '', brand: '', qty: 1, checked: false,
+        produit_id: f.produitId, variante_produit_id: f.varianteId, marque_pref: f.estMdd ? 'mdd' : 'nationale' });
+      return;
+    }
+    await onUpdate({ ...it, qty: next });
+  };
 
-  return (
-    <div style={{ background:C.white, border:`1px solid ${C.grayLight}`, borderRadius:12, padding:"12px 14px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
-      <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.text, marginBottom:10 }}>{produit.nom_reference}</div>
+  // Palette de la maquette (distincte de C : cet écran suit la maquette).
+  const M = {
+    card:'#FFFFFF', ink:'#16191D', ink2:'#5C646E', ink3:'#98A0A9', line:'#E6E9EC',
+    green:'#12854B', greenSoft:'#E7F5ED', amber:'#F5C13B', amberDeep:'#B8860B',
+    amberSoft:'#FFF4E0', brand:'#9B1C1C', brandSoft:'#FBEDED', thumb:'#F6F2E9', chip:'#F1F3F5',
+  };
+  const F = "'Nunito',sans-serif";
+  const badgeStyle = (kind) => {
+    const base = { fontFamily:F, fontSize:10.5, fontWeight:700, padding:'3px 7px', borderRadius:6, letterSpacing:'.2px' };
+    if (kind === 'best')  return { ...base, background:M.green, color:'#fff' };
+    if (kind === 'fresh') return { ...base, background:M.greenSoft, color:M.green };
+    if (kind === 'stale') return { ...base, background:M.amberSoft, color:M.amberDeep };
+    if (kind === 'gap')   return { ...base, background:M.brandSoft, color:M.brand };
+    return { ...base, background:M.chip, color:M.ink2 }; // gris (N× le meilleur prix)
+  };
+  // ══════════════════════════════════════════════════════════════════════════
+  // BLOCS DE PRÉSENTATION (standard visuel de l'app). Volontairement isolés et
+  // nommés pour être EXTRAITS en composants réutilisables lors d'un chantier
+  // ultérieur (Ma liste, recherche, historique, comparateur…). Ne rien
+  // généraliser ici : ce sont des fonctions locales de rendu, appelées par le
+  // return ci-dessous.
+  // ══════════════════════════════════════════════════════════════════════════
 
-      {variantesLoading && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.gray, marginBottom:10 }}>Chargement des formats…</div>}
-      {varianteError && !variantesLoading && (
-        <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", marginBottom:10 }}>
-          <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.red }}>⚠️ {varianteError}</span>
-          <button onClick={loadVariantes} style={{ background:"none", border:"none", color:C.blue, fontWeight:700, cursor:"pointer", fontSize:13, textDecoration:"underline" }}>Réessayer</button>
-        </div>
-      )}
-      {!variantesLoading && !varianteError && variantes.length === 0 && (
-        <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.gray, marginBottom:10 }}>Format indifférent (aucun autre format référencé).</div>
-      )}
-
-      {!variantesLoading && !varianteError && variantes.length > 0 && (
-        <>
-          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Préférence marque</div>
-          <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom: basculeAutoMdd ? 6 : 12 }}>
-            <button onClick={()=>choisirSegment('nationale')} style={pillStyle(segmentMarque==='nationale')}>Marques nationales</button>
-            <button onClick={()=>choisirSegment('mdd')} style={pillStyle(segmentMarque==='mdd')}>Marque Distributeur</button>
-          </div>
-          {basculeAutoMdd && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.orange, fontWeight:700, marginBottom:12 }}>Ce produit n'existe qu'en Marque Distributeur.</div>}
-
-          {segmentMarque === 'nationale' && marquesListe.length > 0 && (
-            <div style={{ marginBottom:12 }}>
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Marque</div>
-              <select value={marqueSelectionnee} onChange={e=>setMarqueSelectionnee(e.target.value)} style={selectStyle}>
-                <option value="all">Toutes les marques</option>
-                {marquesListe.map(m => <option key={m.id} value={m.id}>{m.nom}</option>)}
-              </select>
-            </div>
-          )}
-
-          <div style={{ marginBottom:12 }}>
-            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Format</div>
-            <select value={formatSelectionne} onChange={e=>setFormatSelectionne(e.target.value)} style={selectStyle}>
-              <option value="all">Tous les formats</option>
-              {formatsListe.map(label => <option key={label} value={label}>{label}</option>)}
-            </select>
-          </div>
-        </>
-      )}
-
-      <div style={{ display:"flex", alignItems:"center", background:C.grayLight, borderRadius:12, padding:"8px 14px", marginBottom:10 }}>
-        <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, flex:1 }}>Quantité</span>
-        <div style={{ display:"flex", alignItems:"center", gap:14 }}>
-          <button onClick={()=>setQty(q=>Math.max(1,q-1))} style={{ width:30, height:30, borderRadius:99, border:"2px solid #CC0000", background:C.white, cursor:"pointer", color:"#CC0000", fontWeight:900, fontSize:18, display:"flex", alignItems:"center", justifyContent:"center" }}>−</button>
-          <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:18, color:"#CC0000", minWidth:22, textAlign:"center" }}>{qty}</span>
-          <button onClick={()=>setQty(q=>q+1)} style={{ width:30, height:30, borderRadius:99, border:"none", background:"#CC0000", cursor:"pointer", color:C.white, fontSize:18, display:"flex", alignItems:"center", justifyContent:"center" }}>+</button>
-        </div>
+  // BLOC — COMPTEUR de quantité (bouton jaune ＋ / pilule verte − n ＋).
+  // MDD : désactivé tant que l'ajout du groupe n'est pas arbitré.
+  const blocCompteur = (f, q, mdd) => {
+    if (mdd) return (
+      <button disabled aria-label="Ajout du groupe MDD à définir" title="Ajout à définir"
+        style={{ width:44, height:44, borderRadius:"50%", border:"none", background:M.line, color:M.ink3, fontSize:22, fontWeight:700, cursor:"not-allowed", display:"grid", placeItems:"center", fontFamily:F, opacity:.7 }}>＋</button>
+    );
+    if (q === 0) return (
+      <button onClick={()=>changerQty(f, +1)} aria-label="Ajouter à ma liste"
+        style={{ width:44, height:44, borderRadius:"50%", border:"none", background:M.amber, color:"#4A3800", fontSize:22, fontWeight:700, cursor:"pointer", display:"grid", placeItems:"center", fontFamily:F }}>＋</button>
+    );
+    return (
+      <div style={{ display:"flex", alignItems:"center", background:M.green, borderRadius:99, padding:3 }}>
+        <button onClick={()=>changerQty(f, -1)} aria-label="Retirer un paquet" style={{ width:36, height:36, border:"none", background:"transparent", color:"#fff", fontSize:21, fontWeight:800, cursor:"pointer", borderRadius:"50%", display:"grid", placeItems:"center", fontFamily:F, lineHeight:1 }}>−</button>
+        <span style={{ minWidth:24, textAlign:"center", color:"#fff", fontWeight:800, fontSize:16, fontFamily:F }}>{q}</span>
+        <button onClick={()=>changerQty(f, +1)} aria-label="Ajouter un paquet" style={{ width:36, height:36, border:"none", background:"transparent", color:"#fff", fontSize:21, fontWeight:800, cursor:"pointer", borderRadius:"50%", display:"grid", placeItems:"center", fontFamily:F, lineHeight:1 }}>＋</button>
       </div>
+    );
+  };
 
-      {submitError && <div style={{ color:C.red, fontSize:13, fontFamily:"'Nunito',sans-serif", fontWeight:700, marginBottom:8 }}>⚠️ {submitError}</div>}
-      {justAdded && <div style={{ color:C.green, fontSize:13, fontFamily:"'Nunito',sans-serif", fontWeight:800, marginBottom:8 }}>✓ Ajouté à ta liste</div>}
-      {alreadyInList && !justAdded && <div style={{ color:C.green, fontSize:12, fontFamily:"'Nunito',sans-serif", fontWeight:700, marginBottom:8 }}>✓ Déjà dans ta liste</div>}
+  // BLOC — BADGES d'un format (Meilleur rapport / Gros écart / N× / fraîcheur).
+  const blocBadges = (estBest, gap, ratio, fr) => (
+    <div style={{ display:"flex", gap:6, marginTop:6, flexWrap:"wrap" }}>
+      {estBest && <span style={badgeStyle('best')}>Meilleur rapport</span>}
+      {gap && <span style={badgeStyle('gap')}>Gros écart selon magasin</span>}
+      {!estBest && ratio >= 2 && <span style={badgeStyle('gray')}>{ratio.toLocaleString('fr-FR', { minimumFractionDigits:1, maximumFractionDigits:1 })}× le meilleur prix</span>}
+      {fr && <span style={badgeStyle(fr.type)}>{fr.texte}</span>}
+    </div>
+  );
 
-      <button onClick={submit} disabled={!canSubmit} style={{ width:"100%", padding:"13px", border:"none", borderRadius:12, background:canSubmit?C.orange:C.grayLight, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:canSubmit?"#111111":C.gray, cursor:canSubmit?"pointer":"default", boxShadow:canSubmit?"0 6px 16px rgba(200,160,0,0.4)":"none" }}>
-        + Ajouter à ma liste
-      </button>
+  // BLOC — LIGNE DE FORMAT (vignette 42px + prix/fourchette + sous-ligne + badges + compteur).
+  const blocLigneFormat = (f, idx, mq) => {
+    const mdd = !!f.mddMerged;                             // groupe « Marques distributeurs »
+    const q = mdd ? 0 : (itemDeFormat(f)?.qty ?? 0);
+    const picked = !mdd && q > 0;
+    const estBest = idx === 0 && mq.formats.length >= 2;   // le moins cher du groupe (si comparable)
+    const gap = f.kgMax >= 1.4 * f.kgMin;
+    const ratio = mq.best > 0 ? f.kgMin / mq.best : 1;
+    const fr = fraicheur(f.dateAncienne);
+    return (
+      <div key={mdd ? f.sig : f.varianteId} style={{ display:"flex", alignItems:"center", gap:11, background: estBest ? M.greenSoft : M.card, border:`${picked?'1.5px':'1px'} solid ${(estBest||picked)?M.green:M.line}`, borderRadius:14, padding:"13px 12px 13px 14px" }}>
+        {/* Vignette 42px : carré vide arrondi, prêt pour une icône SVG (chantier suivant). Pas d'emoji. */}
+        <div style={{ width:42, height:42, flex:"0 0 auto", borderRadius:9, background:M.thumb }} />
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontFamily:F, fontWeight:800, fontSize:19, color:M.ink, letterSpacing:"-.3px" }}>
+            {rng(f.kgMin, f.kgMax)} <span style={{ fontSize:13, fontWeight:700, color:M.ink2 }}>{labelUnite(f.uniteRef)}</span>
+          </div>
+          <div style={{ fontFamily:F, fontSize:12.5, color:M.ink2, marginTop:2, lineHeight:1.35 }}>
+            {!mdd && `${f.nomProduit} · `}{f.label} · le paquet {rng(f.paqMin, f.paqMax)} €
+          </div>
+          {blocBadges(estBest, gap, ratio, fr)}
+        </div>
+        <div style={{ flex:"0 0 auto" }}>{blocCompteur(f, q, mdd)}</div>
+      </div>
+    );
+  };
+
+  // BLOC — LIGNE DE MARQUE repliable (nom + fourchette €/kg + chevron).
+  const blocLigneMarque = (mq, cle, ouvert) => (
+    <button onClick={()=>setOpenMarque(ouvert ? null : cle)}
+      style={{ display:"flex", alignItems:"center", justifyContent:"space-between", width:"100%", background:M.card, border:`${ouvert?'1.5px':'1px'} solid ${ouvert?M.brand:M.line}`, borderRadius:14, padding:"15px 16px", cursor:"pointer", textAlign:"left" }}>
+      <span style={{ fontFamily:F, fontWeight:800, fontSize:16, color:M.ink }}>{mq.nom}</span>
+      <span style={{ display:"flex", alignItems:"center", gap:8, fontFamily:F, fontWeight:700, fontSize:14, color:M.green }}>
+        {rng(mq.kgMin, mq.kgMax)} {labelUnite(mq.uniteRef)}
+        <span style={{ color:M.ink3, fontSize:12, transform: ouvert?"rotate(90deg)":"none", transition:"transform .15s" }}>›</span>
+      </span>
+    </button>
+  );
+
+  // ── Assemblage : intertitre de SORTE → lignes de marque → lignes de format ──
+  return (
+    <div style={{ paddingLeft:14, borderLeft:`2px solid ${M.line}`, marginLeft:6, display:"flex", flexDirection:"column", gap:14 }}>
+      <div style={{ fontFamily:F, fontSize:12.5, color:M.ink2, fontStyle:"italic", lineHeight:1.45 }}>Prix au kilo relevés en magasin par la communauté. Ils varient d'une enseigne à l'autre — vérifie en rayon.</div>
+
+      {loading && <div style={{ fontFamily:F, fontSize:13, color:M.ink3 }}>Chargement des prix…</div>}
+      {error && !loading && <div style={{ fontFamily:F, fontSize:13, color:M.brand, fontWeight:700 }}>⚠️ {error}</div>}
+      {!loading && !error && arbre.length === 0 && (
+        <div style={{ fontFamily:F, fontSize:13, color:M.ink3 }}>Pas encore de relevé de prix pour cette famille.</div>
+      )}
+
+      {!loading && !error && arbre.map(({ sorte, marques }) => (
+        <div key={sorte} style={{ display:"flex", flexDirection:"column", gap:8 }}>
+          <div style={{ fontFamily:F, fontWeight:800, fontSize:17, color:M.ink }}>
+            {sorte} <span style={{ fontSize:13, fontWeight:600, color:M.ink3 }}>· {marques.length} marque{marques.length>1?'s':''}</span>
+          </div>
+
+          {marques.map(mq => {
+            const cle = `${sorte}||${mq.nom}`;
+            const ouvert = openMarque === cle;
+            return (
+              <div key={cle} style={{ display:"flex", flexDirection:"column", gap:7 }}>
+                {blocLigneMarque(mq, cle, ouvert)}
+                {ouvert && (
+                  <div style={{ display:"flex", flexDirection:"column", gap:7, paddingLeft:12 }}>
+                    {mq.formats.map((f, idx) => blocLigneFormat(f, idx, mq))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 }
 
-function CatalogTab({ items, onAdd, setTab }) {
+function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab }) {
   const [categories,      setCategories]      = useState([]);
   const [catLoading,      setCatLoading]      = useState(true);
   const [catError,        setCatError]        = useState(null);
@@ -2954,24 +3066,13 @@ function CatalogTab({ items, onAdd, setTab }) {
   const [searchError,     setSearchError]     = useState(null);
   // Chantier « famille » — familles dépliées dans les résultats de recherche.
   const [openFamilles,    setOpenFamilles]    = useState(new Set());
-  // Chantier « sous-famille » — filtre local à chaque famille (famille -> valeur
-  // sélectionnée ; absent = '__tout__' par défaut).
-  const [filtresSousFamille, setFiltresSousFamille] = useState({});
   const searchSeq = useRef(0);
 
-  const toggleFamille = (fam) => {
-    setOpenFamilles(prev => {
-      const next = new Set(prev);
-      next.has(fam) ? next.delete(fam) : next.add(fam);
-      return next;
-    });
-    // Réinitialise le filtre de CETTE famille (no-op à l'ouverture, reset au repli).
-    setFiltresSousFamille(prev => { const c = { ...prev }; delete c[fam]; return c; });
-  };
-  const setFiltreFamille = (fam, val) => setFiltresSousFamille(prev => ({ ...prev, [fam]: val }));
-
-  // Une nouvelle recherche réinitialise tous les filtres sous-famille à « Tout ».
-  useEffect(() => { setFiltresSousFamille({}); }, [searchResults]);
+  const toggleFamille = (fam) => setOpenFamilles(prev => {
+    const next = new Set(prev);
+    next.has(fam) ? next.delete(fam) : next.add(fam);
+    return next;
+  });
 
   // Chantier « famille » — regroupe les résultats de recherche : les fiches qui
   // partagent une même valeur de `famille` non nulle sont rassemblées sous une
@@ -3181,25 +3282,10 @@ function CatalogTab({ items, onAdd, setTab }) {
                 </button>
               );
             }
-            // Entrée « famille » — une seule ligne accordéon (ex. « Chips (25) »)
-            // qui se déplie sur ses fiches membres.
+            // Entrée « famille » — une ligne accordéon (nom seul) qui déplie la
+            // liste scrollable (sortes -> marques -> formats) de FamilleDepliee.
             const ouvert = openFamilles.has(entry.famille);
             const presFam = getCategoryPresentation(entry.membres[0]?.sous_categories?.categories || {});
-            // Sous-familles : valeurs réelles distinctes (générique), triées A→Z
-            // avec « Autres » toujours en dernier. Rangée affichée seulement s'il
-            // y a au moins 2 valeurs (sinon inutile).
-            // Types = valeurs réelles de sous_famille (générique), triées A→Z,
-            // « Autres » toujours en dernier. Pas de bouton « Tout ». Le 1er type
-            // est sélectionné par défaut ; la rangée est masquée s'il y a 0 ou 1
-            // type (inutile). Les fiches sans sous_famille (aucun type) sont
-            // rendues directement en cascade.
-            const typesSF = [...new Set(entry.membres.map(m => (m.sous_famille || '').trim()).filter(Boolean))]
-              .sort((a, b) => (a === 'Autres') - (b === 'Autres') || a.localeCompare(b, 'fr'));
-            const afficherTypes = typesSF.length >= 2;
-            const selType = typesSF.length > 0 ? (filtresSousFamille[entry.famille] || typesSF[0]) : null;
-            const fichesAffichees = typesSF.length === 0
-              ? entry.membres
-              : entry.membres.filter(m => (m.sous_famille || '').trim() === selType);
             return (
               <div key={`fam-${entry.famille}`} style={{ display:"flex", flexDirection:"column", gap:6 }}>
                 <button onClick={()=>toggleFamille(entry.famille)}
@@ -3207,32 +3293,11 @@ function CatalogTab({ items, onAdd, setTab }) {
                   <span style={{ fontSize:22 }}>{presFam.emoji}</span>
                   <div style={{ flex:1 }}>
                     <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.text }}>{entry.famille}</div>
-                    <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:presFam.color, fontWeight:700, marginTop:2 }}>{ouvert ? "Masquer les sortes" : "Voir les sortes"}</div>
+                    <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:presFam.color, fontWeight:700, marginTop:2 }}>{ouvert ? "Masquer les variétés" : "Voir les variétés"}</div>
                   </div>
                   <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:16, color:C.gray, transform: ouvert?"rotate(90deg)":"none", transition:"transform 0.15s" }}>›</span>
                 </button>
-                {ouvert && (
-                  <div style={{ display:"flex", flexDirection:"column", gap:8, paddingLeft:14, borderLeft:`2px solid ${C.grayLight}`, marginLeft:6 }}>
-                    {/* Rangée des TYPES (sous_famille) — sans « Tout », 1er sélectionné par défaut */}
-                    {afficherTypes && (
-                      <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:2 }}>
-                        {typesSF.map(v => {
-                          const actif = selType === v;
-                          return (
-                            <button key={v} onClick={()=>setFiltreFamille(entry.famille, v)}
-                              style={{ padding:"5px 12px", borderRadius:99, border:`1.5px solid ${actif?C.blue:C.grayLight}`, background:actif?C.blue:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, color:actif?C.white:C.textLight, cursor:"pointer" }}>
-                              {v}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                    {/* Cascade : un bloc Marque/Format (menus déroulants) par fiche du type */}
-                    {fichesAffichees.map(r => (
-                      <FicheInline key={r.id} produit={r} onAdd={addItem} items={items} />
-                    ))}
-                  </div>
-                )}
+                {ouvert && <FamilleDepliee membres={entry.membres} items={items} onAdd={addItem} onUpdate={onUpdate} onRemove={onRemove} />}
               </div>
             );
           })}
@@ -3244,19 +3309,20 @@ function CatalogTab({ items, onAdd, setTab }) {
         </div>
       )}
 
-      {/* Bouton voir liste si articles en cours */}
+      {/* Barre du bas (maquette) — bloc résumé sobre, PAS un bouton d'action :
+          « Ma liste » + N articles + chevron. Au clic : ouvre l'onglet Ma liste.
+          Pas de fourchette totale, pas de jauge, pas d'écart en euros. */}
       {totalInList>0 && (
         <button onClick={()=>setTab("list")} style={{
-          width:"100%", padding:"15px", marginBottom:20,
-          background:"linear-gradient(135deg,#CC0000,#FF1A1A)",
-          border:"none", borderRadius:14,
-          fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15,
-          color:C.white, cursor:"pointer",
-          display:"flex", alignItems:"center", justifyContent:"center", gap:8,
-          boxShadow:"0 6px 16px rgba(180,0,0,0.4)",
-          animation:"pulse 2s infinite",
+          width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between",
+          background:"#FFFFFF", border:"1px solid #E6E9EC", borderRadius:14,
+          padding:"12px 14px", marginBottom:20, cursor:"pointer", textAlign:"left",
         }}>
-          🛒 Voir ma liste ({totalInList} article{totalInList>1?"s":""})
+          <span style={{ display:"flex", flexDirection:"column", gap:1 }}>
+            <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:15, color:"#16191D" }}>Ma liste</span>
+            <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:600, fontSize:12.5, color:"#5C646E" }}>{totalInList} article{totalInList>1?"s":""}</span>
+          </span>
+          <span style={{ color:"#98A0A9", fontSize:19, fontWeight:700 }}>›</span>
         </button>
       )}
 
@@ -7914,7 +7980,7 @@ export default function App() {
           <TabErrorBoundary key={tab}>
           {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} onResumeScan={handleResumeScan} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)}/>}
           {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} onSetMarquePref={setMarquePrefItem}/>}
-          {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} setTab={setTab}/>}
+          {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
           {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} estFrancois={estFrancois} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{

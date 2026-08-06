@@ -93,6 +93,30 @@ export function calculerPrixReference({ prix_total, quantite_nette, unite_quanti
   return { prix_reference: Number(prix_total) / quantite_totale_canonique, famille: resolution.famille, unite };
 }
 
+// Chantier « Catalogue épuré » — €/kg ou €/L ROBUSTE à partir de la seule unité
+// stockée (unite_quantite), sans exiger type_unite. Convertit g/kg/mg et
+// ml/cl/dl/l vers l'unité canonique (kg ou L) : une variante stockée en grammes
+// donne donc un €/kg CORRECT (bug du classement ~1000× trop bas fermé). Retourne
+// null (jamais un nombre faux) si l'unité n'est pas une unité de poids/volume
+// connue (ex. 'pièce', 'unite_inconnue') ou si une donnée est invalide.
+export function calculerPrixReferenceParUnite({ prix_total, quantite_nette, unite_quantite, nombre_unites }) {
+  if (!estNumeriquePositif(prix_total)) return null;
+  if (!estNumeriquePositif(quantite_nette)) return null;
+
+  const nuBrut = Number(nombre_unites);
+  const nombreUnites = Number.isFinite(nuBrut) && nuBrut > 0 ? nuBrut : 1;
+
+  const resolution = resoudreFamilleEtCoefficient(unite_quantite);
+  if (resolution.exclusion) return null;
+  if (resolution.famille === FAMILLE_PIECE) return null; // pas de €/kg pour une pièce
+
+  const totalCanonique = Number(quantite_nette) * nombreUnites * resolution.coefficient;
+  if (!(totalCanonique > 0)) return null;
+
+  const unite = resolution.famille === FAMILLE_POIDS ? 'kg' : 'L';
+  return { valeur: Number(prix_total) / totalCanonique, unite };
+}
+
 // #58.2.A — classe des entrées (une par magasin) selon leur prix unitaire
 // (€/kg ou €/L), du moins cher au plus cher. Pure, ne mute jamais le tableau
 // d'entrée : chaque entrée retournée est une copie. Les entrées sans
