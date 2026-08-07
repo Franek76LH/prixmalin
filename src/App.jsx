@@ -4,6 +4,7 @@ import { STORES, STALE_DAYS, JOURS_MOYENNE } from "./constants";
 import { supabase } from "./lib/supabase";
 import { mapperLigneListeCourses, chargerVariantes, getCategoryPresentation, formatFormatStructure, calculerPrixUnitaire } from "./lib/catalogueCore";
 import { calculerPrixReferenceParUnite } from "./lib/unitesCore";
+import { urlPhotoVariante, offLargeSource, offFullUrl, cloudinaryAgrandi } from "./lib/photosProduits";
 import { nomComposeVariante, formatEtiquetteVariante } from "./lib/nomProduit";
 import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
 import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
@@ -45,6 +46,49 @@ const C = {
   text:       "#111111",   textLight:   "#555555",
   green:      "#00B341",   red:         "#CC0000",   yellow: "#FFD000",
 };
+
+// Chantier 83 « Photos produits » (shadow, additif) — vignette/photo d'un produit
+// via son code-barres (Open Food Facts + Cloudinary). Additif : le `fallback`
+// (emoji de catégorie / carré placeholder existant) reste affiché PENDANT le
+// chargement ET si aucune photo n'est trouvée. Chargement PARESSEUX : l'appel
+// réseau OFF n'est déclenché que lorsque l'élément entre dans le viewport
+// (IntersectionObserver). Ne plante jamais (toute erreur -> on garde le fallback).
+function PhotoProduit({ varianteId, taille = 'thumb', fallback = null, radius = 9 }) {
+  const [url, setUrl] = useState(null);
+  // Si IntersectionObserver n'existe pas (vieux moteur), on considère visible
+  // d'emblée (valeur initiale, pas de setState synchrone dans l'effet).
+  const [visible, setVisible] = useState(() => typeof IntersectionObserver === 'undefined');
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || visible) return;
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some(e => e.isIntersecting)) { setVisible(true); io.disconnect(); }
+    }, { rootMargin: '150px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [visible]);
+
+  useEffect(() => {
+    if (!visible || !varianteId) return;
+    let cancelled = false;
+    urlPhotoVariante(varianteId, taille)
+      .then(u => { if (!cancelled) setUrl(u); })
+      .catch(() => { /* silencieux : on garde le fallback */ });
+    return () => { cancelled = true; };
+  }, [visible, varianteId, taille]);
+
+  return (
+    <div ref={ref} style={{ position:"relative", width:"100%", height:"100%", borderRadius:radius, overflow:"hidden" }}>
+      {fallback}
+      {url && (
+        <img src={url} loading="lazy" alt="" onError={()=>setUrl(null)}
+          style={{ position:"absolute", inset:0, width:"100%", height:"100%", objectFit:"contain", background:"#fff" }} />
+      )}
+    </div>
+  );
+}
 
 
 function isStale(d){ return d && (Date.now()-new Date(d))/86400000 > STALE_DAYS; }
@@ -2486,6 +2530,10 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
   // marque distributeur -> bascule auto en 'mdd' (note affichée).
   const [segmentMarque, setSegmentMarque] = useState('nationale');
   const [basculeAutoMdd, setBasculeAutoMdd] = useState(false);
+  // Chantier 83 (ajustement) — agrandi/lightbox de la photo de fiche.
+  const [offLarge,      setOffLarge]      = useState(null);   // URL OFF brute (400) ou null
+  const [agrandi,       setAgrandi]       = useState(false);  // overlay ouvert ?
+  const [agrandiReplie, setAgrandiReplie] = useState(false);  // .full a échoué -> repli 400
 
   const loadVariantes = async () => {
     setVarianteError(null);
@@ -2526,6 +2574,19 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
     loadVariantes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [produit.id]);
+
+  // Chantier 83 (ajustement) — résout l'URL OFF brute (pour l'agrandi) quand une
+  // variante est connue. Sert à savoir si la photo est cliquable et à construire
+  // la pleine résolution. Ne plante jamais (erreur -> pas d'agrandi).
+  const varianteRefId = variantes[0]?.id;
+  useEffect(() => {
+    let cancelled = false;
+    // offLargeSource(undefined) résout null : pas de setState synchrone ici.
+    offLargeSource(varianteRefId)
+      .then(u => { if (!cancelled) setOffLarge(u); })
+      .catch(() => { if (!cancelled) setOffLarge(null); });
+    return () => { cancelled = true; };
+  }, [varianteRefId]);
 
   // Variantes retenues par le segment courant. Nationale = est_mdd !== true
   // (inclut les sans-marque) ; MDD = est_mdd === true.
@@ -2640,6 +2701,22 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
 
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", zIndex:300, animation:"fadeIn 0.2s ease" }} onClick={onClose}>
+
+      {/* Chantier 83 — lightbox : photo agrandie pleine résolution (OFF .full via
+          Cloudinary c_limit w_1000), repli sur le 400 si .full échoue. Fermeture
+          en tapant hors image ou sur ×. Aucun dialog natif bloquant. */}
+      {agrandi && offLarge && (
+        <div onClick={(e)=>{ e.stopPropagation(); setAgrandi(false); }}
+          style={{ position:"fixed", inset:0, zIndex:400, background:"rgba(0,0,0,0.85)", display:"flex", alignItems:"center", justifyContent:"center", padding:20, animation:"fadeIn 0.15s ease" }}>
+          <button onClick={(e)=>{ e.stopPropagation(); setAgrandi(false); }} aria-label="Fermer"
+            style={{ position:"absolute", top:16, right:16, width:40, height:40, borderRadius:99, border:"none", background:"rgba(255,255,255,0.2)", color:"#fff", fontSize:20, cursor:"pointer" }}>✕</button>
+          <img src={agrandiReplie ? offLarge : cloudinaryAgrandi(offFullUrl(offLarge))}
+            onClick={(e)=>e.stopPropagation()}
+            onError={()=>{ if (!agrandiReplie) setAgrandiReplie(true); }}
+            alt="" style={{ maxWidth:"90vw", maxHeight:"90vh", objectFit:"contain", borderRadius:8 }} />
+        </div>
+      )}
+
       <div onClick={e=>e.stopPropagation()} style={{ background:C.white, borderRadius:"20px 20px 0 0", width:"100%", maxHeight:"90vh", display:"flex", flexDirection:"column", animation:"slideUp 0.3s ease", overflow:"hidden" }}>
 
         {/* Header produit */}
@@ -2657,6 +2734,20 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
         </div>
 
         <div style={{ overflowY:"auto", flex:1, padding:"16px 16px 40px" }}>
+
+          {/* Chantier 83 — photo produit en grand (OFF+Cloudinary) ; repli sur
+              l'emoji de catégorie pendant le chargement et si aucune photo.
+              Cliquable pour l'agrandir SEULEMENT si une photo OFF existe (offLarge). */}
+          {variantes[0]?.id && (
+            <div onClick={offLarge ? () => { setAgrandiReplie(false); setAgrandi(true); } : undefined}
+              style={{ position:"relative", height:200, marginBottom:14, borderRadius:14, overflow:"hidden", background:"#F6F2E9", cursor: offLarge ? "pointer" : "default", WebkitTapHighlightColor:"transparent" }}>
+              <PhotoProduit varianteId={variantes[0].id} taille="large" radius={14}
+                fallback={<div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", fontSize:64 }}>{categoryPresentation.emoji}</div>} />
+              {offLarge && (
+                <div style={{ position:"absolute", right:8, bottom:8, width:28, height:28, borderRadius:99, background:"rgba(0,0,0,0.45)", color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, pointerEvents:"none" }}>⤢</div>
+              )}
+            </div>
+          )}
 
           {alreadyInList && !submitting && (
             <div style={{ background:"#F0FFF5", border:`1.5px solid ${C.green}`, borderRadius:12, padding:"10px 12px", marginBottom:14, fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:700, color:C.green }}>
@@ -2978,8 +3069,12 @@ function FamilleDepliee({ membres, items, onAdd, onUpdate, onRemove }) {
     const fr = fraicheur(f.dateAncienne);
     return (
       <div key={mdd ? f.sig : f.varianteId} style={{ display:"flex", alignItems:"center", gap:11, background: estBest ? M.greenSoft : M.card, border:`${picked?'1.5px':'1px'} solid ${(estBest||picked)?M.green:M.line}`, borderRadius:14, padding:"13px 12px 13px 14px" }}>
-        {/* Vignette 42px : carré vide arrondi, prêt pour une icône SVG (chantier suivant). Pas d'emoji. */}
-        <div style={{ width:42, height:42, flex:"0 0 auto", borderRadius:9, background:M.thumb }} />
+        {/* Vignette 42px : photo produit (OFF+Cloudinary) si dispo, sinon le carré
+            placeholder. Pas de photo pour le groupe MDD (ne pas trahir la marque). */}
+        <div style={{ width:42, height:42, flex:"0 0 auto" }}>
+          <PhotoProduit varianteId={mdd ? null : f.varianteId} taille="thumb" radius={9}
+            fallback={<div style={{ width:"100%", height:"100%", borderRadius:9, background:M.thumb }} />} />
+        </div>
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ fontFamily:F, fontWeight:800, fontSize:19, color:M.ink, letterSpacing:"-.3px" }}>
             {rng(f.kgMin, f.kgMax)} <span style={{ fontSize:13, fontWeight:700, color:M.ink2 }}>{labelUnite(f.uniteRef)}</span>
@@ -3835,6 +3930,11 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
       <button onClick={()=>toggleCheck(item.id)} style={{ width:26, height:26, borderRadius:6, border:`2px solid ${done?C.green:C.blue}`, background:done?C.green:C.white, cursor:"pointer", flexShrink:0, color:C.white, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13 }}>
         {done?"✓":""}
       </button>
+      {/* Chantier 83 — petite vignette photo (OFF+Cloudinary) ; carré neutre en repli. */}
+      <div style={{ width:38, height:38, flexShrink:0 }}>
+        <PhotoProduit varianteId={item.variante_produit_id} taille="thumb" radius={8}
+          fallback={<div style={{ width:"100%", height:"100%", borderRadius:8, background:C.grayLight }} />} />
+      </div>
       <div style={{ flex:1, minWidth:0 }}>
         <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, textDecoration:'none' }}>
           {item.brand?`${item.brand} · `:""}{item.product}
