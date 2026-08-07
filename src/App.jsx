@@ -53,8 +53,9 @@ const C = {
 // chargement ET si aucune photo n'est trouvée. Chargement PARESSEUX : l'appel
 // réseau OFF n'est déclenché que lorsque l'élément entre dans le viewport
 // (IntersectionObserver). Ne plante jamais (toute erreur -> on garde le fallback).
-function PhotoProduit({ varianteId, taille = 'thumb', fallback = null, radius = 9 }) {
+function PhotoProduit({ varianteId, taille = 'thumb', fallback = null, radius = 9, onAgrandir = null }) {
   const [url, setUrl] = useState(null);
+  const [offLarge, setOffLarge] = useState(null);   // URL OFF brute (pour l'agrandi)
   // Si IntersectionObserver n'existe pas (vieux moteur), on considère visible
   // d'emblée (valeur initiale, pas de setState synchrone dans l'effet).
   const [visible, setVisible] = useState(() => typeof IntersectionObserver === 'undefined');
@@ -76,16 +77,46 @@ function PhotoProduit({ varianteId, taille = 'thumb', fallback = null, radius = 
     urlPhotoVariante(varianteId, taille)
       .then(u => { if (!cancelled) setUrl(u); })
       .catch(() => { /* silencieux : on garde le fallback */ });
+    // Chantier 85 — résout aussi l'URL OFF brute quand l'agrandi est possible
+    // (caches partagés : quasi gratuit). Sert à rendre la vignette cliquable.
+    if (onAgrandir) {
+      offLargeSource(varianteId)
+        .then(o => { if (!cancelled) setOffLarge(o); })
+        .catch(() => {});
+    }
     return () => { cancelled = true; };
-  }, [visible, varianteId, taille]);
+  }, [visible, varianteId, taille, onAgrandir]);
 
+  // Cliquable seulement s'il y a réellement une photo (jamais d'overlay vide).
+  const cliquable = !!(onAgrandir && url && offLarge);
   return (
-    <div ref={ref} style={{ position:"relative", width:"100%", height:"100%", borderRadius:radius, overflow:"hidden" }}>
+    <div ref={ref} onClick={cliquable ? () => onAgrandir(offLarge) : undefined}
+      style={{ position:"relative", width:"100%", height:"100%", borderRadius:radius, overflow:"hidden", cursor: cliquable ? "pointer" : undefined }}>
       {fallback}
       {url && (
         <img src={url} loading="lazy" alt="" onError={()=>setUrl(null)}
           style={{ position:"absolute", inset:0, width:"100%", height:"100%", objectFit:"contain", background:"#fff" }} />
       )}
+    </div>
+  );
+}
+
+// Chantier 85 — overlay/lightbox partagé (factorisé du chantier 83) : photo
+// pleine résolution OFF (.full via Cloudinary c_limit w_1000), repli sur le 400
+// si .full échoue ; fermeture hors image ou ×, aucun dialog natif. Réutilisé par
+// la fiche produit ET le comparateur (FamilleDepliee).
+function LightboxPhoto({ offLarge, onClose }) {
+  const [replie, setReplie] = useState(false);
+  if (!offLarge) return null;
+  return (
+    <div onClick={(e)=>{ e.stopPropagation(); onClose(); }}
+      style={{ position:"fixed", inset:0, zIndex:400, background:"rgba(0,0,0,0.85)", display:"flex", alignItems:"center", justifyContent:"center", padding:20, animation:"fadeIn 0.15s ease" }}>
+      <button onClick={(e)=>{ e.stopPropagation(); onClose(); }} aria-label="Fermer"
+        style={{ position:"absolute", top:16, right:16, width:40, height:40, borderRadius:99, border:"none", background:"rgba(255,255,255,0.2)", color:"#fff", fontSize:20, cursor:"pointer" }}>✕</button>
+      <img src={replie ? offLarge : cloudinaryAgrandi(offFullUrl(offLarge))}
+        onClick={(e)=>e.stopPropagation()}
+        onError={()=>{ if (!replie) setReplie(true); }}
+        alt="" style={{ maxWidth:"90vw", maxHeight:"90vh", objectFit:"contain", borderRadius:8 }} />
     </div>
   );
 }
@@ -2532,8 +2563,7 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
   const [basculeAutoMdd, setBasculeAutoMdd] = useState(false);
   // Chantier 83 (ajustement) — agrandi/lightbox de la photo de fiche.
   const [offLarge,      setOffLarge]      = useState(null);   // URL OFF brute (400) ou null
-  const [agrandi,       setAgrandi]       = useState(false);  // overlay ouvert ?
-  const [agrandiReplie, setAgrandiReplie] = useState(false);  // .full a échoué -> repli 400
+  const [agrandi,       setAgrandi]       = useState(false);  // overlay ouvert ? (repli géré dans LightboxPhoto)
 
   const loadVariantes = async () => {
     setVarianteError(null);
@@ -2705,17 +2735,7 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
       {/* Chantier 83 — lightbox : photo agrandie pleine résolution (OFF .full via
           Cloudinary c_limit w_1000), repli sur le 400 si .full échoue. Fermeture
           en tapant hors image ou sur ×. Aucun dialog natif bloquant. */}
-      {agrandi && offLarge && (
-        <div onClick={(e)=>{ e.stopPropagation(); setAgrandi(false); }}
-          style={{ position:"fixed", inset:0, zIndex:400, background:"rgba(0,0,0,0.85)", display:"flex", alignItems:"center", justifyContent:"center", padding:20, animation:"fadeIn 0.15s ease" }}>
-          <button onClick={(e)=>{ e.stopPropagation(); setAgrandi(false); }} aria-label="Fermer"
-            style={{ position:"absolute", top:16, right:16, width:40, height:40, borderRadius:99, border:"none", background:"rgba(255,255,255,0.2)", color:"#fff", fontSize:20, cursor:"pointer" }}>✕</button>
-          <img src={agrandiReplie ? offLarge : cloudinaryAgrandi(offFullUrl(offLarge))}
-            onClick={(e)=>e.stopPropagation()}
-            onError={()=>{ if (!agrandiReplie) setAgrandiReplie(true); }}
-            alt="" style={{ maxWidth:"90vw", maxHeight:"90vh", objectFit:"contain", borderRadius:8 }} />
-        </div>
-      )}
+      {agrandi && offLarge && <LightboxPhoto offLarge={offLarge} onClose={()=>setAgrandi(false)} />}
 
       <div onClick={e=>e.stopPropagation()} style={{ background:C.white, borderRadius:"20px 20px 0 0", width:"100%", maxHeight:"90vh", display:"flex", flexDirection:"column", animation:"slideUp 0.3s ease", overflow:"hidden" }}>
 
@@ -2739,7 +2759,7 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
               l'emoji de catégorie pendant le chargement et si aucune photo.
               Cliquable pour l'agrandir SEULEMENT si une photo OFF existe (offLarge). */}
           {variantes[0]?.id && (
-            <div onClick={offLarge ? () => { setAgrandiReplie(false); setAgrandi(true); } : undefined}
+            <div onClick={offLarge ? () => setAgrandi(true) : undefined}
               style={{ position:"relative", height:200, marginBottom:14, borderRadius:14, overflow:"hidden", background:"#F6F2E9", cursor: offLarge ? "pointer" : "default", WebkitTapHighlightColor:"transparent" }}>
               <PhotoProduit varianteId={variantes[0].id} taille="large" radius={14}
                 fallback={<div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", fontSize:64 }}>{categoryPresentation.emoji}</div>} />
@@ -2863,19 +2883,37 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
 // Le €/kg vient des relevés (prix_comparables) : min prix relevé par format,
 // converti au kilo/litre via calculerPrixReferenceParUnite (robuste aux unités).
 // Aucune valeur en dur ; une seule marque ouverte à la fois.
-function FamilleDepliee({ membres, items, onAdd, onUpdate, onRemove }) {
+// modeRayon (Chantier 84) : réutilise CE composant pour un RAYON entier (sous-
+// catégorie), pas seulement une famille de recherche. Différences UNIQUEMENT
+// quand modeRayon=true (la recherche reste strictement inchangée) : les fiches
+// SANS relevé restent visibles en repli, et une sous_famille nulle regroupe par
+// produit (pas un gros « Autres »). onOpenProduct ouvre la modale (fiches repli).
+function FamilleDepliee({ membres, items, onAdd, onUpdate, onRemove, modeRayon = false, onOpenProduct }) {
   const [prix,       setPrix]       = useState([]);
   const [loading,    setLoading]    = useState(true);
   const [error,      setError]      = useState(null);
   const [openMarque, setOpenMarque] = useState(null);   // clé "sorte||marque" (une seule ouverte)
   const [maintenant] = useState(() => Date.now());       // instant figé au montage (fraîcheur, pur au rendu)
+  const [lightbox,   setLightbox]   = useState(null);    // Chantier 85 — URL OFF de l'agrandi, ou null
 
   const produitIds = useMemo(() => membres.map(m => m.id), [membres]);
   const sousFamilleParProduit = useMemo(() => {
     const m = new Map();
-    membres.forEach(p => m.set(p.id, (p.sous_famille || '').trim() || 'Autres'));
+    membres.forEach(p => m.set(p.id, (p.sous_famille || '').trim()));   // brute (peut être vide)
     return m;
   }, [membres]);
+  const nomRefParProduit = useMemo(() => {
+    const m = new Map();
+    membres.forEach(p => m.set(p.id, p.nom_reference || 'Produit'));
+    return m;
+  }, [membres]);
+  // Clé de SORTE : sous_famille si présente ; sinon 'Autres' (recherche) OU le
+  // nom du produit en mode rayon (une entrée par fiche sur les rayons hétérogènes).
+  const sorteDe = useCallback((produitId) => {
+    const sf = sousFamilleParProduit.get(produitId);
+    if (sf) return sf;
+    return modeRayon ? (nomRefParProduit.get(produitId) || 'Autres') : 'Autres';
+  }, [sousFamilleParProduit, nomRefParProduit, modeRayon]);
 
   // Monté à neuf à chaque ouverture de famille (état initial loading=true) : pas
   // de setState synchrone ici, uniquement le chargement asynchrone.
@@ -2930,50 +2968,68 @@ function FamilleDepliee({ membres, items, onAdd, onUpdate, onRemove }) {
       }
     }
 
-    const sortes = new Map(); // sorte -> Map(marque -> [formats])
+    const sortesMarques = new Map(); // sorte -> Map(marque -> [formats])
+    const produitsAvecPrix = new Set();
     for (const f of parFormat.values()) {
-      const sorte = sousFamilleParProduit.get(f.produitId) || 'Autres';
-      if (!sortes.has(sorte)) sortes.set(sorte, new Map());
-      const marques = sortes.get(sorte);
+      produitsAvecPrix.add(f.produitId);
+      const sorte = sorteDe(f.produitId);
+      if (!sortesMarques.has(sorte)) sortesMarques.set(sorte, new Map());
+      const marques = sortesMarques.get(sorte);
       if (!marques.has(f.marqueNom)) marques.set(f.marqueNom, []);
       marques.get(f.marqueNom).push(f);
     }
 
-    const ordreSorte = (a, b) => (a === 'Autres') - (b === 'Autres') || a.localeCompare(b, 'fr');
-    return [...sortes.entries()].sort((x, y) => ordreSorte(x[0], y[0])).map(([sorte, marques]) => ({
-      sorte,
-      marques: [...marques.entries()].map(([nom, fmts]) => {
-        const estGroupeMdd = nom === 'Marques distributeurs';
-        let formats;
-        if (estGroupeMdd) {
-          // Fusion par format identique : plusieurs MDD au même (quantité+unité)
-          // deviennent UNE ligne dont la fourchette couvre toutes ces MDD.
-          const parSig = new Map();
-          for (const f of fmts) {
-            const e = parSig.get(f.sig);
-            if (!e) { parSig.set(f.sig, { ...f, mddMerged: true }); }
-            else {
-              e.kgMin = Math.min(e.kgMin, f.kgMin);
-              e.kgMax = Math.max(e.kgMax, f.kgMax);
-              e.paqMin = Math.min(e.paqMin, f.paqMin);
-              e.paqMax = Math.max(e.paqMax, f.paqMax);
-              if (f.dateAncienne != null && (e.dateAncienne == null || f.dateAncienne < e.dateAncienne)) e.dateAncienne = f.dateAncienne;
-            }
+    // Mode rayon : les fiches SANS relevé exploitable restent visibles en repli
+    // (« pas encore de prix »), groupées comme les autres. Jamais masquées.
+    const sansPrixParSorte = new Map();
+    if (modeRayon) {
+      for (const m of membres) {
+        if (produitsAvecPrix.has(m.id)) continue;
+        const sorte = sorteDe(m.id);
+        if (!sansPrixParSorte.has(sorte)) sansPrixParSorte.set(sorte, []);
+        sansPrixParSorte.get(sorte).push(m);
+      }
+    }
+
+    const buildMarques = (marques) => [...marques.entries()].map(([nom, fmts]) => {
+      const estGroupeMdd = nom === 'Marques distributeurs';
+      let formats;
+      if (estGroupeMdd) {
+        // Fusion par format identique : plusieurs MDD au même (quantité+unité)
+        // deviennent UNE ligne dont la fourchette couvre toutes ces MDD.
+        const parSig = new Map();
+        for (const f of fmts) {
+          const e = parSig.get(f.sig);
+          if (!e) { parSig.set(f.sig, { ...f, mddMerged: true }); }
+          else {
+            e.kgMin = Math.min(e.kgMin, f.kgMin);
+            e.kgMax = Math.max(e.kgMax, f.kgMax);
+            e.paqMin = Math.min(e.paqMin, f.paqMin);
+            e.paqMax = Math.max(e.paqMax, f.paqMax);
+            if (f.dateAncienne != null && (e.dateAncienne == null || f.dateAncienne < e.dateAncienne)) e.dateAncienne = f.dateAncienne;
           }
-          formats = [...parSig.values()].sort((a, b) => a.kgMin - b.kgMin);
-        } else {
-          formats = fmts.slice().sort((a, b) => a.kgMin - b.kgMin);
         }
-        return {
-          nom, formats,
-          best:  formats[0]?.kgMin ?? Infinity,           // meilleur €/kg de la marque (ou du groupe MDD)
-          kgMin: Math.min(...formats.map(f => f.kgMin)),
-          kgMax: Math.max(...formats.map(f => f.kgMax)),
-          uniteRef: formats[0]?.uniteRef || 'kg',
-        };
-      }).sort((a, b) => a.best - b.best),   // classée par prix, jamais fixée en tête
+        formats = [...parSig.values()].sort((a, b) => a.kgMin - b.kgMin);
+      } else {
+        formats = fmts.slice().sort((a, b) => a.kgMin - b.kgMin);
+      }
+      return {
+        nom, formats,
+        best:  formats[0]?.kgMin ?? Infinity,           // meilleur €/kg de la marque (ou du groupe MDD)
+        kgMin: Math.min(...formats.map(f => f.kgMin)),
+        kgMax: Math.max(...formats.map(f => f.kgMax)),
+        uniteRef: formats[0]?.uniteRef || 'kg',
+      };
+    }).sort((a, b) => a.best - b.best);   // classée par prix, jamais fixée en tête
+
+    const ordreSorte = (a, b) => (a === 'Autres') - (b === 'Autres') || a.localeCompare(b, 'fr');
+    const toutesSortes = new Set([...sortesMarques.keys(), ...sansPrixParSorte.keys()]);
+    return [...toutesSortes].sort(ordreSorte).map(sorte => ({
+      sorte,
+      marques: buildMarques(sortesMarques.get(sorte) || new Map()),
+      sansPrix: sansPrixParSorte.get(sorte) || [],
     }));
-  }, [prix, sousFamilleParProduit]);
+  }, [prix, sorteDe, membres, modeRayon]);
 
   const fmtEur = (n) => Number(n).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   // Fourchette : une seule valeur si min == max (au centime), sinon "lo – hi".
@@ -3068,11 +3124,16 @@ function FamilleDepliee({ membres, items, onAdd, onUpdate, onRemove }) {
     const ratio = mq.best > 0 ? f.kgMin / mq.best : 1;
     const fr = fraicheur(f.dateAncienne);
     return (
-      <div key={mdd ? f.sig : f.varianteId} style={{ display:"flex", alignItems:"center", gap:11, background: estBest ? M.greenSoft : M.card, border:`${picked?'1.5px':'1px'} solid ${(estBest||picked)?M.green:M.line}`, borderRadius:14, padding:"13px 12px 13px 14px" }}>
+      // BUG 2 (chantier 85) — fond vert PLEIN = « dans ma liste » (picked), identique
+      // sur tous les formats de la liste. Le « Meilleur rapport » n'a plus de vert :
+      // seulement son badge (via blocBadges).
+      <div key={mdd ? f.sig : f.varianteId} style={{ display:"flex", alignItems:"center", gap:11, background: picked ? M.greenSoft : M.card, border:`${picked?'1.5px':'1px'} solid ${picked?M.green:M.line}`, borderRadius:14, padding:"13px 12px 13px 14px" }}>
         {/* Vignette 42px : photo produit (OFF+Cloudinary) si dispo, sinon le carré
-            placeholder. Pas de photo pour le groupe MDD (ne pas trahir la marque). */}
+            placeholder. Pas de photo pour le groupe MDD (ne pas trahir la marque).
+            Chantier 85 — cliquable → agrandi partagé (LightboxPhoto). */}
         <div style={{ width:42, height:42, flex:"0 0 auto" }}>
           <PhotoProduit varianteId={mdd ? null : f.varianteId} taille="thumb" radius={9}
+            onAgrandir={mdd ? null : (off)=>setLightbox(off)}
             fallback={<div style={{ width:"100%", height:"100%", borderRadius:9, background:M.thumb }} />} />
         </div>
         <div style={{ flex:1, minWidth:0 }}>
@@ -3101,9 +3162,28 @@ function FamilleDepliee({ membres, items, onAdd, onUpdate, onRemove }) {
     </button>
   );
 
+  // BLOC — FICHE SANS PRIX (mode rayon) : reste visible, « pas encore de prix ».
+  // Tap → ouvre la modale format pour l'ajouter (rebascule au comparateur dès
+  // qu'un relevé existe). Jamais masquée.
+  const blocLigneSansPrix = (m) => {
+    const inList = items.some(i => i.produit_id === m.id);
+    return (
+      <button key={`sp-${m.id}`} onClick={()=>onOpenProduct?.(m)}
+        style={{ display:"flex", alignItems:"center", gap:11, width:"100%", textAlign:"left", background:M.card, border:`1px solid ${inList?M.green:M.line}`, borderRadius:14, padding:"13px 12px 13px 14px", cursor:"pointer" }}>
+        <div style={{ width:42, height:42, flex:"0 0 auto", borderRadius:9, background:M.thumb }} />
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontFamily:F, fontWeight:800, fontSize:15, color:M.ink }}>{m.nom_reference}</div>
+          <div style={{ fontFamily:F, fontSize:12.5, color:M.ink3, marginTop:2 }}>{inList ? "✓ dans ta liste · " : ""}Pas encore de prix</div>
+        </div>
+        <span style={{ fontFamily:F, fontSize:20, color:M.ink3, flex:"0 0 auto" }}>›</span>
+      </button>
+    );
+  };
+
   // ── Assemblage : intertitre de SORTE → lignes de marque → lignes de format ──
   return (
     <div style={{ paddingLeft:14, borderLeft:`2px solid ${M.line}`, marginLeft:6, display:"flex", flexDirection:"column", gap:14 }}>
+      {lightbox && <LightboxPhoto offLarge={lightbox} onClose={()=>setLightbox(null)} />}
       <div style={{ fontFamily:F, fontSize:12.5, color:M.ink2, fontStyle:"italic", lineHeight:1.45 }}>Prix au kilo relevés en magasin par la communauté. Ils varient d'une enseigne à l'autre — vérifie en rayon.</div>
 
       {loading && <div style={{ fontFamily:F, fontSize:13, color:M.ink3 }}>Chargement des prix…</div>}
@@ -3112,10 +3192,10 @@ function FamilleDepliee({ membres, items, onAdd, onUpdate, onRemove }) {
         <div style={{ fontFamily:F, fontSize:13, color:M.ink3 }}>Pas encore de relevé de prix pour cette famille.</div>
       )}
 
-      {!loading && !error && arbre.map(({ sorte, marques }) => (
+      {!loading && !error && arbre.map(({ sorte, marques, sansPrix }) => (
         <div key={sorte} style={{ display:"flex", flexDirection:"column", gap:8 }}>
           <div style={{ fontFamily:F, fontWeight:800, fontSize:17, color:M.ink }}>
-            {sorte} <span style={{ fontSize:13, fontWeight:600, color:M.ink3 }}>· {marques.length} marque{marques.length>1?'s':''}</span>
+            {sorte}{marques.length > 0 && <span style={{ fontSize:13, fontWeight:600, color:M.ink3 }}> · {marques.length} marque{marques.length>1?'s':''}</span>}
           </div>
 
           {marques.map(mq => {
@@ -3132,6 +3212,8 @@ function FamilleDepliee({ membres, items, onAdd, onUpdate, onRemove }) {
               </div>
             );
           })}
+
+          {sansPrix.map(m => blocLigneSansPrix(m))}
         </div>
       ))}
     </div>
@@ -3252,7 +3334,7 @@ function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab }) {
     setProduits([]); setOpenProduct(null);
     setProdLoading(true); setProdError(null);
     supabase.from('produits')
-      .select('id, sous_categorie_id, nom_reference, slug, type_unite, unite_base')
+      .select('id, sous_categorie_id, nom_reference, slug, type_unite, unite_base, famille, sous_famille')
       .eq('sous_categorie_id', sc.id)
       .eq('actif', true)
       .order('nom_reference')
@@ -3526,24 +3608,11 @@ function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab }) {
           {!prodLoading && !prodError && produits.length === 0 && (
             <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.gray, textAlign:"center", padding:"20px 0" }}>Aucun produit disponible.</div>
           )}
+          {/* Chantier 84 — le rayon affiche LE MÊME comparateur que la recherche
+              (FamilleDepliee, mode rayon). Fiches sans relevé gardées en repli. */}
           {!prodLoading && !prodError && produits.length > 0 && (
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-              {produits.map(p => {
-                const inList = items.some(i => i.product.toLowerCase().trim() === p.nom_reference.toLowerCase().trim());
-                return (
-                  <button key={p.id} onClick={()=>setOpenProduct(p)} style={{
-                    padding:"14px 12px", background:inList?"#F0FFF5":C.white,
-                    border:`2px solid ${inList?C.green:C.grayLight}`,
-                    borderRadius:14, cursor:"pointer", textAlign:"left",
-                    boxShadow:"0 2px 8px rgba(0,0,0,0.06)",
-                    position:"relative",
-                  }}>
-                    {inList && <span style={{ position:"absolute", top:6, right:8, fontSize:12 }}>✓</span>}
-                    <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{p.nom_reference}</div>
-                  </button>
-                );
-              })}
-            </div>
+            <FamilleDepliee membres={produits} items={items} onAdd={addItem}
+              onUpdate={onUpdate} onRemove={onRemove} modeRayon onOpenProduct={setOpenProduct} />
           )}
         </div>
       )}
