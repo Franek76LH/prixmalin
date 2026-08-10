@@ -2968,63 +2968,60 @@ function FamilleDepliee({ membres, items, onAdd, onUpdate, onRemove, modeRayon =
       }
     }
 
-    const sortesMarques = new Map(); // sorte -> Map(marque -> [formats])
-    const produitsAvecPrix = new Set();
-    for (const f of parFormat.values()) {
-      produitsAvecPrix.add(f.produitId);
+    const tousFormats = [...parFormat.values()];
+    const produitsAvecPrix = new Set(tousFormats.map(f => f.produitId));
+
+    // Fiches SANS relevé (mode rayon) : gardées visibles en repli, jamais masquées.
+    const sansPrix = modeRayon ? membres.filter(m => !produitsAvecPrix.has(m.id)) : [];
+
+    // Fusion MDD par signature de format (plusieurs MDD au même quantité+unité ->
+    // une seule ligne « Marques distributeurs »).
+    const fusionnerMdd = (fmts) => {
+      const parSig = new Map();
+      for (const f of fmts) {
+        const e = parSig.get(f.sig);
+        if (!e) { parSig.set(f.sig, { ...f, mddMerged: true }); }
+        else {
+          e.kgMin = Math.min(e.kgMin, f.kgMin);
+          e.kgMax = Math.max(e.kgMax, f.kgMax);
+          e.paqMin = Math.min(e.paqMin, f.paqMin);
+          e.paqMax = Math.max(e.paqMax, f.paqMax);
+          if (f.dateAncienne != null && (e.dateAncienne == null || f.dateAncienne < e.dateAncienne)) e.dateAncienne = f.dateAncienne;
+        }
+      }
+      return [...parSig.values()];
+    };
+    const stats = (formats) => ({
+      best:  formats[0]?.kgMin ?? Infinity,
+      kgMin: Math.min(...formats.map(f => f.kgMin)),
+      kgMax: Math.max(...formats.map(f => f.kgMax)),
+      uniteRef: formats[0]?.uniteRef || 'kg',
+    });
+    const ordreCle = (a, b) => (a === 'Autres') - (b === 'Autres') || a.localeCompare(b, 'fr');
+
+    // ── Arbre sorte (sous_famille) -> marque -> formats. Marques et formats triés
+    // du moins cher au plus cher, MDD regroupés sous « Marques distributeurs ».
+    // L'ordre des VARIÉTÉS (sortes) reste stable (ordreCle), sans tri par prix.
+    const sortesMarques = new Map();
+    for (const f of tousFormats) {
       const sorte = sorteDe(f.produitId);
       if (!sortesMarques.has(sorte)) sortesMarques.set(sorte, new Map());
       const marques = sortesMarques.get(sorte);
       if (!marques.has(f.marqueNom)) marques.set(f.marqueNom, []);
       marques.get(f.marqueNom).push(f);
     }
-
-    // Mode rayon : les fiches SANS relevé exploitable restent visibles en repli
-    // (« pas encore de prix »), groupées comme les autres. Jamais masquées.
     const sansPrixParSorte = new Map();
-    if (modeRayon) {
-      for (const m of membres) {
-        if (produitsAvecPrix.has(m.id)) continue;
-        const sorte = sorteDe(m.id);
-        if (!sansPrixParSorte.has(sorte)) sansPrixParSorte.set(sorte, []);
-        sansPrixParSorte.get(sorte).push(m);
-      }
+    for (const m of sansPrix) {
+      const sorte = sorteDe(m.id);
+      if (!sansPrixParSorte.has(sorte)) sansPrixParSorte.set(sorte, []);
+      sansPrixParSorte.get(sorte).push(m);
     }
-
     const buildMarques = (marques) => [...marques.entries()].map(([nom, fmts]) => {
-      const estGroupeMdd = nom === 'Marques distributeurs';
-      let formats;
-      if (estGroupeMdd) {
-        // Fusion par format identique : plusieurs MDD au même (quantité+unité)
-        // deviennent UNE ligne dont la fourchette couvre toutes ces MDD.
-        const parSig = new Map();
-        for (const f of fmts) {
-          const e = parSig.get(f.sig);
-          if (!e) { parSig.set(f.sig, { ...f, mddMerged: true }); }
-          else {
-            e.kgMin = Math.min(e.kgMin, f.kgMin);
-            e.kgMax = Math.max(e.kgMax, f.kgMax);
-            e.paqMin = Math.min(e.paqMin, f.paqMin);
-            e.paqMax = Math.max(e.paqMax, f.paqMax);
-            if (f.dateAncienne != null && (e.dateAncienne == null || f.dateAncienne < e.dateAncienne)) e.dateAncienne = f.dateAncienne;
-          }
-        }
-        formats = [...parSig.values()].sort((a, b) => a.kgMin - b.kgMin);
-      } else {
-        formats = fmts.slice().sort((a, b) => a.kgMin - b.kgMin);
-      }
-      return {
-        nom, formats,
-        best:  formats[0]?.kgMin ?? Infinity,           // meilleur €/kg de la marque (ou du groupe MDD)
-        kgMin: Math.min(...formats.map(f => f.kgMin)),
-        kgMax: Math.max(...formats.map(f => f.kgMax)),
-        uniteRef: formats[0]?.uniteRef || 'kg',
-      };
-    }).sort((a, b) => a.best - b.best);   // classée par prix, jamais fixée en tête
-
-    const ordreSorte = (a, b) => (a === 'Autres') - (b === 'Autres') || a.localeCompare(b, 'fr');
+      const formats = (nom === 'Marques distributeurs' ? fusionnerMdd(fmts) : fmts.slice()).sort((a, b) => a.kgMin - b.kgMin);
+      return { nom, formats, ...stats(formats) };
+    }).sort((a, b) => a.best - b.best);
     const toutesSortes = new Set([...sortesMarques.keys(), ...sansPrixParSorte.keys()]);
-    return [...toutesSortes].sort(ordreSorte).map(sorte => ({
+    return [...toutesSortes].sort(ordreCle).map(sorte => ({
       sorte,
       marques: buildMarques(sortesMarques.get(sorte) || new Map()),
       sansPrix: sansPrixParSorte.get(sorte) || [],
@@ -3273,6 +3270,30 @@ function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab }) {
     return out;
   }, [searchResults]);
 
+  // Chantier 86 — RAYON (niveau 3) : parent « famille » comme la recherche.
+  // Entrées ORDONNÉES (tri nom_reference conservé) : un bloc « famille » prend la
+  // position de sa 1re fiche ; les fiches SANS famille forment des « runs »
+  // contigus rendus par un FamilleDepliee à plat. Générique (aucune famille en
+  // dur). Mémoïsé sur `produits` : les tableaux `membres` restent STABLES, sinon
+  // chaque FamilleDepliee rechargerait ses prix à chaque rendu.
+  const entreesRayon = useMemo(() => {
+    const entrees = [];
+    const idxFamille = new Map();
+    let flatRun = null;
+    for (const p of produits) {
+      const fam = (p.famille || '').trim();
+      if (fam) {
+        flatRun = null; // coupe le run de fiches sans famille
+        if (idxFamille.has(fam)) entrees[idxFamille.get(fam)].membres.push(p);
+        else { idxFamille.set(fam, entrees.length); entrees.push({ type: 'famille', famille: fam, membres: [p] }); }
+      } else {
+        if (!flatRun) { flatRun = { type: 'flat', membres: [] }; entrees.push(flatRun); }
+        flatRun.membres.push(p);
+      }
+    }
+    return entrees;
+  }, [produits]);
+
   const totalInList = items.filter(i=>!i.checked).length;
 
   // Propage le booléen de succès/échec d'App.addItem jusqu'à ProductPickerSheet.
@@ -3358,25 +3379,64 @@ function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab }) {
     setSearching(true);
     setSearchError(null);
     try {
-      // Chantier 83 (finition) — recherche accent-insensible : on réutilise le
-      // RPC tolérant (extensions.unaccent, multi-mots) déjà employé pour la
-      // correction de ticket ("biere" trouve "Bière"). Il ne renvoie que
-      // produit_id + nom_reference : on recharge ensuite la catégorie/sous-
-      // catégorie pour garder la forme attendue par l'affichage et la navigation.
+      // Chantier 87 — RPC DÉDIÉ au catalogue : chaque mot doit apparaître dans
+      // nom_reference + famille + sous_famille (extensions.unaccent, multi-mots),
+      // limite 100. Distinct de rechercher_produits_pour_correction (tickets), qui
+      // reste inchangé. Le RPC ne renvoie que produit_id + nom_reference : on
+      // recharge ensuite les colonnes complètes (catégorie/sous-catégorie) pour
+      // garder la forme attendue par l'affichage et la navigation.
+      const COLS = 'id, nom_reference, famille, sous_famille, sous_categorie_id, sous_categories(id, nom, categorie_id, categories(id, nom, slug, icone))';
       const { data: matches, error: errRpc } = await supabase
-        .rpc('rechercher_produits_pour_correction', { p_terme: q });
+        .rpc('rechercher_produits_catalogue', { p_terme: q });
       if (mySeq !== searchSeq.current) return; // réponse obsolète, ignorée
       if (errRpc) { setSearchError("Recherche impossible."); setSearching(false); return; }
       const ids = (matches || []).map(m => m.produit_id);
       if (ids.length === 0) { setSearchResults([]); setSearching(false); return; }
-      const { data, error } = await supabase.from('produits')
-        .select('id, nom_reference, famille, sous_famille, sous_categorie_id, sous_categories(id, nom, categorie_id, categories(id, nom, slug, icone))')
-        .in('id', ids);
+      const { data, error } = await supabase.from('produits').select(COLS).in('id', ids);
       if (mySeq !== searchSeq.current) return;
       if (error) { setSearchError("Recherche impossible."); setSearching(false); return; }
-      // Conserve l'ordre de pertinence renvoyé par le RPC.
+      // Ordre de pertinence renvoyé par le RPC.
       const parId = new Map((data || []).map(p => [p.id, p]));
-      setSearchResults(ids.map(id => parId.get(id)).filter(Boolean));
+      const ordered = ids.map(id => parId.get(id)).filter(Boolean);
+
+      // Complétude de l'accordéon (chantier 87) : pour chaque famille non vide
+      // trouvée, charger TOUTES ses fiches actives (mêmes colonnes) afin que
+      // l'accordéon ne soit jamais tronqué à la limite du RPC. On garde les
+      // valeurs BRUTES de famille pour le filtre .in (match exact en base) et une
+      // clé « trim » pour le regroupement.
+      const famillesRaw = [...new Set(ordered.map(r => r.famille).filter(f => f && f.trim()))];
+      const membresParFamille = new Map(); // clé trim -> fiches complètes
+      if (famillesRaw.length > 0) {
+        const { data: famData, error: famErr } = await supabase.from('produits')
+          .select(COLS).in('famille', famillesRaw).eq('actif', true).order('nom_reference');
+        if (mySeq !== searchSeq.current) return;
+        // Fallback : si le rechargement échoue, membresParFamille reste vide et on
+        // retombe sur les membres déjà connus de la recherche (jamais de plantage).
+        if (!famErr && famData) {
+          for (const p of famData) {
+            const f = (p.famille && p.famille.trim()) ? p.famille.trim() : null;
+            if (!f) continue;
+            if (!membresParFamille.has(f)) membresParFamille.set(f, []);
+            membresParFamille.get(f).push(p);
+          }
+        }
+      }
+
+      // Reconstruit la liste en préservant l'ordre de pertinence : une famille
+      // prend la position de sa 1re fiche et reçoit TOUS ses membres ; les fiches
+      // sans famille restent à plat, inchangées.
+      const finale = [];
+      const famillesVues = new Set();
+      for (const r of ordered) {
+        const f = (r.famille && r.famille.trim()) ? r.famille.trim() : null;
+        if (!f) { finale.push(r); continue; }
+        if (famillesVues.has(f)) continue;
+        famillesVues.add(f);
+        const complets = membresParFamille.get(f);
+        if (complets && complets.length) finale.push(...complets);
+        else finale.push(r); // fallback : membre connu de la recherche
+      }
+      setSearchResults(finale);
       setSearching(false);
     } catch (e) {
       if (mySeq !== searchSeq.current) return;
@@ -3609,10 +3669,42 @@ function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab }) {
             <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.gray, textAlign:"center", padding:"20px 0" }}>Aucun produit disponible.</div>
           )}
           {/* Chantier 84 — le rayon affiche LE MÊME comparateur que la recherche
-              (FamilleDepliee, mode rayon). Fiches sans relevé gardées en repli. */}
+              (FamilleDepliee, mode rayon). Fiches sans relevé gardées en repli.
+              Chantier 86 — niveau parent « famille » : les fiches avec une famille
+              sont regroupées sous un accordéon (comme la recherche) ; les fiches
+              sans famille restent à plat. Si aucune famille -> un seul FamilleDepliee. */}
           {!prodLoading && !prodError && produits.length > 0 && (
-            <FamilleDepliee membres={produits} items={items} onAdd={addItem}
-              onUpdate={onUpdate} onRemove={onRemove} modeRayon onOpenProduct={setOpenProduct} />
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {entreesRayon.map((e, i) => {
+                if (e.type === 'flat') {
+                  return (
+                    <FamilleDepliee key={`flat-${i}`} membres={e.membres} items={items} onAdd={addItem}
+                      onUpdate={onUpdate} onRemove={onRemove} modeRayon onOpenProduct={setOpenProduct} />
+                  );
+                }
+                // Bloc parent « famille » — même rendu/interaction que l'accordéon
+                // de la recherche (openFamilles/toggleFamille réutilisés).
+                const ouvert = openFamilles.has(e.famille);
+                const presFam = getCategoryPresentation(selectedCat || {});
+                return (
+                  <div key={`fam-${e.famille}`} style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                    <button onClick={()=>toggleFamille(e.famille)}
+                      style={{ display:"flex", alignItems:"center", gap:12, background:C.white, border:`1px solid ${ouvert?C.blue:C.grayLight}`, borderRadius:12, padding:"12px 14px", cursor:"pointer", textAlign:"left", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+                      <span style={{ fontSize:22 }}>{presFam.emoji}</span>
+                      <div style={{ flex:1 }}>
+                        <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.text }}>{e.famille}</div>
+                        <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:presFam.color, fontWeight:700, marginTop:2 }}>{ouvert ? "Masquer les variétés" : "Voir les variétés"}</div>
+                      </div>
+                      <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:16, color:C.gray, transform: ouvert?"rotate(90deg)":"none", transition:"transform 0.15s" }}>›</span>
+                    </button>
+                    {ouvert && (
+                      <FamilleDepliee membres={e.membres} items={items} onAdd={addItem}
+                        onUpdate={onUpdate} onRemove={onRemove} modeRayon onOpenProduct={setOpenProduct} />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       )}
