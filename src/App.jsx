@@ -3238,8 +3238,10 @@ function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab }) {
   const [searchResults,   setSearchResults]   = useState([]);
   const [searching,       setSearching]       = useState(false);
   const [searchError,     setSearchError]     = useState(null);
-  // Chantier « famille » — familles dépliées dans les résultats de recherche.
+  // Chantier « famille » — familles dépliées dans les RAYONS (chantier 86).
   const [openFamilles,    setOpenFamilles]    = useState(new Set());
+  // Chantier 88 (suite) — fiches dépliées dans les résultats de RECHERCHE (à plat).
+  const [openFiches,      setOpenFiches]      = useState(new Set());
   const searchSeq = useRef(0);
 
   const toggleFamille = (fam) => setOpenFamilles(prev => {
@@ -3247,27 +3249,24 @@ function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab }) {
     next.has(fam) ? next.delete(fam) : next.add(fam);
     return next;
   });
+  const toggleFiche = (id) => setOpenFiches(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
 
-  // Chantier « famille » — regroupe les résultats de recherche : les fiches qui
-  // partagent une même valeur de `famille` non nulle sont rassemblées sous une
-  // seule entrée « accordéon » (générique, aucune famille codée en dur). Les
-  // fiches sans famille (null/vide) restent des entrées individuelles, à plat.
-  // L'ordre de pertinence du RPC est préservé (une famille prend la position de
-  // sa 1re fiche rencontrée).
-  const resultatsGroupes = useMemo(() => {
-    const out = [];
-    const indexFamille = new Map();
-    for (const r of searchResults) {
-      const fam = (r.famille && r.famille.trim()) ? r.famille.trim() : null;
-      if (!fam) { out.push({ type: 'produit', produit: r }); continue; }
-      if (indexFamille.has(fam)) {
-        out[indexFamille.get(fam)].membres.push(r);
-      } else {
-        indexFamille.set(fam, out.length);
-        out.push({ type: 'famille', famille: fam, membres: [r] });
-      }
-    }
-    return out;
+  // Chantier 88 (suite) — Recherche À PLAT (façon drive) : plus AUCUN regroupement
+  // par famille en recherche. Chaque fiche renvoyée est une carte individuelle,
+  // dépliable sur son propre comparateur (marques/formats/prix). Le regroupement
+  // famille → sous-famille (FamilleDepliee sur plusieurs membres) reste réservé à
+  // la navigation par RAYONS (entreesRayon / modeRayon, chantier 86, inchangé).
+  // On mémoïse un tableau [fiche] STABLE par id : FamilleDepliee dérive ses
+  // produitIds de `membres`, donc un nouveau tableau à chaque rendu relancerait le
+  // chargement des prix en boucle.
+  const membresParFiche = useMemo(() => {
+    const m = new Map();
+    for (const r of searchResults) m.set(r.id, [r]);
+    return m;
   }, [searchResults]);
 
   // Chantier 86 — RAYON (niveau 3) : parent « famille » comme la recherche.
@@ -3395,48 +3394,17 @@ function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab }) {
       const { data, error } = await supabase.from('produits').select(COLS).in('id', ids);
       if (mySeq !== searchSeq.current) return;
       if (error) { setSearchError("Recherche impossible."); setSearching(false); return; }
-      // Ordre de pertinence renvoyé par le RPC.
+      // Chantier 88 — Recherche PRÉCISE puis À PLAT (logique drive) : on n'affiche
+      // QUE les fiches réellement renvoyées par le RPC pour le terme tapé (nom /
+      // famille / sous-famille qui matchent). On ne recharge PLUS toute la famille
+      // (comportement du chantier 87, désormais réservé aux RAYONS — modeRayon /
+      // entreesRayon, inchangé). L'affichage des résultats est une LISTE À PLAT :
+      // une carte par fiche, dépliable sur son propre comparateur (voir le rendu,
+      // membresParFiche). Aucun regroupement de famille en recherche.
+      // Ex. « penne » ne remonte que les penne ; « pâtes » (nom de famille) remonte
+      // toutes les fiches de famille « Pâtes » car elles matchent le terme.
       const parId = new Map((data || []).map(p => [p.id, p]));
-      const ordered = ids.map(id => parId.get(id)).filter(Boolean);
-
-      // Complétude de l'accordéon (chantier 87) : pour chaque famille non vide
-      // trouvée, charger TOUTES ses fiches actives (mêmes colonnes) afin que
-      // l'accordéon ne soit jamais tronqué à la limite du RPC. On garde les
-      // valeurs BRUTES de famille pour le filtre .in (match exact en base) et une
-      // clé « trim » pour le regroupement.
-      const famillesRaw = [...new Set(ordered.map(r => r.famille).filter(f => f && f.trim()))];
-      const membresParFamille = new Map(); // clé trim -> fiches complètes
-      if (famillesRaw.length > 0) {
-        const { data: famData, error: famErr } = await supabase.from('produits')
-          .select(COLS).in('famille', famillesRaw).eq('actif', true).order('nom_reference');
-        if (mySeq !== searchSeq.current) return;
-        // Fallback : si le rechargement échoue, membresParFamille reste vide et on
-        // retombe sur les membres déjà connus de la recherche (jamais de plantage).
-        if (!famErr && famData) {
-          for (const p of famData) {
-            const f = (p.famille && p.famille.trim()) ? p.famille.trim() : null;
-            if (!f) continue;
-            if (!membresParFamille.has(f)) membresParFamille.set(f, []);
-            membresParFamille.get(f).push(p);
-          }
-        }
-      }
-
-      // Reconstruit la liste en préservant l'ordre de pertinence : une famille
-      // prend la position de sa 1re fiche et reçoit TOUS ses membres ; les fiches
-      // sans famille restent à plat, inchangées.
-      const finale = [];
-      const famillesVues = new Set();
-      for (const r of ordered) {
-        const f = (r.famille && r.famille.trim()) ? r.famille.trim() : null;
-        if (!f) { finale.push(r); continue; }
-        if (famillesVues.has(f)) continue;
-        famillesVues.add(f);
-        const complets = membresParFamille.get(f);
-        if (complets && complets.length) finale.push(...complets);
-        else finale.push(r); // fallback : membre connu de la recherche
-      }
-      setSearchResults(finale);
+      setSearchResults(ids.map(id => parId.get(id)).filter(Boolean)); // ordre de pertinence du RPC
       setSearching(false);
     } catch (e) {
       if (mySeq !== searchSeq.current) return;
@@ -3452,17 +3420,6 @@ function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab }) {
     const timer = setTimeout(() => runSearch(searchQuery.trim()), 280);
     return () => clearTimeout(timer);
   }, [searchQuery, runSearch]);
-
-  const pickSearchResult = (r) => {
-    setSelectedCat(r.sous_categories.categories);
-    setSelectedSousCat(r.sous_categories);
-    setOpenProduct({ id: r.id, nom_reference: r.nom_reference });
-    searchSeq.current++; // invalide toute requête en cours
-    setSearchQuery("");
-    setSearchResults([]);
-    setSearchError(null);
-    setSearching(false);
-  };
 
   return (
     <div style={{ padding:"16px 16px 110px" }}>
@@ -3502,39 +3459,29 @@ function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab }) {
       )}
       {!searching && !searchError && searchResults.length > 0 && (
         <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:20 }}>
-          {resultatsGroupes.map((entry) => {
-            // Fiche individuelle (famille null/vide) — affichage à plat, inchangé.
-            if (entry.type === 'produit') {
-              const r = entry.produit;
-              const pres = getCategoryPresentation(r.sous_categories?.categories || {});
-              return (
-                <button key={r.id} onClick={()=>pickSearchResult(r)}
-                  style={{ display:"flex", alignItems:"center", gap:12, background:C.white, border:`1px solid ${C.grayLight}`, borderRadius:12, padding:"12px 14px", cursor:"pointer", textAlign:"left", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+          {/* Chantier 88 (suite) — Recherche À PLAT : une carte par fiche renvoyée
+              (aucun accordéon de famille). La carte se déplie sur son PROPRE
+              comparateur (FamilleDepliee sur cette seule fiche) : marques
+              regroupées (MDD fusionnées) et formats du moins cher au plus cher. */}
+          {searchResults.map((r) => {
+            const pres = getCategoryPresentation(r.sous_categories?.categories || {});
+            const ouvert = openFiches.has(r.id);
+            // Chantier 88 (suite 2) — libellé = RAYON (sous-catégorie), plus proche
+            // d'un drive que la grande catégorie. Repli sur la catégorie de niveau 1
+            // si la sous-catégorie manque, sinon rien (jamais de plantage).
+            const rayon = r.sous_categories?.nom || r.sous_categories?.categories?.nom || null;
+            return (
+              <div key={r.id} style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                <button onClick={()=>toggleFiche(r.id)}
+                  style={{ display:"flex", alignItems:"center", gap:12, background:C.white, border:`1px solid ${ouvert?C.blue:C.grayLight}`, borderRadius:12, padding:"12px 14px", cursor:"pointer", textAlign:"left", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
                   <span style={{ fontSize:22 }}>{pres.emoji}</span>
                   <div style={{ flex:1 }}>
                     <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{r.nom_reference}</div>
-                    {r.sous_categories?.categories && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:pres.color, fontWeight:700, marginTop:2 }}>{r.sous_categories.categories.nom}</div>}
-                  </div>
-                  <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:20, color:C.blue }}>+</span>
-                </button>
-              );
-            }
-            // Entrée « famille » — une ligne accordéon (nom seul) qui déplie la
-            // liste scrollable (sortes -> marques -> formats) de FamilleDepliee.
-            const ouvert = openFamilles.has(entry.famille);
-            const presFam = getCategoryPresentation(entry.membres[0]?.sous_categories?.categories || {});
-            return (
-              <div key={`fam-${entry.famille}`} style={{ display:"flex", flexDirection:"column", gap:6 }}>
-                <button onClick={()=>toggleFamille(entry.famille)}
-                  style={{ display:"flex", alignItems:"center", gap:12, background:C.white, border:`1px solid ${ouvert?C.blue:C.grayLight}`, borderRadius:12, padding:"12px 14px", cursor:"pointer", textAlign:"left", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
-                  <span style={{ fontSize:22 }}>{presFam.emoji}</span>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.text }}>{entry.famille}</div>
-                    <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:presFam.color, fontWeight:700, marginTop:2 }}>{ouvert ? "Masquer les variétés" : "Voir les variétés"}</div>
+                    {rayon && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:pres.color, fontWeight:700, marginTop:2 }}>{rayon}</div>}
                   </div>
                   <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:16, color:C.gray, transform: ouvert?"rotate(90deg)":"none", transition:"transform 0.15s" }}>›</span>
                 </button>
-                {ouvert && <FamilleDepliee membres={entry.membres} items={items} onAdd={addItem} onUpdate={onUpdate} onRemove={onRemove} />}
+                {ouvert && <FamilleDepliee membres={membresParFiche.get(r.id) || [r]} items={items} onAdd={addItem} onUpdate={onUpdate} onRemove={onRemove} />}
               </div>
             );
           })}
