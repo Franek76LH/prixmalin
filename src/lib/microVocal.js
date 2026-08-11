@@ -58,6 +58,58 @@ export function normaliserResultatTranscription(data) {
   return { transcription, elements, elements_ignores };
 }
 
+// ── Lot 3 — récapitulatif unique ─────────────────────────────────────────────
+
+// Clé de comparaison d'un nom d'élément : minuscules, sans accents, espaces
+// normalisés. Même philosophie que normalizeName (catalogueCore), recopié ici
+// pour garder ce module sans dépendance.
+export function normaliserNomElement(nom) {
+  return (nom || "").toLowerCase().trim()
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+// Compte les occurrences par nom normalisé — sert à proposer la fusion
+// (jamais automatique : l'utilisateur décide).
+export function comptesParNom(elements) {
+  const m = new Map();
+  for (const e of elements) {
+    const k = normaliserNomElement(e.nom);
+    if (!k) continue;
+    m.set(k, (m.get(k) || 0) + 1);
+  }
+  return m;
+}
+
+// Fusionne TOUTES les lignes portant ce nom normalisé en une seule (à la place
+// de la première). Règles :
+// - quantité : null partout -> null (on ne compte pas ce qui n'a pas été
+//   quantifié) ; sinon somme, un null comptant pour 1 ;
+// - unité : la première non nulle (les autres sont perdues : cas marginal) ;
+// - qualificatifs : concaténation dédoublonnée ;
+// - confiance : "haute" seulement si toutes les lignes étaient "haute" ;
+// - texte_entendu : concaténation " + " pour garder la trace des prises.
+export function fusionnerParNom(elements, nomNorm) {
+  const membres = elements.filter(e => normaliserNomElement(e.nom) === nomNorm);
+  if (membres.length < 2) return elements;
+
+  const toutesNulles = membres.every(m => m.quantite == null);
+  const quantite = toutesNulles ? null : membres.reduce((s, m) => s + (m.quantite ?? 1), 0);
+  const unite = membres.find(m => m.unite)?.unite ?? null;
+  const qualificatifs = [...new Set(membres.map(m => m.qualificatifs).filter(Boolean))].join(", ") || null;
+  const confiance = membres.every(m => m.confiance === "haute") ? "haute" : "faible";
+  const texte_entendu = membres.map(m => m.texte_entendu).filter(Boolean).join(" + ");
+
+  const fusion = { ...membres[0], quantite, unite, qualificatifs, confiance, texte_entendu };
+  let placee = false;
+  return elements.flatMap(e => {
+    if (normaliserNomElement(e.nom) !== nomNorm) return [e];
+    if (placee) return [];
+    placee = true;
+    return [fusion];
+  });
+}
+
 // Envoie une prise à l'Edge Function et renvoie le résultat normalisé.
 export async function transcrireAudioListe(blob, mime) {
   const audioBase64 = await blobToBase64(blob);

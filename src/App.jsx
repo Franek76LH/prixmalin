@@ -6,7 +6,7 @@ import { mapperLigneListeCourses, chargerVariantes, getCategoryPresentation, for
 import { calculerPrixReferenceParUnite } from "./lib/unitesCore";
 import { urlPhotoVariante, offLargeSource, offFullUrl, cloudinaryAgrandi } from "./lib/photosProduits";
 import { nomComposeVariante, formatEtiquetteVariante } from "./lib/nomProduit";
-import { transcrireAudioListe } from "./lib/microVocal";
+import { transcrireAudioListe, normaliserNomElement, comptesParNom, fusionnerParNom } from "./lib/microVocal";
 import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
 import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
 import { classerMagasinsPourPanier, calculerEconomiePotentielle } from "./lib/classementPanierCore";
@@ -1199,6 +1199,30 @@ function formatDateBrouillon(iso) {
   if (!d || Number.isNaN(d.getTime())) return '';
   return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }).replace(':', 'h');
 }
+// ── BROUILLON MICRO (Chantier Micro, Lot 3) ──────────────────────────────────
+// Même mécanique éprouvée que le brouillon de scan : le RÉCAPITULATIF (texte
+// seulement — jamais l'audio, qui n'est pas conservé) survit à un rechargement
+// iOS en arrière-plan via localStorage. Clé versionnée.
+const MICRO_DRAFT_KEY = 'prixmalin_microDraft_v1';
+function lireMicroDraft() {
+  try { const s = localStorage.getItem(MICRO_DRAFT_KEY); return s ? JSON.parse(s) : null; }
+  catch { return null; }
+}
+function ecrireMicroDraft(draft) {
+  try { localStorage.setItem(MICRO_DRAFT_KEY, JSON.stringify(draft)); } catch { /* quota/mode privé : on ignore */ }
+}
+function effacerMicroDraft() {
+  try { localStorage.removeItem(MICRO_DRAFT_KEY); } catch { /* ignore */ }
+}
+// Identifiant local d'un élément du récapitulatif. Volontairement HORS
+// composant (compteur module) : pas d'appel impur dans le corps du composant
+// (règle react-hooks/purity), unicité garantie au sein de la session.
+let microSeqElement = 0;
+function genIdElementMicro() {
+  microSeqElement += 1;
+  return `el_${microSeqElement}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
 // Étape du scan en langage utilisateur (pas la valeur technique de status).
 // Le brouillon n'est sauvegardé qu'aux étapes 'store' et 'share' ; 'store'
 // couvre à la fois le magasin et la revue des produits.
@@ -6883,8 +6907,28 @@ function MicroTab() {
   );
   const [etat,   setEtat]   = useState("repos"); // repos | demande | ecoute
   const [erreur, setErreur] = useState(null);
-  const [prises, setPrises] = useState([]);      // { id, url, duree }
+  const [prises, setPrises] = useState([]);      // { id, url, duree, blob, mime, statut, resultat }
   const [chrono, setChrono] = useState(0);       // secondes de la prise en cours
+
+  // Lot 3 — RÉCAPITULATIF unique, alimenté par toutes les prises + les ajouts
+  // manuels. Restauré depuis le brouillon localStorage au montage (l'audio des
+  // anciennes prises, lui, n'est pas conservé — texte seulement).
+  const [elementsListe, setElementsListe] = useState(() => {
+    const d = lireMicroDraft();
+    return Array.isArray(d?.elements) ? d.elements : [];
+  });
+  const [listeRestauree] = useState(() => (lireMicroDraft()?.elements?.length ?? 0) > 0);
+  const [nouvelElement, setNouvelElement] = useState("");
+  const [editionId,  setEditionId]  = useState(null);
+  const [editionNom, setEditionNom] = useState("");
+  const [confirmVider, setConfirmVider] = useState(false);
+
+  // Brouillon écrit à chaque évolution du récapitulatif ; liste vide = brouillon
+  // effacé (rien à reprendre).
+  useEffect(() => {
+    if (elementsListe.length === 0) effacerMicroDraft();
+    else ecrireMicroDraft({ version: 1, elements: elementsListe });
+  }, [elementsListe]);
 
   const recorderRef    = useRef(null);
   const streamRef      = useRef(null);
@@ -7049,6 +7093,14 @@ function MicroTab() {
     try {
       const resultat = await transcrireAudioListe(blob, mime);
       setPrises(prev => prev.map(p => p.id === priseId ? { ...p, statut: "ok", resultat } : p));
+      // Lot 3 — les éléments extraits rejoignent le RÉCAPITULATIF unique
+      // (une seule fois : le statut ne repasse jamais de "ok" à autre chose).
+      if (resultat.elements.length > 0) {
+        setElementsListe(prev => [
+          ...prev,
+          ...resultat.elements.map(e => ({ ...e, id: genIdElementMicro(), origine: "vocal" })),
+        ]);
+      }
     } catch (e) {
       console.error("Erreur transcription prise vocale :", e);
       setPrises(prev => prev.map(p => p.id === priseId
@@ -7056,6 +7108,39 @@ function MicroTab() {
         : p));
     }
   };
+
+  // Lot 3 — actions du récapitulatif. Renommer vaut validation humaine :
+  // la confiance passe à "haute" (le badge « à vérifier » disparaît).
+  const ajouterElementManuel = () => {
+    const nom = nouvelElement.trim();
+    if (!nom) return;
+    setElementsListe(prev => [...prev, { id: genIdElementMicro(), texte_entendu: "", nom, quantite: null, unite: null, qualificatifs: null, confiance: "haute", origine: "manuel" }]);
+    setNouvelElement("");
+  };
+  const changerQuantite = (id, delta) => {
+    setElementsListe(prev => prev.map(e => e.id === id ? { ...e, quantite: Math.max(1, (e.quantite ?? 1) + delta) } : e));
+  };
+  const supprimerElement = (id) => setElementsListe(prev => prev.filter(e => e.id !== id));
+  const demarrerEdition = (el) => { setEditionId(el.id); setEditionNom(el.nom); };
+  const validerEdition = () => {
+    const nom = editionNom.trim();
+    if (nom) setElementsListe(prev => prev.map(e => e.id === editionId ? { ...e, nom, confiance: "haute" } : e));
+    setEditionId(null); setEditionNom("");
+  };
+  // Fusion : TOUJOURS à la demande de l'utilisateur, jamais automatique.
+  const fusionner = (nomNorm) => setElementsListe(prev => fusionnerParNom(prev, nomNorm));
+  const viderTout = () => {
+    setPrises(prev => { prev.forEach(p => URL.revokeObjectURL(p.url)); return []; });
+    setElementsListe([]);
+    effacerMicroDraft();
+    setConfirmVider(false);
+  };
+
+  // Doublons candidats à la fusion (nom normalisé présent 2 fois ou plus).
+  const doublons = useMemo(
+    () => [...comptesParNom(elementsListe).entries()].filter(([, c]) => c > 1),
+    [elementsListe]
+  );
 
   const fmtDuree = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   const ecoute = etat === "ecoute";
@@ -7138,6 +7223,123 @@ function MicroTab() {
             </div>
           )}
 
+          {/* Lot 3 — RÉCAPITULATIF unique : toutes les prises + ajouts manuels,
+              entièrement éditable, sauvegardé en brouillon localStorage. */}
+          {(elementsListe.length > 0 || listeRestauree) && (
+            <div style={{ marginBottom:20 }}>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8 }}>
+                <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:C.gray, letterSpacing:"0.06em", textTransform:"uppercase" }}>
+                  Ma liste ({elementsListe.length})
+                </div>
+                {elementsListe.length > 0 && (
+                  <button onClick={() => setConfirmVider(true)}
+                    style={{ background:"none", border:"none", fontFamily:F, fontSize:12, fontWeight:800, color:C.red, cursor:"pointer", padding:"2px 4px" }}>
+                    Vider et recommencer
+                  </button>
+                )}
+              </div>
+
+              {listeRestauree && (
+                <div style={{ background:"#FFF8E6", border:"1px solid #F5C200", borderRadius:10, padding:"7px 10px", marginBottom:8, fontFamily:F, fontSize:11, fontWeight:700, color:"#7A6000" }}>
+                  🗂 Liste reprise de ta dernière session (l'audio, lui, n'est jamais conservé).
+                </div>
+              )}
+
+              <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                {elementsListe.map((e) => (
+                  <div key={e.id} style={{ display:"flex", alignItems:"center", gap:8, background:C.white, border:`1px solid ${C.grayLight}`, borderRadius:12, padding:"9px 12px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+                    {editionId === e.id ? (
+                      <>
+                        <input value={editionNom} autoFocus onChange={ev => setEditionNom(ev.target.value)}
+                          onKeyDown={ev => { if (ev.key === "Enter") validerEdition(); }}
+                          style={{ flex:1, minWidth:0, padding:"7px 10px", borderRadius:9, border:`2px solid ${C.blue}`, fontFamily:F, fontSize:14, fontWeight:700, color:C.text, outline:"none" }} />
+                        <button onClick={validerEdition}
+                          style={{ border:"none", borderRadius:9, background:C.green, color:C.white, fontFamily:F, fontWeight:900, fontSize:13, padding:"8px 12px", cursor:"pointer", flexShrink:0 }}>
+                          OK
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button onClick={() => demarrerEdition(e)} style={{ flex:1, minWidth:0, background:"none", border:"none", padding:0, cursor:"pointer", textAlign:"left" }}>
+                          <span style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+                            <span style={{ fontFamily:F, fontWeight:800, fontSize:14, color:C.text }}>
+                              {e.nom}{e.unite ? ` (${e.unite}${(e.quantite ?? 1) > 1 ? "s" : ""})` : ""}
+                            </span>
+                            {e.qualificatifs && <span style={{ fontFamily:F, fontSize:11, color:C.gray }}>({e.qualificatifs})</span>}
+                            {e.confiance === "faible" && (
+                              <span style={{ fontFamily:F, fontSize:10, fontWeight:800, color:"#7A6000", background:"#FFF8E6", border:"1px solid #F5C200", borderRadius:99, padding:"1px 8px" }}>
+                                à vérifier
+                              </span>
+                            )}
+                          </span>
+                          {e.texte_entendu && normaliserNomElement(e.texte_entendu) !== normaliserNomElement(e.nom) && (
+                            <span style={{ display:"block", fontFamily:F, fontSize:10.5, fontStyle:"italic", color:C.gray, marginTop:1 }}>
+                              entendu : « {e.texte_entendu} »
+                            </span>
+                          )}
+                        </button>
+                        <div style={{ display:"flex", alignItems:"center", gap:0, border:`1px solid ${C.grayLight}`, borderRadius:9, overflow:"hidden", flexShrink:0 }}>
+                          <button onClick={() => changerQuantite(e.id, -1)} aria-label="Diminuer la quantité"
+                            style={{ border:"none", background:C.grayLight, width:28, height:30, fontSize:15, fontWeight:900, color:C.text, cursor:"pointer" }}>−</button>
+                          <span style={{ fontFamily:F, fontWeight:900, fontSize:13, color:C.text, minWidth:24, textAlign:"center" }}>{e.quantite ?? 1}</span>
+                          <button onClick={() => changerQuantite(e.id, 1)} aria-label="Augmenter la quantité"
+                            style={{ border:"none", background:C.grayLight, width:28, height:30, fontSize:15, fontWeight:900, color:C.text, cursor:"pointer" }}>+</button>
+                        </div>
+                        <button onClick={() => supprimerElement(e.id)} aria-label={`Supprimer ${e.nom}`}
+                          style={{ border:"none", background:"none", cursor:"pointer", fontSize:16, flexShrink:0, padding:2 }}>
+                          🗑️
+                        </button>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* Fusion des doublons — proposée, jamais imposée */}
+              {doublons.map(([nomNorm, count]) => (
+                <div key={nomNorm} style={{ display:"flex", alignItems:"center", gap:8, background:"#EFF6FF", border:"1px solid #BFDBFE", borderRadius:10, padding:"8px 10px", marginTop:8, flexWrap:"wrap" }}>
+                  <span style={{ fontFamily:F, fontSize:12, fontWeight:700, color:"#1D4ED8" }}>
+                    « {nomNorm} » apparaît {count} fois
+                  </span>
+                  <button onClick={() => fusionner(nomNorm)}
+                    style={{ border:"none", borderRadius:99, background:"#1D4ED8", color:"#fff", fontFamily:F, fontWeight:800, fontSize:12, padding:"5px 12px", cursor:"pointer" }}>
+                    Fusionner en une ligne
+                  </button>
+                </div>
+              ))}
+
+              {/* Ajout manuel — produit oublié ou trop mal transcrit */}
+              <div style={{ display:"flex", gap:8, marginTop:10 }}>
+                <input value={nouvelElement} onChange={ev => setNouvelElement(ev.target.value)}
+                  onKeyDown={ev => { if (ev.key === "Enter") ajouterElementManuel(); }}
+                  placeholder="Ajouter un produit à la main…"
+                  style={{ flex:1, minWidth:0, padding:"10px 12px", borderRadius:10, border:`1.5px solid ${C.grayLight}`, fontFamily:F, fontSize:13, fontWeight:700, color:C.text, outline:"none" }} />
+                <button onClick={ajouterElementManuel} disabled={!nouvelElement.trim()}
+                  style={{ border:"none", borderRadius:10, background:nouvelElement.trim() ? C.green : "#ccc", color:C.white, fontFamily:F, fontWeight:900, fontSize:13, padding:"10px 14px", cursor:nouvelElement.trim() ? "pointer" : "default", flexShrink:0 }}>
+                  Ajouter
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Confirmation « Vider et recommencer » */}
+          {confirmVider && (
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:9999, padding:24 }} onClick={() => setConfirmVider(false)}>
+              <div onClick={ev => ev.stopPropagation()} style={{ background:"#fff", borderRadius:16, padding:"20px", maxWidth:320, width:"100%" }}>
+                <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:"#1a1a1a", marginBottom:6 }}>Vider toute la liste ?</div>
+                <div style={{ fontFamily:F, fontSize:13, color:"#888", marginBottom:16 }}>Les {elementsListe.length} éléments et les prises de cette session seront supprimés.</div>
+                <div style={{ display:"flex", gap:8 }}>
+                  <button onClick={viderTout} style={{ flex:1, padding:"12px", border:"none", borderRadius:10, background:"#CC0000", fontFamily:F, fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer" }}>
+                    Vider
+                  </button>
+                  <button onClick={() => setConfirmVider(false)} style={{ padding:"12px 16px", border:"1.5px solid #eee", borderRadius:10, background:"#fff", fontFamily:F, fontWeight:800, fontSize:14, color:"#333", cursor:"pointer" }}>
+                    Annuler
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Prises enregistrées — réécoute locale (le Lot 2 en fera la transcription) */}
           {prises.length > 0 && (
             <div>
@@ -7181,24 +7383,17 @@ function MicroTab() {
                             « {p.resultat.transcription} »
                           </div>
                         )}
-                        {p.resultat.elements.length === 0 && (
+                        {/* Lot 3 — le détail des éléments vit dans « Ma liste »
+                            ci-dessus ; ici, un simple bilan de la prise. */}
+                        {p.resultat.elements.length === 0 ? (
                           <div style={{ fontFamily:F, fontSize:12, fontWeight:700, color:C.textLight }}>
                             Aucun produit reconnu dans cette prise.
                           </div>
-                        )}
-                        {p.resultat.elements.map((e, j) => (
-                          <div key={j} style={{ display:"flex", alignItems:"center", gap:6, padding:"4px 0", flexWrap:"wrap" }}>
-                            <span style={{ fontFamily:F, fontSize:13, fontWeight:800, color:C.text }}>
-                              • {e.nom}{e.quantite ? ` × ${e.quantite}` : ""}{e.unite ? ` ${e.unite}` : ""}
-                            </span>
-                            {e.qualificatifs && <span style={{ fontFamily:F, fontSize:11, color:C.gray }}>({e.qualificatifs})</span>}
-                            {e.confiance === "faible" && (
-                              <span style={{ fontFamily:F, fontSize:10, fontWeight:800, color:"#7A6000", background:"#FFF8E6", border:"1px solid #F5C200", borderRadius:99, padding:"1px 8px" }}>
-                                à vérifier
-                              </span>
-                            )}
+                        ) : (
+                          <div style={{ fontFamily:F, fontSize:12, fontWeight:800, color:C.green }}>
+                            ✓ {p.resultat.elements.length} produit{p.resultat.elements.length > 1 ? "s" : ""} ajouté{p.resultat.elements.length > 1 ? "s" : ""} à ta liste
                           </div>
-                        ))}
+                        )}
                         {p.resultat.elements_ignores.length > 0 && p.resultat.elements_ignores.map((e, j) => (
                           <div key={`ig-${j}`} style={{ fontFamily:F, fontSize:11, color:C.gray, padding:"2px 0", textDecoration:"line-through" }}>
                             {e.texte_entendu}{e.raison ? ` — ${e.raison}` : ""}

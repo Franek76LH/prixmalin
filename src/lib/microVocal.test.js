@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatDepuisMime, normaliserResultatTranscription } from "./microVocal";
+import { formatDepuisMime, normaliserResultatTranscription, normaliserNomElement, comptesParNom, fusionnerParNom } from "./microVocal";
 
 describe("formatDepuisMime", () => {
   it("mappe l'audio Safari iOS (mp4/AAC) vers m4a", () => {
@@ -73,5 +73,65 @@ describe("normaliserResultatTranscription", () => {
     expect(normaliserResultatTranscription(null)).toEqual({ transcription: "", elements: [], elements_ignores: [] });
     expect(normaliserResultatTranscription({ elements: "oui", elements_ignores: 42 }))
       .toEqual({ transcription: "", elements: [], elements_ignores: [] });
+  });
+});
+
+describe("normaliserNomElement", () => {
+  it("ignore casse, accents et espaces multiples", () => {
+    expect(normaliserNomElement("  Yaourts  Natures ")).toBe("yaourts natures");
+    expect(normaliserNomElement("Pâtes Complètes")).toBe("pates completes");
+  });
+});
+
+describe("comptesParNom", () => {
+  it("compte les occurrences par nom normalisé", () => {
+    const m = comptesParNom([
+      { nom: "Lait" }, { nom: "lait " }, { nom: "beurre" }, { nom: "" },
+    ]);
+    expect(m.get("lait")).toBe(2);
+    expect(m.get("beurre")).toBe(1);
+    expect(m.has("")).toBe(false);
+  });
+});
+
+describe("fusionnerParNom", () => {
+  const base = [
+    { id: 1, nom: "lait", quantite: 2, unite: "bouteilles", qualificatifs: null, confiance: "haute", texte_entendu: "deux bouteilles de lait" },
+    { id: 2, nom: "beurre", quantite: null, unite: null, qualificatifs: null, confiance: "haute", texte_entendu: "du beurre" },
+    { id: 3, nom: "Lait", quantite: null, unite: null, qualificatifs: "demi-écrémé", confiance: "faible", texte_entendu: "du lait" },
+  ];
+
+  it("fusionne à la place de la première occurrence, en gardant les autres lignes", () => {
+    const r = fusionnerParNom(base, "lait");
+    expect(r).toHaveLength(2);
+    expect(r[0].id).toBe(1);
+    expect(r[1].id).toBe(2);
+  });
+
+  it("additionne les quantités (null vaut 1 dès qu'une quantité existe)", () => {
+    const r = fusionnerParNom(base, "lait");
+    expect(r[0].quantite).toBe(3);
+    expect(r[0].unite).toBe("bouteilles");
+  });
+
+  it("garde null si aucune ligne n'était quantifiée", () => {
+    const r = fusionnerParNom([
+      { id: 1, nom: "beurre", quantite: null, confiance: "haute" },
+      { id: 2, nom: "beurre", quantite: null, confiance: "haute" },
+    ], "beurre");
+    expect(r).toHaveLength(1);
+    expect(r[0].quantite).toBeNull();
+  });
+
+  it("propage la prudence : une seule confiance faible suffit", () => {
+    const r = fusionnerParNom(base, "lait");
+    expect(r[0].confiance).toBe("faible");
+    expect(r[0].qualificatifs).toBe("demi-écrémé");
+    expect(r[0].texte_entendu).toBe("deux bouteilles de lait + du lait");
+  });
+
+  it("ne touche à rien s'il n'y a pas de doublon", () => {
+    const r = fusionnerParNom(base, "beurre");
+    expect(r).toEqual(base);
   });
 });
