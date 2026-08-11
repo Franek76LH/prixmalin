@@ -7035,7 +7035,7 @@ function MicroLienSheet({ element, onClose, onResolu, onIntrouvable }) {
 // Prise plafonnée à 3 minutes (décision chantier), enchaînable à volonté.
 const MICRO_PRISE_MAX_S = 3 * 60;
 
-function MicroTab() {
+function MicroTab({ onAdd, setTab }) {
   const F = "'Nunito',sans-serif";
   // Détections une seule fois au montage (pas de setState synchrone au rendu).
   // Le micro exige un contexte sécurisé (https, ou localhost) : en http local,
@@ -7068,6 +7068,10 @@ function MicroTab() {
   });
   // Lot 4 — élément en cours de liaison au Catalogue (feuille ouverte).
   const [lienElement, setLienElement] = useState(null);
+  // Lot 5 — ajout groupé au caddie.
+  const [confirmAjout, setConfirmAjout] = useState(false);
+  const [ajoutEnCours, setAjoutEnCours] = useState(false);
+  const [bilanAjout,   setBilanAjout]   = useState(null); // { ajoutes, doublons, echecs }
   const [listeRestauree] = useState(() => (lireMicroDraft()?.elements?.length ?? 0) > 0);
   const [nouvelElement, setNouvelElement] = useState("");
   const [editionId,  setEditionId]  = useState(null);
@@ -7306,6 +7310,38 @@ function MicroTab() {
       ? { ...e, statut_resolution: "introuvable", produit_id: null, variante_produit_id: null, produit_nom: null }
       : e));
     setLienElement(null);
+  };
+
+  // Lot 5 — ajout groupé au caddie via le addItem OFFICIEL (le même que le
+  // Catalogue) : un appel par élément, séquentiel. Relié => produit/variante/
+  // marque_pref ; non relié ou introuvable => texte libre (le rapprochement
+  // alias existant d'addItem peut encore le reconnaître). Les succès et les
+  // doublons sortent de « Ma liste » (et donc du brouillon) ; les échecs
+  // restent, rien n'est jamais perdu.
+  const lancerAjoutCaddie = async () => {
+    if (ajoutEnCours || elementsListe.length === 0 || typeof onAdd !== "function") return;
+    setConfirmAjout(false);
+    setAjoutEnCours(true);
+
+    let ajoutes = 0, doublons = 0;
+    const idsEchecs = new Set();
+    for (const e of [...elementsListe]) {
+      const estRelie = e.statut_resolution === "resolu" && e.produit_id;
+      const item = estRelie
+        ? { product: e.produit_nom, format: "", brand: "", qty: e.quantite ?? 1, checked: false,
+            produit_id: e.produit_id, variante_produit_id: e.variante_produit_id ?? null,
+            marque_pref: e.marque_pref === "mdd" ? "mdd" : "nationale" }
+        : { product: e.nom, format: "", brand: "", qty: e.quantite ?? 1, checked: false };
+      let ok = false;
+      try { ok = await onAdd(item); } catch (err) { console.error("Erreur ajout caddie depuis Micro :", err); ok = false; }
+      if (ok === true) ajoutes++;
+      else if (ok === "duplicate") doublons++;
+      else idsEchecs.add(e.id);
+    }
+
+    setElementsListe(prev => prev.filter(e => idsEchecs.has(e.id)));
+    setBilanAjout({ ajoutes, doublons, echecs: idsEchecs.size });
+    setAjoutEnCours(false);
   };
   // Fusion : TOUJOURS à la demande de l'utilisateur, jamais automatique.
   const fusionner = (nomNorm) => setElementsListe(prev => fusionnerParNom(prev, nomNorm));
@@ -7552,6 +7588,77 @@ function MicroTab() {
                 <button onClick={ajouterElementManuel} disabled={!nouvelElement.trim()}
                   style={{ border:"none", borderRadius:10, background:nouvelElement.trim() ? C.green : "#ccc", color:C.white, fontFamily:F, fontWeight:900, fontSize:13, padding:"10px 14px", cursor:nouvelElement.trim() ? "pointer" : "default", flexShrink:0 }}>
                   Ajouter
+                </button>
+              </div>
+
+              {/* Lot 5 — envoi de toute la liste vers le caddie officiel */}
+              {elementsListe.length > 0 && (
+                <button onClick={() => setConfirmAjout(true)} disabled={ajoutEnCours}
+                  style={{ width:"100%", marginTop:12, padding:"14px", border:"none", borderRadius:13,
+                    background: ajoutEnCours ? "#9CCFAF" : C.green, color:C.white,
+                    fontFamily:F, fontWeight:900, fontSize:15, cursor: ajoutEnCours ? "default" : "pointer",
+                    boxShadow:"0 4px 14px rgba(0,179,65,0.35)", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
+                  {ajoutEnCours ? (
+                    <>
+                      <span style={{ width:16, height:16, border:"3px solid rgba(255,255,255,0.4)", borderTopColor:"#fff", borderRadius:"50%", animation:"spin 0.8s linear infinite", display:"inline-block" }}/>
+                      Ajout en cours…
+                    </>
+                  ) : (
+                    <>🛒 Ajouter au caddie ({elementsListe.length})</>
+                  )}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Lot 5 — confirmation avant l'ajout groupé : le détail est annoncé,
+              l'utilisateur peut annuler pour aller relier ce qui manque. */}
+          {confirmAjout && (
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:9999, padding:24 }} onClick={() => setConfirmAjout(false)}>
+              <div onClick={ev => ev.stopPropagation()} style={{ background:"#fff", borderRadius:16, padding:"20px", maxWidth:340, width:"100%" }}>
+                <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:"#1a1a1a", marginBottom:8 }}>Ajouter au caddie ?</div>
+                <div style={{ fontFamily:F, fontSize:13, color:"#555", lineHeight:1.5, marginBottom:6 }}>
+                  <span style={{ color:C.green, fontWeight:800 }}>{bilanLiaison.ok}</span> produit{bilanLiaison.ok > 1 ? "s" : ""} relié{bilanLiaison.ok > 1 ? "s" : ""} au catalogue
+                </div>
+                {(bilanLiaison.todo + bilanLiaison.ko) > 0 && (
+                  <div style={{ fontFamily:F, fontSize:13, color:"#555", lineHeight:1.5, marginBottom:6 }}>
+                    <span style={{ color:"#B45309", fontWeight:800 }}>{bilanLiaison.todo + bilanLiaison.ko}</span> partiront en <strong>texte libre</strong> (non reliés ou introuvables) — tu pourras les préciser plus tard dans Ma liste.
+                  </div>
+                )}
+                <div style={{ fontFamily:F, fontSize:12, color:"#999", marginBottom:16 }}>
+                  Les quantités et tes préférences de marque sont conservées.
+                </div>
+                <div style={{ display:"flex", gap:8 }}>
+                  <button onClick={lancerAjoutCaddie} style={{ flex:1, padding:"12px", border:"none", borderRadius:10, background:C.green, fontFamily:F, fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer" }}>
+                    Ajouter
+                  </button>
+                  <button onClick={() => setConfirmAjout(false)} style={{ padding:"12px 16px", border:"1.5px solid #eee", borderRadius:10, background:"#fff", fontFamily:F, fontWeight:800, fontSize:14, color:"#333", cursor:"pointer" }}>
+                    Annuler
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Lot 5 — bilan après l'ajout groupé */}
+          {bilanAjout && (
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:9999, padding:24 }} onClick={() => setBilanAjout(null)}>
+              <div onClick={ev => ev.stopPropagation()} style={{ background:"#fff", borderRadius:16, padding:"20px", maxWidth:340, width:"100%", textAlign:"center" }}>
+                <div style={{ fontSize:36, marginBottom:6 }}>{bilanAjout.echecs > 0 ? "⚠️" : "🎉"}</div>
+                <div style={{ fontFamily:F, fontWeight:900, fontSize:16, color:"#1a1a1a", marginBottom:10 }}>
+                  {bilanAjout.ajoutes > 0 ? `${bilanAjout.ajoutes} produit${bilanAjout.ajoutes > 1 ? "s" : ""} ajouté${bilanAjout.ajoutes > 1 ? "s" : ""} à ton caddie` : "Aucun produit ajouté"}
+                </div>
+                <div style={{ fontFamily:F, fontSize:13, color:"#555", lineHeight:1.6, marginBottom:16 }}>
+                  {bilanAjout.doublons > 0 && <div>{bilanAjout.doublons} déjà dans ta liste (non dupliqué{bilanAjout.doublons > 1 ? "s" : ""})</div>}
+                  {bilanAjout.echecs > 0 && <div style={{ color:C.red, fontWeight:700 }}>{bilanAjout.echecs} échec{bilanAjout.echecs > 1 ? "s" : ""} (réseau ?) — ces éléments restent dans Ma liste, réessaie.</div>}
+                </div>
+                <button onClick={() => { setBilanAjout(null); setTab?.("list"); }}
+                  style={{ width:"100%", padding:"13px", border:"none", borderRadius:11, background:"#E5181B", fontFamily:F, fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer", marginBottom:8 }}>
+                  Voir ma liste 🛒
+                </button>
+                <button onClick={() => setBilanAjout(null)}
+                  style={{ background:"none", border:"none", fontFamily:F, fontSize:13, fontWeight:700, color:"#999", cursor:"pointer", padding:"6px" }}>
+                  Rester ici
                 </button>
               </div>
             </div>
@@ -8996,8 +9103,9 @@ export default function App() {
           <TabErrorBoundary key={tab}>
           {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} onResumeScan={handleResumeScan} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)} estFrancois={estFrancois}/>}
           {/* Chantier « Micro » Lot 1 — même mécanique shadow que rejets (#56.3b) :
-              jamais rendu pour un autre utilisateur, même si tab="micro" traîne en state */}
-          {loaded && estFrancois && tab==="micro" && <MicroTab/>}
+              jamais rendu pour un autre utilisateur, même si tab="micro" traîne en state.
+              Lot 5 : onAdd = le addItem OFFICIEL du caddie (même chemin que le Catalogue). */}
+          {loaded && estFrancois && tab==="micro" && <MicroTab onAdd={addItem} setTab={setTab}/>}
           {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} onSetMarquePref={setMarquePrefItem}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix}/>}
