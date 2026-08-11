@@ -25,6 +25,14 @@ async function identifier(userId) {
   }
 }
 
+// Chantier Micro, Lot 6 — capture d'un événement métier nommé. Même garde-fou
+// absolu que le reste du module : sans init (clé absente) on ne fait rien, et
+// aucune erreur d'analytics ne doit jamais remonter dans l'app.
+export function capturerEvenement(nom, proprietes = {}) {
+  if (!initialise || !nom) return;
+  try { posthog.capture(nom, proprietes); } catch { /* silencieux */ }
+}
+
 // Initialise PostHog une seule fois. À appeler tôt (main.jsx), avant le rendu.
 export function initPostHog() {
   if (initialise || !KEY) return;   // pas de clé -> pas d'init, pas de crash

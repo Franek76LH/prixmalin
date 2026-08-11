@@ -7,6 +7,7 @@ import { calculerPrixReferenceParUnite } from "./lib/unitesCore";
 import { urlPhotoVariante, offLargeSource, offFullUrl, cloudinaryAgrandi } from "./lib/photosProduits";
 import { nomComposeVariante, formatEtiquetteVariante } from "./lib/nomProduit";
 import { transcrireAudioListe, normaliserNomElement, comptesParNom, fusionnerParNom } from "./lib/microVocal";
+import { capturerEvenement } from "./lib/posthog";
 import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
 import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
 import { classerMagasinsPourPanier, calculerEconomiePotentielle } from "./lib/classementPanierCore";
@@ -7101,8 +7102,22 @@ function MicroTab({ onAdd, setTab }) {
   const stopperChrono = () => { if (chronoRef.current) { clearInterval(chronoRef.current); chronoRef.current = null; } };
   const libererStream = () => { streamRef.current?.getTracks().forEach(t => t.stop()); streamRef.current = null; };
 
+  // Lot 6 — verrou d'écran (Wake Lock) pendant l'écoute : l'écran ne s'éteint
+  // pas tout seul en pleine prise. Supporté Safari 16.4+ ; si absent ou refusé,
+  // on continue sans (la consigne « garde l'écran allumé » reste affichée).
+  const wakeLockRef = useRef(null);
+  const demanderWakeLock = async () => {
+    try { wakeLockRef.current = await navigator.wakeLock?.request?.("screen") ?? null; }
+    catch { wakeLockRef.current = null; /* refusé (batterie faible…) : non bloquant */ }
+  };
+  const relacherWakeLock = () => {
+    try { wakeLockRef.current?.release?.(); } catch { /* déjà relâché */ }
+    wakeLockRef.current = null;
+  };
+
   const arreter = () => {
     stopperChrono();
+    relacherWakeLock();
     const rec = recorderRef.current;
     if (rec && rec.state !== "inactive") {
       try { rec.stop(); return; } catch { /* onstop ne viendra pas : nettoyage direct */ }
@@ -7164,6 +7179,7 @@ function MicroTab({ onAdd, setTab }) {
     rec.onerror = () => { interrompueRef.current = true; arreter(); };
     rec.onstop = () => {
       stopperChrono();
+      relacherWakeLock();
       const duree = Math.max(1, Math.round((Date.now() - debutRef.current) / 1000));
       const blob = new Blob(chunksRef.current, { type: rec.mimeType || "audio/mp4" });
       chunksRef.current = [];
@@ -7191,6 +7207,8 @@ function MicroTab({ onAdd, setTab }) {
     };
 
     recorderRef.current = rec;
+    // Lot 6 — verrou d'écran le temps de la prise (best effort, jamais bloquant).
+    demanderWakeLock();
     // Faux positif react-hooks/purity : demarrer est un gestionnaire de clic
     // (jamais appelé pendant le rendu), l'horodatage de début de prise y est
     // légitime.
@@ -7224,11 +7242,13 @@ function MicroTab({ onAdd, setTab }) {
     return () => document.removeEventListener("visibilitychange", onHide);
   }, []);
 
-  // Démontage : arrêt de l'enregistreur, libération du micro et des URLs de réécoute.
+  // Démontage : arrêt de l'enregistreur, libération du micro, du verrou
+  // d'écran et des URLs de réécoute.
   useEffect(() => () => {
     if (chronoRef.current) clearInterval(chronoRef.current);
     try { if (recorderRef.current?.state === "recording") recorderRef.current.stop(); } catch { /* ignore */ }
     streamRef.current?.getTracks().forEach(t => t.stop());
+    try { wakeLockRef.current?.release?.(); } catch { /* déjà relâché */ }
     urlsRef.current.forEach(u => URL.revokeObjectURL(u));
   }, []);
 
@@ -7256,6 +7276,11 @@ function MicroTab({ onAdd, setTab }) {
           ...resultat.elements.map(e => ({ ...e, id: genIdElementMicro(), origine: "vocal", statut_resolution: "a_relier", produit_id: null, variante_produit_id: null, produit_nom: null })),
         ]);
       }
+      // Lot 6 — mesure d'usage (jamais le contenu : des comptes, pas des mots).
+      capturerEvenement("micro_prise_transcrite", {
+        nb_elements: resultat.elements.length,
+        nb_ignores: resultat.elements_ignores.length,
+      });
     } catch (e) {
       console.error("Erreur transcription prise vocale :", e);
       setPrises(prev => prev.map(p => p.id === priseId
@@ -7342,6 +7367,8 @@ function MicroTab({ onAdd, setTab }) {
     setElementsListe(prev => prev.filter(e => idsEchecs.has(e.id)));
     setBilanAjout({ ajoutes, doublons, echecs: idsEchecs.size });
     setAjoutEnCours(false);
+    // Lot 6 — mesure d'usage (comptes uniquement, jamais les produits).
+    capturerEvenement("micro_ajout_caddie", { ajoutes, doublons, echecs: idsEchecs.size });
   };
   // Fusion : TOUJOURS à la demande de l'utilisateur, jamais automatique.
   const fusionner = (nomNorm) => setElementsListe(prev => fusionnerParNom(prev, nomNorm));
@@ -8369,6 +8396,8 @@ export default function App() {
   // Chantier anti-doublon, étape 1 — écran "À valider", dev uniquement (voir
   // le bouton flottant plus bas, gardé par import.meta.env.DEV).
   const [showAValider, setShowAValider] = useState(false);
+  // Chantier Micro Lot 6 — pastille 🛠️ qui replie les outils admin flottants.
+  const [adminOutilsOuverts, setAdminOutilsOuverts] = useState(false);
   // Chantier "Scan code-barres", bout 3B — console de validation admin des
   // propositions envoyées par les utilisateurs non-admin (file d'attente
   // propositions_liaison_scan). pendingScanCount alimente le badge du bouton
@@ -9143,26 +9172,37 @@ export default function App() {
             </button>
           </div>
         )}
-        {/* Chantier #73 — accès discret réservé admin (même critère que
-            AdminRejetsCorePanel : isAdmin, calculé via la RPC
-            est_administrateur() / app_metadata.role==='admin'), jamais dans
-            la TabBar, invisible pour tout autre utilisateur en prod. */}
+        {/* Chantier #73 + "Scan code-barres" 3B — accès discrets réservés admin
+            (isAdmin via la RPC est_administrateur() / app_metadata.role==='admin'),
+            jamais dans la TabBar, invisibles pour tout autre utilisateur en prod.
+            Chantier Micro Lot 6 : REPLIÉS derrière une pastille 🛠️ unique — les
+            deux gros boutons chevauchaient les titres d'écran (Micro, Ma liste…).
+            Le badge pendingScanCount reste visible sur la pastille repliée. */}
         {isAdmin && (
-          <button onClick={()=>setShowAValider(true)} style={{ position:"fixed", top:10, left:10, zIndex:500, padding:"6px 10px", borderRadius:8, border:"none", background:"rgba(0,0,0,0.55)", color:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:10, cursor:"pointer" }}>
-            🔍 À valider
-          </button>
+          <div style={{ position:"fixed", top:10, left:10, zIndex:500, display:"flex", flexDirection:"column", gap:6, alignItems:"flex-start" }}>
+            <button onClick={()=>setAdminOutilsOuverts(o=>!o)} aria-label="Outils admin"
+              style={{ width:32, height:32, borderRadius:99, border:"none", background:"rgba(0,0,0,0.55)", color:"#fff", fontSize:14, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", position:"relative", padding:0 }}>
+              {adminOutilsOuverts ? "✕" : "🛠️"}
+              {pendingScanCount > 0 && !adminOutilsOuverts && (
+                <span style={{ position:"absolute", top:-4, right:-4, background:"#CC0000", borderRadius:99, minWidth:15, height:15, padding:"0 3px", fontSize:9, fontWeight:900, color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1 }}>{pendingScanCount}</span>
+              )}
+            </button>
+            {adminOutilsOuverts && (
+              <>
+                <button onClick={()=>{ setShowAValider(true); setAdminOutilsOuverts(false); }} style={{ padding:"6px 10px", borderRadius:8, border:"none", background:"rgba(0,0,0,0.55)", color:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:10, cursor:"pointer" }}>
+                  🔍 À valider
+                </button>
+                <button onClick={()=>{ setShowValidationScan(true); setAdminOutilsOuverts(false); }} style={{ padding:"6px 10px", borderRadius:8, border:"none", background:"rgba(0,0,0,0.55)", color:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:10, cursor:"pointer", display:"flex", alignItems:"center", gap:5 }}>
+                  🧾 Validation scan
+                  {pendingScanCount > 0 && (
+                    <span style={{ background:"#CC0000", borderRadius:99, minWidth:16, height:16, padding:"0 4px", fontSize:10, fontWeight:900, display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1 }}>{pendingScanCount}</span>
+                  )}
+                </button>
+              </>
+            )}
+          </div>
         )}
         {showAValider && isAdmin && <AValiderSheet onClose={()=>setShowAValider(false)}/>}
-        {/* Chantier "Scan code-barres" bout 3B — même critère admin, même
-            emplacement discret hors TabBar. Badge = pendingScanCount. */}
-        {isAdmin && (
-          <button onClick={()=>setShowValidationScan(true)} style={{ position:"fixed", top:44, left:10, zIndex:500, padding:"6px 10px", borderRadius:8, border:"none", background:"rgba(0,0,0,0.55)", color:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:10, cursor:"pointer", display:"flex", alignItems:"center", gap:5 }}>
-            🧾 Validation scan
-            {pendingScanCount > 0 && (
-              <span style={{ background:"#CC0000", borderRadius:99, minWidth:16, height:16, padding:"0 4px", fontSize:10, fontWeight:900, display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1 }}>{pendingScanCount}</span>
-            )}
-          </button>
-        )}
         {showValidationScan && isAdmin && <ValidationScanSheet onClose={()=>setShowValidationScan(false)} onCountChange={setPendingScanCount}/>}
         {appToast && <Toast msg={appToast.msg} ok={appToast.ok}/>}
         {showCircleSheet  && <CircleSheet  circles={circles} userId={session.user.id} userEmail={session.user.email} profileMap={profileMap} pseudo={pseudo} archives={archives} onClose={()=>setShowCircleSheet(false)} onInvite={inviteByPseudo} onUpdateStatus={updateCircleStatus}/>}
