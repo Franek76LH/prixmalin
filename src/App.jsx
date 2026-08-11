@@ -1234,7 +1234,17 @@ function lireSessionCourses() {
 function ecrireSessionCourses(sessionCourses) {
   try { localStorage.setItem(SESSION_COURSES_KEY, JSON.stringify(sessionCourses)); } catch { /* quota/mode privé : on ignore */ }
 }
-// L'effacement (localStorage.removeItem) arrivera avec la clôture au Lot 6.
+// Lot 3 — abandon explicite depuis la carte d'accueil (et clôture au Lot 6).
+function effacerSessionCourses() {
+  try { localStorage.removeItem(SESSION_COURSES_KEY); } catch { /* ignore */ }
+}
+// Lot 3 — ancienneté d'une session pour le bandeau de la carte d'accueil
+// (arbitrage François : jamais d'expiration automatique, seulement informer).
+function joursDepuis(iso) {
+  const d = iso ? new Date(iso) : null;
+  if (!d || Number.isNaN(d.getTime())) return 0;
+  return Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000));
+}
 function genIdElementMicro() {
   microSeqElement += 1;
   return `el_${microSeqElement}_${Math.random().toString(36).slice(2, 8)}`;
@@ -8018,13 +8028,18 @@ function CoursesTab({ session, setTab, onChangerEtat }) {
   );
 }
 
-function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash, onResumeScan, archives = [], pseudo, onStats, onMesPrix, onFaq, onSignOut, pendingCagnotte, onConsumeCagnotteCelebration, pendingPotential, onConsumePotentialCelebration, estFrancois = false }) {
+function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash, onResumeScan, archives = [], pseudo, onStats, onMesPrix, onFaq, onSignOut, pendingCagnotte, onConsumeCagnotteCelebration, pendingPotential, onConsumePotentialCelebration, estFrancois = false, sessionCourses = null, onReprendreCourses, onAbandonnerCourses }) {
   const F = "'Nunito',sans-serif";
   // Chantier 79 (ajustement) — scan en cours visible dès l'accueil. HomeTab
   // n'étant monté que sur l'onglet home, la lecture au montage reflète l'état
   // courant du brouillon (relu à chaque retour sur l'accueil).
   const [scanDraft, setScanDraft] = useState(() => lireScanDraft());
   const [confirmAbandonScan, setConfirmAbandonScan] = useState(false);
+  // Chantier « Courses » Lot 3 (shadow estFrancois) — confirmation d'abandon
+  // de la session de courses (même pattern que l'abandon de scan).
+  const [confirmAbandonCourses, setConfirmAbandonCourses] = useState(false);
+  const progCourses = sessionCourses ? calculerProgression(sessionCourses.articles) : null;
+  const joursCourses = sessionCourses ? joursDepuis(sessionCourses.cree_le) : 0;
   const unchecked = items.filter(i => !i.checked).length;
   const members   = circles.filter(c => c.status === 'accepted');
   const avatarBg  = ["#E5181B","#F5C200","#00B341","#4A90D9","#8E44AD"];
@@ -8245,6 +8260,64 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash
             <button onClick={() => setConfirmAbandonScan(true)} style={{ padding:'10px 14px', border:'1.5px solid rgba(122,96,0,0.35)', borderRadius:10, background:'transparent', fontFamily:F, fontWeight:800, fontSize:13, color:'#7A6000', cursor:'pointer' }}>
               Abandonner
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Chantier « Courses » Lot 3 (shadow estFrancois) — carte de reprise :
+          visible uniquement quand une session est active, entièrement
+          cliquable (Reprendre), progression réelle mise à jour à chaque
+          cochage, bandeau d'ancienneté au-delà de 2 jours. Ne disparaît que
+          sur abandon explicite (ou clôture, Lot 6) — jamais d'expiration
+          automatique. Distincte du bouton caddie 🛒 en haut à droite (qui
+          ouvre « Ma liste » pour PRÉPARER un comparatif). */}
+      {sessionCourses && (
+        <div onClick={() => onReprendreCourses?.()}
+          style={{ margin:'12px 20px 0', padding:'12px 14px', background:'#fff', border:'2px solid #E5181B', borderRadius:14, position:'relative', zIndex:10, boxShadow:'0 3px 12px rgba(0,0,0,0.12)', cursor:'pointer' }}>
+          <div style={{ fontFamily:F, fontWeight:900, fontSize:13, color:'#1a1a1a' }}>
+            🛒 Courses en cours chez {sessionCourses.magasin?.nom}
+          </div>
+          <div style={{ fontFamily:F, fontSize:12, color:'#666', marginTop:2 }}>
+            {progCourses.pris} article{progCourses.pris > 1 ? 's' : ''} sur {progCourses.total} dans le caddie
+            {progCourses.introuvables > 0 ? ` · ${progCourses.introuvables} introuvable${progCourses.introuvables > 1 ? 's' : ''}` : ''}
+          </div>
+          <div style={{ marginTop:6, height:6, borderRadius:99, background:'#F0F0F0', overflow:'hidden' }}>
+            <div style={{ width:`${progCourses.total > 0 ? Math.round(progCourses.pris / progCourses.total * 100) : 0}%`, height:'100%', borderRadius:99, background:'#E5181B' }} />
+          </div>
+          {joursCourses >= 2 && (
+            <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:'#7A6000', background:'#FFF8E6', border:`1px solid ${C.yellow}`, borderRadius:8, padding:'4px 8px', marginTop:8, display:'inline-block' }}>
+              ⚠️ commencées il y a {joursCourses} jours
+            </div>
+          )}
+          <div style={{ display:'flex', gap:8, marginTop:10 }}>
+            <button onClick={(e) => { e.stopPropagation(); onReprendreCourses?.(); }}
+              style={{ flex:1, padding:'10px', border:'none', borderRadius:10, background:'#E5181B', fontFamily:F, fontWeight:900, fontSize:13, color:'#fff', cursor:'pointer' }}>
+              Reprendre
+            </button>
+            <button onClick={(e) => { e.stopPropagation(); setConfirmAbandonCourses(true); }}
+              style={{ padding:'10px 14px', border:'1.5px solid rgba(204,0,0,0.3)', borderRadius:10, background:'transparent', fontFamily:F, fontWeight:800, fontSize:13, color:'#CC0000', cursor:'pointer' }}>
+              Abandonner
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation d'abandon des courses en cours */}
+      {confirmAbandonCourses && sessionCourses && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:9999, padding:24 }} onClick={() => setConfirmAbandonCourses(false)}>
+          <div onClick={e => e.stopPropagation()} style={{ background:'#fff', borderRadius:16, padding:'20px', maxWidth:320, width:'100%' }}>
+            <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:'#1a1a1a', marginBottom:6 }}>Abandonner ces courses en cours ?</div>
+            <div style={{ fontFamily:F, fontSize:13, color:'#888', marginBottom:16 }}>
+              La progression ({progCourses.pris} sur {progCourses.total}) sera perdue. Ton caddie « Ma liste » n'est pas touché.
+            </div>
+            <div style={{ display:'flex', gap:8 }}>
+              <button onClick={() => { onAbandonnerCourses?.(); setConfirmAbandonCourses(false); }} style={{ flex:1, padding:'12px', border:'none', borderRadius:10, background:'#CC0000', fontFamily:F, fontWeight:900, fontSize:14, color:'#fff', cursor:'pointer' }}>
+                Abandonner
+              </button>
+              <button onClick={() => setConfirmAbandonCourses(false)} style={{ padding:'12px 16px', border:'1.5px solid #eee', borderRadius:10, background:'#fff', fontFamily:F, fontWeight:800, fontSize:14, color:'#333', cursor:'pointer' }}>
+                Annuler
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -8475,6 +8548,15 @@ export default function App() {
   // réhydratée depuis localStorage à l'init (survit au rechargement). Rendue
   // uniquement pour François via tab==="courses" (aucun onglet TabBar ajouté).
   const [sessionCourses, setSessionCourses] = useState(() => lireSessionCourses());
+  // Lot 3 — validation demandée alors qu'une session est déjà active :
+  // mémorise la validation en attente ({store, potentialSaving, extrasCourses})
+  // le temps que François choisisse « reprendre » ou « remplacer ».
+  const [confirmCoursesExistantes, setConfirmCoursesExistantes] = useState(null);
+  // Lot 3 — session réellement exploitable : active ET appartenant à
+  // l'utilisateur connecté (le localStorage est partagé par appareil — une
+  // session d'un autre compte ne doit ni s'afficher ni être reprise).
+  const sessionCoursesActive = (estFrancois && sessionCourses?.statut === 'active'
+    && sessionCourses?.utilisateur_id === session?.user?.id) ? sessionCourses : null;
   const [priceDB, setPriceDB]     = useState([]);
   // Chantier 81 — zone du comparateur (point + rayon + libellé) réhydratée
   // depuis localStorage à l'init : au retour, l'utilisateur retrouve sa zone
@@ -9143,7 +9225,24 @@ export default function App() {
     setSessionCourses(suivante);
   };
 
-  const handleValidate = async (store, potentialSaving = 0, extrasCourses = null) => {
+  // Lot 3 — abandon explicite depuis la carte d'accueil (jamais automatique).
+  // Le caddie n'est pas touché ; l'archive créée à la validation reste, comme
+  // pour un comparatif validé sans scan de ticket (comportement historique).
+  const abandonnerSessionCourses = () => {
+    effacerSessionCourses();
+    setSessionCourses(null);
+  };
+
+  const handleValidate = async (store, potentialSaving = 0, extrasCourses = null, forcerRemplacement = false) => {
+    // Lot 3 (shadow estFrancois) — une session est déjà active : on demande
+    // AVANT toute écriture (ni archive ni session créées à ce stade) si
+    // François reprend ses courses ou remplace par cette nouvelle liste.
+    // « Reprendre » ne crée donc rien — pas d'archive fantôme.
+    if (estFrancois && extrasCourses && sessionCoursesActive && !forcerRemplacement) {
+      setConfirmCoursesExistantes({ store, potentialSaving, extrasCourses });
+      return;
+    }
+
     let totalSaving = 0;
     const details = [];
     items.forEach(item => {
@@ -9423,7 +9522,7 @@ export default function App() {
             </div>
           )}
           <TabErrorBoundary key={tab}>
-          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} onResumeScan={handleResumeScan} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)} estFrancois={estFrancois}/>}
+          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} onResumeScan={handleResumeScan} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)} estFrancois={estFrancois} sessionCourses={sessionCoursesActive} onReprendreCourses={()=>setTab("courses")} onAbandonnerCourses={abandonnerSessionCourses}/>}
           {/* Chantier « Micro » Lot 1 — même mécanique shadow que rejets (#56.3b) :
               jamais rendu pour un autre utilisateur, même si tab="micro" traîne en state.
               Lot 5 : onAdd = le addItem OFFICIEL du caddie (même chemin que le Catalogue). */}
@@ -9431,7 +9530,7 @@ export default function App() {
           {/* Chantier « Courses » Lot 1 (shadow estFrancois) — écran de courses,
               accessible uniquement via la validation du comparatif (aucun
               onglet TabBar). Session absente -> rien n'est rendu. */}
-          {loaded && estFrancois && tab==="courses" && sessionCourses && <CoursesTab session={sessionCourses} setTab={setTab} onChangerEtat={changerEtatArticleSession}/>}
+          {loaded && estFrancois && tab==="courses" && sessionCoursesActive && <CoursesTab session={sessionCoursesActive} setTab={setTab} onChangerEtat={changerEtatArticleSession}/>}
           {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} onSetMarquePref={setMarquePrefItem}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix} estFrancois={estFrancois}/>}
@@ -9551,6 +9650,31 @@ export default function App() {
             onSave={async rating=>{ const {error}=await updateArchive(showRating.id,{store_rating:rating}); if(error) showAppToast("⚠️ Note non sauvegardée, vérifie ta connexion",false); else fetchStoreRatings(); setShowRating(null); setTab("home"); }}
             onSkip={()=>{ setShowRating(null); setTab("home"); }}
           />
+        )}
+        {/* Lot 3 (shadow estFrancois) — validation demandée alors que des
+            courses sont déjà en cours : reprendre (ne crée RIEN) ou remplacer
+            (relance la validation complète avec forcerRemplacement). */}
+        {confirmCoursesExistantes && sessionCoursesActive && (
+          <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:9999, padding:24 }} onClick={()=>setConfirmCoursesExistantes(null)}>
+            <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:16, padding:"20px", maxWidth:340, width:"100%" }}>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:"#1a1a1a", marginBottom:6 }}>Des courses sont déjà en cours 🛒</div>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:"#888", marginBottom:16 }}>
+                Chez <strong>{sessionCoursesActive.magasin?.nom}</strong> — {calculerProgression(sessionCoursesActive.articles).pris} article{calculerProgression(sessionCoursesActive.articles).pris > 1 ? "s" : ""} sur {calculerProgression(sessionCoursesActive.articles).total} déjà dans le caddie. Remplacer effacera cette progression.
+              </div>
+              <button onClick={()=>{ setConfirmCoursesExistantes(null); setTab("courses"); }}
+                style={{ width:"100%", padding:"13px", border:"none", borderRadius:10, background:C.green, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer", marginBottom:8 }}>
+                ▶️ Reprendre mes courses
+              </button>
+              <button onClick={()=>{ const p = confirmCoursesExistantes; setConfirmCoursesExistantes(null); handleValidate(p.store, p.potentialSaving, p.extrasCourses, true); }}
+                style={{ width:"100%", padding:"13px", border:"none", borderRadius:10, background:"#CC0000", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer", marginBottom:8 }}>
+                🔄 Remplacer par cette nouvelle liste
+              </button>
+              <button onClick={()=>setConfirmCoursesExistantes(null)}
+                style={{ width:"100%", padding:"12px", border:"1.5px solid #eee", borderRadius:10, background:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:"#333", cursor:"pointer" }}>
+                Annuler
+              </button>
+            </div>
+          </div>
         )}
         {showSuccess && (
           <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:300, animation:"fadeIn 0.2s ease", padding:"20px", overflowY:"auto" }}>
