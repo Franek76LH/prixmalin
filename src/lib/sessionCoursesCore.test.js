@@ -15,6 +15,12 @@ import {
   grouperParRayon,
   calculerProgression,
   appliquerEtatArticle,
+  genererIdSession,
+  ligneSupabaseDepuisSession,
+  sauvegarderSessionSupabase,
+  abandonnerSessionsActivesSupabase,
+  chargerSessionActiveSupabase,
+  choisirSessionLaPlusRecente,
 } from './sessionCoursesCore';
 
 const RAYON_EPICERIE = {
@@ -288,6 +294,121 @@ describe('emojiRayon', () => {
     expect(emojiRayon(RAYON_FRUITS)).toBe('🥦');
     expect(emojiRayon(RAYON_AUTRES)).toBe('🧺');
     expect(emojiRayon({ categorie_slug: 'inconnu' })).toBe('🧺');
+  });
+});
+
+describe('genererIdSession (incident 2026-08-11 : contexte non sécurisé)', () => {
+  const FORMAT_UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+  it('utilise crypto.randomUUID quand il existe (contexte sécurisé)', () => {
+    const cryptoApi = { randomUUID: vi.fn().mockReturnValue('uuid-natif') };
+    expect(genererIdSession(cryptoApi)).toBe('uuid-natif');
+    expect(cryptoApi.randomUUID).toHaveBeenCalledTimes(1);
+  });
+
+  it('sans randomUUID (http:// sur IP locale) : UUID v4 valide via getRandomValues', () => {
+    const cryptoApi = {
+      // randomUUID absent, comme sur Safari en contexte non sécurisé
+      getRandomValues: (arr) => { for (let i = 0; i < arr.length; i++) arr[i] = (i * 37 + 11) % 256; return arr; },
+    };
+    const id = genererIdSession(cryptoApi);
+    expect(id).toMatch(FORMAT_UUID_V4); // version 4 + variante RFC 4122 posées à la main
+  });
+
+  it('deux appels réels produisent deux ids distincts au bon format', () => {
+    const sansNatif = { getRandomValues: (arr) => globalThis.crypto.getRandomValues(arr) };
+    const a = genererIdSession(sansNatif);
+    const b = genererIdSession(sansNatif);
+    expect(a).toMatch(FORMAT_UUID_V4);
+    expect(b).toMatch(FORMAT_UUID_V4);
+    expect(a).not.toBe(b);
+  });
+});
+
+describe('Lot 4 — filet Supabase', () => {
+  const sessionSync = () => construireSessionCourses({
+    id: 'sess-1',
+    utilisateurId: 'u1',
+    magasin: { magasin_id: 'm1', nom: 'E.Leclerc Blotzheim' },
+    articles: [{ cle: 'a', etat: 'a_prendre' }],
+    totalPrevu: 12.5,
+    creeLeISO: '2026-08-11T10:00:00.000Z',
+  });
+
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('construireSessionCourses porte l’id fourni (null par défaut, sessions pré-Lot 4)', () => {
+    expect(sessionSync().id).toBe('sess-1');
+    expect(construireSessionCourses({ utilisateurId: 'u1', magasin: null, articles: [], totalPrevu: 0, creeLeISO: 'x' }).id).toBeNull();
+  });
+
+  it('ligneSupabaseDepuisSession : colonnes dénormalisées + document complet dans donnees', () => {
+    const ligne = ligneSupabaseDepuisSession(sessionSync());
+    expect(ligne).toMatchObject({
+      id: 'sess-1', utilisateur_id: 'u1', magasin_id: 'm1', statut: 'active',
+      cree_le: '2026-08-11T10:00:00.000Z', modifie_le: '2026-08-11T10:00:00.000Z', terminee_le: null,
+    });
+    expect(ligne.donnees.articles).toHaveLength(1); // le document entier, tel quel
+    expect(ligneSupabaseDepuisSession({ ...sessionSync(), id: null })).toBeNull();
+  });
+
+  it('sauvegarderSessionSupabase : upsert idempotent sur id ; false sans id/compte ; throw sur erreur', async () => {
+    const upsert = vi.fn().mockResolvedValue({ error: null });
+    supabase.from.mockReturnValue({ upsert });
+    await expect(sauvegarderSessionSupabase(sessionSync())).resolves.toBe(true);
+    expect(supabase.from).toHaveBeenCalledWith('sessions_courses');
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({ id: 'sess-1' }), { onConflict: 'id' });
+
+    await expect(sauvegarderSessionSupabase({ ...sessionSync(), id: null })).resolves.toBe(false);
+    await expect(sauvegarderSessionSupabase(null)).resolves.toBe(false);
+
+    upsert.mockResolvedValue({ error: new Error('reseau') });
+    await expect(sauvegarderSessionSupabase(sessionSync())).rejects.toThrow('reseau');
+  });
+
+  it('abandonnerSessionsActivesSupabase : cible mes sessions actives, épargne saufId', async () => {
+    const chaine = { eq: vi.fn(), neq: vi.fn(), error: null };
+    chaine.eq.mockReturnValue(chaine);
+    chaine.neq.mockReturnValue(chaine);
+    const update = vi.fn().mockReturnValue(chaine);
+    supabase.from.mockReturnValue({ update });
+
+    await abandonnerSessionsActivesSupabase('u1', 'T1', { saufId: 'sess-2' });
+    expect(update).toHaveBeenCalledWith({ statut: 'abandonnee', modifie_le: 'T1' });
+    expect(chaine.eq).toHaveBeenCalledWith('utilisateur_id', 'u1');
+    expect(chaine.eq).toHaveBeenCalledWith('statut', 'active');
+    expect(chaine.neq).toHaveBeenCalledWith('id', 'sess-2');
+
+    chaine.neq.mockClear();
+    await abandonnerSessionsActivesSupabase('u1', 'T2');
+    expect(chaine.neq).not.toHaveBeenCalled();
+
+    await abandonnerSessionsActivesSupabase(null, 'T3'); // sans compte : aucun appel
+    expect(update).toHaveBeenCalledTimes(2);
+  });
+
+  it('chargerSessionActiveSupabase : renvoie le document donnees, null si aucune', async () => {
+    const maybeSingle = vi.fn().mockResolvedValue({ data: { donnees: { id: 'sess-9' } }, error: null });
+    const chaine = { eq: vi.fn(), maybeSingle };
+    chaine.eq.mockReturnValue(chaine);
+    supabase.from.mockReturnValue({ select: vi.fn().mockReturnValue(chaine) });
+
+    await expect(chargerSessionActiveSupabase('u1')).resolves.toEqual({ id: 'sess-9' });
+    maybeSingle.mockResolvedValue({ data: null, error: null });
+    await expect(chargerSessionActiveSupabase('u1')).resolves.toBeNull();
+    await expect(chargerSessionActiveSupabase(null)).resolves.toBeNull();
+  });
+
+  it('choisirSessionLaPlusRecente : modifie_le le plus récent gagne, la locale à égalité/date illisible', () => {
+    const locale = { id: 'L', modifie_le: '2026-08-11T10:00:00.000Z' };
+    const distante = { id: 'D', modifie_le: '2026-08-11T11:00:00.000Z' };
+    expect(choisirSessionLaPlusRecente(locale, distante).id).toBe('D');
+    expect(choisirSessionLaPlusRecente(distante, locale).id).toBe('D');
+    expect(choisirSessionLaPlusRecente(locale, { ...distante, modifie_le: locale.modifie_le }).id).toBe('L');
+    expect(choisirSessionLaPlusRecente(locale, { id: 'D', modifie_le: 'invalide' }).id).toBe('L');
+    expect(choisirSessionLaPlusRecente(null, distante).id).toBe('D');
+    expect(choisirSessionLaPlusRecente(locale, null).id).toBe('L');
+    expect(choisirSessionLaPlusRecente(null, null)).toBeNull();
   });
 });
 

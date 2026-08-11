@@ -8,7 +8,7 @@ import { urlPhotoVariante, offLargeSource, offFullUrl, cloudinaryAgrandi } from 
 import { nomComposeVariante, formatEtiquetteVariante } from "./lib/nomProduit";
 import { transcrireAudioListe, normaliserNomElement, comptesParNom, fusionnerParNom } from "./lib/microVocal";
 // Chantier « Courses » Lot 1 — session de courses figée (shadow estFrancois).
-import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle } from "./lib/sessionCoursesCore";
+import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession } from "./lib/sessionCoursesCore";
 import { capturerEvenement } from "./lib/posthog";
 import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
 import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
@@ -7900,7 +7900,7 @@ function LigneArticleCourses({ article, variante, onCocher, onIntrouvable, onRes
   );
 }
 
-function CoursesTab({ session, setTab, onChangerEtat }) {
+function CoursesTab({ session, setTab, onChangerEtat, syncEchec = false }) {
   const F = "'Nunito',sans-serif";
   // « Dans le caddie » repliée par défaut — hook déclaré AVANT le early
   // return (règle des Hooks : ordre stable entre rendus).
@@ -7940,6 +7940,14 @@ function CoursesTab({ session, setTab, onChangerEtat }) {
           <div style={{ width:`${Math.round(ratio*100)}%`, height:"100%", borderRadius:99, background:"#FFD700", transition:"width 0.3s ease" }} />
         </div>
       </div>
+
+      {/* Lot 4 — indicateur d'échec du filet Supabase : discret, jamais
+          silencieux. Rien n'est affiché quand tout va bien (cas normal). */}
+      {syncEchec && (
+        <div style={{ background:"#FFF8E6", border:`1px solid ${C.yellow}`, borderRadius:10, padding:"8px 12px", marginBottom:12, fontFamily:F, fontWeight:800, fontSize:12, color:"#7A6000" }}>
+          ⚠️ Sauvegarde en ligne impossible pour l'instant — tes courses restent enregistrées sur ce téléphone.
+        </div>
+      )}
 
       {/* À PRENDRE — sections par rayon (catégorie), ordre de la base. Un
           rayon entièrement pris n'a plus d'article ici : il disparaît de
@@ -8557,6 +8565,72 @@ export default function App() {
   // session d'un autre compte ne doit ni s'afficher ni être reprise).
   const sessionCoursesActive = (estFrancois && sessionCourses?.statut === 'active'
     && sessionCourses?.utilisateur_id === session?.user?.id) ? sessionCourses : null;
+  // Lot 4 — état du filet Supabase : null = rien à dire, 'echec' = la dernière
+  // sauvegarde base a échoué (indicateur discret sur l'écran de courses —
+  // jamais silencieux, jamais bloquant : le localStorage reste la source
+  // immédiate).
+  const [syncCoursesEchec, setSyncCoursesEchec] = useState(false);
+  // Lot 4 — restauration base exécutée une seule fois par connexion.
+  const restaurationCoursesFaite = useRef(false);
+
+  // Lot 4 — sauvegarde Supabase débouncée (~2 s) après chaque changement de
+  // session (création, coche, décoche, introuvable). L'écriture localStorage,
+  // elle, reste immédiate (changerEtatArticleSession). Une session d'avant le
+  // Lot 4 (sans id) reçoit son id ici, une seule fois, puis l'effet relancé
+  // par le re-rendu fait l'upsert.
+  useEffect(() => {
+    if (!estFrancois || !sessionCoursesActive) return;
+    const t = setTimeout(async () => {
+      if (!sessionCoursesActive.id) {
+        // genererIdSession (jamais crypto.randomUUID nu) + try : l'attribution
+        // d'id ne doit jamais produire de rejet non géré (incident 2026-08-11).
+        try {
+          const avecId = { ...sessionCoursesActive, id: genererIdSession() };
+          ecrireSessionCourses(avecId);
+          setSessionCourses(avecId);
+        } catch (e) {
+          console.error("Attribution d'id de session impossible :", e);
+          setSyncCoursesEchec(true);
+        }
+        return;
+      }
+      try {
+        await sauvegarderSessionSupabase(sessionCoursesActive);
+        setSyncCoursesEchec(false);
+      } catch (e) {
+        console.error("Filet Supabase courses (sauvegarde) :", e);
+        setSyncCoursesEchec(true);
+      }
+    }, 2000);
+    return () => clearTimeout(t);
+  }, [estFrancois, sessionCoursesActive]);
+
+  // Lot 4 — restauration à deux sources à la connexion : le localStorage est
+  // déjà hydraté ; on lit la session active en base et le modifie_le le plus
+  // récent gagne (reprise depuis un autre appareil, ou localStorage purgé par
+  // Safari). Échec réseau : silencieux ici car la copie locale reste affichée
+  // et la sauvegarde débouncée resignalera tout vrai problème d'écriture.
+  useEffect(() => {
+    if (!estFrancois || !session?.user?.id || restaurationCoursesFaite.current) return;
+    restaurationCoursesFaite.current = true;
+    let annule = false;
+    (async () => {
+      try {
+        const distante = await chargerSessionActiveSupabase(session.user.id);
+        if (annule || !distante) return;
+        const locale = (sessionCourses?.statut === 'active'
+          && sessionCourses?.utilisateur_id === session.user.id) ? sessionCourses : null;
+        const retenue = choisirSessionLaPlusRecente(locale, distante);
+        if (retenue && retenue !== locale) {
+          ecrireSessionCourses(retenue);
+          setSessionCourses(retenue);
+        }
+      } catch (e) {
+        console.error("Filet Supabase courses (restauration) :", e);
+      }
+    })();
+    return () => { annule = true; };
+  }, [estFrancois, session?.user?.id, sessionCourses]);
   const [priceDB, setPriceDB]     = useState([]);
   // Chantier 81 — zone du comparateur (point + rayon + libellé) réhydratée
   // depuis localStorage à l'init : au retour, l'utilisateur retrouve sa zone
@@ -9195,6 +9269,10 @@ export default function App() {
     }
     const articles = construireArticlesSession({ items, lignesPrix: extrasCourses.lignesPrix, rayons });
     const nouvelleSession = construireSessionCourses({
+      // Lot 4 — id client : clé primaire de la ligne Supabase (upsert
+      // idempotent). genererIdSession et non crypto.randomUUID : ce dernier
+      // n'existe pas en contexte non sécurisé (incident 2026-08-11).
+      id: genererIdSession(),
       utilisateurId: session?.user?.id ?? null,
       magasin: {
         magasin_id: extrasCourses.magasinId ?? null,
@@ -9211,6 +9289,21 @@ export default function App() {
     ecrireSessionCourses(nouvelleSession);
     setSessionCourses(nouvelleSession);
     setTab("courses");
+
+    // Lot 4 — filet Supabase, best effort (jamais bloquant) : d'abord basculer
+    // toute ancienne session active en 'abandonnee' (index unique partiel),
+    // PUIS upsert de la nouvelle. Un échec est signalé par l'indicateur et la
+    // sauvegarde débouncée réessaiera au prochain changement.
+    (async () => {
+      try {
+        await abandonnerSessionsActivesSupabase(session?.user?.id, nouvelleSession.cree_le, { saufId: nouvelleSession.id });
+        await sauvegarderSessionSupabase(nouvelleSession);
+        setSyncCoursesEchec(false);
+      } catch (e) {
+        console.error("Filet Supabase courses (création) :", e);
+        setSyncCoursesEchec(true);
+      }
+    })();
   };
 
   // Chantier « Courses » Lot 2 (shadow estFrancois) — cocher / décocher /
@@ -9229,8 +9322,20 @@ export default function App() {
   // Le caddie n'est pas touché ; l'archive créée à la validation reste, comme
   // pour un comparatif validé sans scan de ticket (comportement historique).
   const abandonnerSessionCourses = () => {
+    const utilisateurId = session?.user?.id;
     effacerSessionCourses();
     setSessionCourses(null);
+    // Lot 4 — bascule aussi la ligne base en 'abandonnee' (best effort). Si
+    // l'écriture échoue (hors ligne), la ligne restera active en base et la
+    // session réapparaîtrait à la prochaine restauration : gênant mais jamais
+    // une perte — l'abandon pourra être refait.
+    (async () => {
+      try {
+        await abandonnerSessionsActivesSupabase(utilisateurId, new Date().toISOString());
+      } catch (e) {
+        console.error("Filet Supabase courses (abandon) :", e);
+      }
+    })();
   };
 
   const handleValidate = async (store, potentialSaving = 0, extrasCourses = null, forcerRemplacement = false) => {
@@ -9279,10 +9384,17 @@ export default function App() {
     if (estFrancois && extrasCourses) {
       try {
         await demarrerSessionCourses(store, extrasCourses);
-        return;
       } catch (e) {
-        console.error("Création de la session de courses échouée, flux standard :", e);
+        // Incident 2026-08-11 — plus JAMAIS de repli vers le flux standard
+        // ici : il viderait le caddie (c'est exactement ce qui s'est produit
+        // quand crypto.randomUUID manquait en contexte non sécurisé). Échec de
+        // démarrage => caddie INTACT, message clair, on reste sur le
+        // comparateur. L'archive créée ci-dessus est conservée (même situation
+        // qu'un comparatif validé jamais scanné).
+        console.error("Création de la session de courses échouée :", e);
+        showAppToast("⚠️ Impossible de démarrer les courses — ta liste est intacte, réessaie.", false);
       }
+      return;
     }
 
     setItems([]);
@@ -9530,7 +9642,7 @@ export default function App() {
           {/* Chantier « Courses » Lot 1 (shadow estFrancois) — écran de courses,
               accessible uniquement via la validation du comparatif (aucun
               onglet TabBar). Session absente -> rien n'est rendu. */}
-          {loaded && estFrancois && tab==="courses" && sessionCoursesActive && <CoursesTab session={sessionCoursesActive} setTab={setTab} onChangerEtat={changerEtatArticleSession}/>}
+          {loaded && estFrancois && tab==="courses" && sessionCoursesActive && <CoursesTab session={sessionCoursesActive} setTab={setTab} onChangerEtat={changerEtatArticleSession} syncEchec={syncCoursesEchec}/>}
           {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} onSetMarquePref={setMarquePrefItem}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix} estFrancois={estFrancois}/>}

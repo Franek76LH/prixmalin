@@ -134,11 +134,14 @@ export function construireArticlesSession({ items, lignesPrix, rayons }) {
   });
 }
 
-// Document de session figé (version 1). creeLeISO est fourni par l'appelant
-// pour garder la fonction pure et testable.
-export function construireSessionCourses({ utilisateurId, magasin, articles, totalPrevu, creeLeISO }) {
+// Document de session figé (version 1). creeLeISO et id sont fournis par
+// l'appelant (crypto.randomUUID() côté app) pour garder la fonction pure et
+// testable. L'id sert de clé primaire de la ligne Supabase (Lot 4) : l'upsert
+// est ainsi idempotent, y compris après une coupure réseau.
+export function construireSessionCourses({ id = null, utilisateurId, magasin, articles, totalPrevu, creeLeISO }) {
   return {
     version: 1,
+    id,
     statut: 'active',
     utilisateur_id: utilisateurId ?? null,
     cree_le: creeLeISO,
@@ -154,6 +157,94 @@ export function construireSessionCourses({ utilisateurId, magasin, articles, tot
     total_prevu: Number.isFinite(Number(totalPrevu)) ? Number(totalPrevu) : null,
     articles: articles || [],
   };
+}
+
+// ── Lot 4 — filet Supabase (table sessions_courses, migration 20260811130000).
+// Le document de session est stocké TEL QUEL dans la colonne jsonb `donnees`
+// (miroir exact du localStorage), plus quelques colonnes dénormalisées pour
+// les requêtes. Toutes ces fonctions sont best effort côté appelant : un échec
+// réseau ne doit JAMAIS bloquer les courses (le localStorage reste la source
+// immédiate), mais il est toujours signalé (indicateur, jamais silencieux).
+
+// Id de session (UUID v4) qui fonctionne AUSSI en contexte non sécurisé.
+// Leçon de l'incident du 2026-08-11 : crypto.randomUUID n'existe qu'en
+// contexte sécurisé (HTTPS/localhost) — sur http://192.168.x.x (test iPhone
+// en LAN), son absence faisait échouer le démarrage de session. Repli sur
+// crypto.getRandomValues, disponible partout, avec les bits version/variante
+// posés à la main (RFC 4122). cryptoApi est injectable pour les tests.
+export function genererIdSession(cryptoApi = globalThis.crypto) {
+  if (typeof cryptoApi?.randomUUID === 'function') return cryptoApi.randomUUID();
+  const octets = new Uint8Array(16);
+  cryptoApi.getRandomValues(octets);
+  octets[6] = (octets[6] & 0x0f) | 0x40; // version 4
+  octets[8] = (octets[8] & 0x3f) | 0x80; // variante RFC 4122
+  const hex = [...octets].map(o => o.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+// Ligne sessions_courses correspondant à un document de session. null si le
+// document n'a pas d'id (sessions d'avant le Lot 4 : l'appelant doit d'abord
+// lui en attribuer un).
+export function ligneSupabaseDepuisSession(session) {
+  if (!session?.id) return null;
+  return {
+    id: session.id,
+    utilisateur_id: session.utilisateur_id,
+    magasin_id: session.magasin?.magasin_id ?? null,
+    donnees: session,
+    statut: session.statut,
+    cree_le: session.cree_le,
+    modifie_le: session.modifie_le,
+    terminee_le: session.terminee_le ?? null,
+  };
+}
+
+// Upsert idempotent de la session (clé : id). false si la session n'est pas
+// synchronisable (pas d'id ou pas de compte) ; throw sur erreur Supabase.
+export async function sauvegarderSessionSupabase(session) {
+  const ligne = ligneSupabaseDepuisSession(session);
+  if (!ligne || !ligne.utilisateur_id) return false;
+  const { error } = await supabase.from('sessions_courses').upsert(ligne, { onConflict: 'id' });
+  if (error) throw error;
+  return true;
+}
+
+// Bascule en 'abandonnee' les sessions actives de l'utilisateur (saufId :
+// épargne la session en cours de création). Appelée AVANT l'insertion d'une
+// nouvelle session active — l'index unique partiel n'est jamais heurté.
+export async function abandonnerSessionsActivesSupabase(utilisateurId, modifieLeISO, { saufId = null } = {}) {
+  if (!utilisateurId) return;
+  let query = supabase.from('sessions_courses')
+    .update({ statut: 'abandonnee', modifie_le: modifieLeISO })
+    .eq('utilisateur_id', utilisateurId)
+    .eq('statut', 'active');
+  if (saufId) query = query.neq('id', saufId);
+  const { error } = await query;
+  if (error) throw error;
+}
+
+// Session active de l'utilisateur en base (document `donnees`), null si
+// aucune. L'index unique partiel garantit au plus une ligne.
+export async function chargerSessionActiveSupabase(utilisateurId) {
+  if (!utilisateurId) return null;
+  const { data, error } = await supabase.from('sessions_courses')
+    .select('donnees')
+    .eq('utilisateur_id', utilisateurId)
+    .eq('statut', 'active')
+    .maybeSingle();
+  if (error) throw error;
+  return data?.donnees ?? null;
+}
+
+// Départage local / base à la restauration : modifie_le le plus récent gagne.
+// À égalité ou dates illisibles, la copie LOCALE gagne (c'est celle que
+// l'utilisateur avait sous les yeux sur cet appareil). Fonction pure.
+export function choisirSessionLaPlusRecente(locale, distante) {
+  if (!locale) return distante ?? null;
+  if (!distante) return locale;
+  const tLocale = new Date(locale.modifie_le ?? 0).getTime() || 0;
+  const tDistante = new Date(distante.modifie_le ?? 0).getTime() || 0;
+  return tDistante > tLocale ? distante : locale;
 }
 
 // Regroupe des articles par rayon (catégorie), dans l'ordre ordre_affichage de
