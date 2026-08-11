@@ -6,6 +6,7 @@ import { mapperLigneListeCourses, chargerVariantes, getCategoryPresentation, for
 import { calculerPrixReferenceParUnite } from "./lib/unitesCore";
 import { urlPhotoVariante, offLargeSource, offFullUrl, cloudinaryAgrandi } from "./lib/photosProduits";
 import { nomComposeVariante, formatEtiquetteVariante } from "./lib/nomProduit";
+import { transcrireAudioListe } from "./lib/microVocal";
 import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
 import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
 import { classerMagasinsPourPanier, calculerEconomiePotentielle } from "./lib/classementPanierCore";
@@ -6854,18 +6855,27 @@ function runConfettiRain(layer, onDone) {
   setTimeout(() => onDone?.(), 3600);
 }
 
-// ── CHANTIER « MICRO » — LOT 1 (shadow estFrancois) ──────────────────────────
-// Création vocale de la liste de courses. Lot 1 : UNIQUEMENT l'enregistrement
-// local (Démarrer/Arrêter, réécoute, suppression de prises) — AUCUN envoi
-// réseau, aucune transcription (Lot 2), aucune écriture en base. L'écran n'est
-// rendu que pour François (même mécanique shadow que le LOT 1 « reconnaissance
-// magasin ») : invisible pour tout autre utilisateur en prod.
+// ── CHANTIER « MICRO » — LOTS 1-2 (shadow estFrancois) ───────────────────────
+// Création vocale de la liste de courses. Lot 1 : enregistrement local
+// (Démarrer/Arrêter, réécoute, suppression). Lot 2 : à l'arrêt de chaque
+// prise, l'audio part vers l'Edge Function transcrire-liste-vocale
+// (OpenRouter, comme scan-ticket) qui renvoie la liste structurée ; l'audio
+// n'est jamais stocké. Toujours aucune écriture en base (caddie = Lot 5).
+// L'écran n'est rendu que pour François (même mécanique shadow que le LOT 1
+// « reconnaissance magasin ») : invisible pour tout autre utilisateur en prod.
 // Prise plafonnée à 3 minutes (décision chantier), enchaînable à volonté.
 const MICRO_PRISE_MAX_S = 3 * 60;
 
 function MicroTab() {
   const F = "'Nunito',sans-serif";
-  // Détection une seule fois au montage : getUserMedia + MediaRecorder requis.
+  // Détections une seule fois au montage (pas de setState synchrone au rendu).
+  // Le micro exige un contexte sécurisé (https, ou localhost) : en http local,
+  // mediaDevices n'existe même pas — on distingue ce cas d'un vrai navigateur
+  // incompatible pour afficher le bon message (retour de test du 2026-08-11).
+  const [contexteSecurise] = useState(() =>
+    typeof window !== "undefined" && window.isSecureContext !== false
+  );
+  // getUserMedia + MediaRecorder requis.
   // (SpeechRecognition volontairement PAS utilisée : cassée en PWA iOS.)
   const [supporte] = useState(() =>
     typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia &&
@@ -6961,7 +6971,15 @@ function MicroTab() {
       libererStream();
       if (blob.size > 0) {
         const url = URL.createObjectURL(blob);
-        setPrises(prev => [...prev, { id: Date.now() + Math.random(), url, duree }]);
+        // id unique sans nouvel appel Date.now() (règle react-hooks/purity) :
+        // l'horodatage de DÉBUT de prise est déjà unique, le hasard décolle
+        // deux prises démarrées dans la même milliseconde.
+        const id = debutRef.current + Math.random();
+        const mime = rec.mimeType || "audio/mp4";
+        // Le blob reste attaché à la prise pour pouvoir RELANCER la
+        // transcription en cas d'échec (réseau) sans réenregistrer.
+        setPrises(prev => [...prev, { id, url, duree, blob, mime, statut: "transcription", resultat: null, erreurMsg: null }]);
+        lancerTranscription(id, blob, mime);
       } else if (!interrompueRef.current) {
         setErreur("Rien n'a été enregistré, réessaie.");
       }
@@ -6974,6 +6992,10 @@ function MicroTab() {
     };
 
     recorderRef.current = rec;
+    // Faux positif react-hooks/purity : demarrer est un gestionnaire de clic
+    // (jamais appelé pendant le rendu), l'horodatage de début de prise y est
+    // légitime.
+    // eslint-disable-next-line react-hooks/purity
     debutRef.current = Date.now();
     setChrono(0);
     // timeslice 1 s : les morceaux arrivent au fil de l'eau — si iOS coupe
@@ -7019,6 +7041,22 @@ function MicroTab() {
     });
   };
 
+  // Lot 2 — envoie la prise à l'Edge Function transcrire-liste-vocale et range
+  // le résultat (ou l'erreur) SUR la prise. L'échec réseau n'efface jamais la
+  // prise : le blob est conservé et le bouton Réessayer relance cet appel.
+  const lancerTranscription = async (priseId, blob, mime) => {
+    setPrises(prev => prev.map(p => p.id === priseId ? { ...p, statut: "transcription", erreurMsg: null } : p));
+    try {
+      const resultat = await transcrireAudioListe(blob, mime);
+      setPrises(prev => prev.map(p => p.id === priseId ? { ...p, statut: "ok", resultat } : p));
+    } catch (e) {
+      console.error("Erreur transcription prise vocale :", e);
+      setPrises(prev => prev.map(p => p.id === priseId
+        ? { ...p, statut: "erreur", erreurMsg: "Transcription impossible (pas de réseau ?). La prise est conservée, tu peux réessayer." }
+        : p));
+    }
+  };
+
   const fmtDuree = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   const ecoute = etat === "ecoute";
 
@@ -7040,17 +7078,23 @@ function MicroTab() {
         🧪 Version test — visible uniquement par toi
       </div>
 
-      {!supporte && (
+      {!contexteSecurise && (
+        <div style={{ background:"#FEE", borderRadius:12, padding:"14px", fontFamily:F, fontSize:13, color:C.red, fontWeight:700 }}>
+          ⚠️ Le micro exige une adresse sécurisée (https). Tu es sur une adresse http (serveur de test local ?) : ouvre l'app via son adresse https habituelle.
+        </div>
+      )}
+      {contexteSecurise && !supporte && (
         <div style={{ background:"#FEE", borderRadius:12, padding:"14px", fontFamily:F, fontSize:13, color:C.red, fontWeight:700 }}>
           ⚠️ Ce navigateur ne permet pas d'enregistrer le micro. Essaie avec Safari (iPhone) ou Chrome (Android) à jour.
         </div>
       )}
 
-      {supporte && (
+      {contexteSecurise && supporte && (
         <>
-          {/* Confidentialité — Lot 1 : tout reste local, rien ne part sur Internet */}
+          {/* Confidentialité — Lot 2 : l'audio part à l'arrêt de la prise pour
+              être transcrit, puis est oublié ; jamais stocké nulle part. */}
           <div style={{ background:C.grayLight, borderRadius:12, padding:"10px 12px", marginBottom:18, fontFamily:F, fontSize:12, color:C.textLight }}>
-            🔒 Dans cette version de test, l'audio reste sur ton téléphone : rien n'est envoyé, rien n'est conservé après fermeture.
+            🔒 Quand tu arrêtes une prise, l'audio est envoyé de façon sécurisée pour être transformé en liste, puis aussitôt oublié : il n'est jamais conservé.
           </div>
 
           {/* Bouton principal Démarrer / Arrêter — état d'écoute impossible à rater */}
@@ -7102,15 +7146,66 @@ function MicroTab() {
               </div>
               <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
                 {prises.map((p, i) => (
-                  <div key={p.id} style={{ display:"flex", alignItems:"center", gap:10, background:C.white, border:`1px solid ${C.grayLight}`, borderRadius:12, padding:"10px 12px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
-                    <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:C.text, flexShrink:0 }}>
-                      Prise {i + 1} · {fmtDuree(p.duree)}
+                  <div key={p.id} style={{ background:C.white, border:`1px solid ${C.grayLight}`, borderRadius:12, padding:"10px 12px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                      <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:C.text, flexShrink:0 }}>
+                        Prise {i + 1} · {fmtDuree(p.duree)}
+                      </div>
+                      <audio controls src={p.url} preload="metadata" style={{ flex:1, minWidth:0, height:36 }} />
+                      <button onClick={() => supprimerPrise(p.id)} aria-label={`Supprimer la prise ${i + 1}`}
+                        style={{ border:"none", background:"none", cursor:"pointer", fontSize:18, flexShrink:0, padding:4 }}>
+                        🗑️
+                      </button>
                     </div>
-                    <audio controls src={p.url} preload="metadata" style={{ flex:1, minWidth:0, height:36 }} />
-                    <button onClick={() => supprimerPrise(p.id)} aria-label={`Supprimer la prise ${i + 1}`}
-                      style={{ border:"none", background:"none", cursor:"pointer", fontSize:18, flexShrink:0, padding:4 }}>
-                      🗑️
-                    </button>
+
+                    {/* Lot 2 — résultat de la transcription de CETTE prise */}
+                    {p.statut === "transcription" && (
+                      <div style={{ display:"flex", alignItems:"center", gap:8, marginTop:8 }}>
+                        <div style={{ width:14, height:14, border:"3px solid #EFEFEF", borderTopColor:"#CC0000", borderRadius:"50%", animation:"spin 0.8s linear infinite", flexShrink:0 }}/>
+                        <span style={{ fontFamily:F, fontSize:12, fontWeight:700, color:C.textLight }}>Je transforme ta voix en liste…</span>
+                      </div>
+                    )}
+                    {p.statut === "erreur" && (
+                      <div style={{ marginTop:8, background:"#FEE", borderRadius:10, padding:"8px 10px", display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+                        <span style={{ fontFamily:F, fontSize:12, fontWeight:700, color:C.red }}>⚠️ {p.erreurMsg}</span>
+                        <button onClick={() => lancerTranscription(p.id, p.blob, p.mime)}
+                          style={{ background:"none", border:"none", color:"#CC0000", fontFamily:F, fontWeight:800, cursor:"pointer", fontSize:12, textDecoration:"underline", padding:0 }}>
+                          Réessayer
+                        </button>
+                      </div>
+                    )}
+                    {p.statut === "ok" && p.resultat && (
+                      <div style={{ marginTop:8 }}>
+                        {p.resultat.transcription && (
+                          <div style={{ fontFamily:F, fontSize:11, fontStyle:"italic", color:C.gray, marginBottom:6 }}>
+                            « {p.resultat.transcription} »
+                          </div>
+                        )}
+                        {p.resultat.elements.length === 0 && (
+                          <div style={{ fontFamily:F, fontSize:12, fontWeight:700, color:C.textLight }}>
+                            Aucun produit reconnu dans cette prise.
+                          </div>
+                        )}
+                        {p.resultat.elements.map((e, j) => (
+                          <div key={j} style={{ display:"flex", alignItems:"center", gap:6, padding:"4px 0", flexWrap:"wrap" }}>
+                            <span style={{ fontFamily:F, fontSize:13, fontWeight:800, color:C.text }}>
+                              • {e.nom}{e.quantite ? ` × ${e.quantite}` : ""}{e.unite ? ` ${e.unite}` : ""}
+                            </span>
+                            {e.qualificatifs && <span style={{ fontFamily:F, fontSize:11, color:C.gray }}>({e.qualificatifs})</span>}
+                            {e.confiance === "faible" && (
+                              <span style={{ fontFamily:F, fontSize:10, fontWeight:800, color:"#7A6000", background:"#FFF8E6", border:"1px solid #F5C200", borderRadius:99, padding:"1px 8px" }}>
+                                à vérifier
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                        {p.resultat.elements_ignores.length > 0 && p.resultat.elements_ignores.map((e, j) => (
+                          <div key={`ig-${j}`} style={{ fontFamily:F, fontSize:11, color:C.gray, padding:"2px 0", textDecoration:"line-through" }}>
+                            {e.texte_entendu}{e.raison ? ` — ${e.raison}` : ""}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
