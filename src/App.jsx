@@ -874,7 +874,7 @@ function MesPrixSheet({ priceDB, setPriceDB, archives, updateArchive, onTicketVa
 // ── HEADER ────────────────────────────────────────────────────────────────────
 function Header({ tab, itemCount, userEmail, displayName, onLogout, pendingCount, onCircle }) {
   const F = "'Nunito',sans-serif";
-  const titles = { list:"Ma liste", catalog:"Catalogue", compare:"Comparer", prices:"Mes prix", archive:"Historique", economies:"Mes économies", rejets:"Rejets" };
+  const titles = { list:"Ma liste", catalog:"Catalogue", compare:"Comparer", prices:"Mes prix", archive:"Historique", economies:"Mes économies", rejets:"Rejets", micro:"Micro" };
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef(null);
   useEffect(() => {
@@ -6854,7 +6854,275 @@ function runConfettiRain(layer, onDone) {
   setTimeout(() => onDone?.(), 3600);
 }
 
-function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash, onResumeScan, archives = [], pseudo, onStats, onMesPrix, onFaq, onSignOut, pendingCagnotte, onConsumeCagnotteCelebration, pendingPotential, onConsumePotentialCelebration }) {
+// ── CHANTIER « MICRO » — LOT 1 (shadow estFrancois) ──────────────────────────
+// Création vocale de la liste de courses. Lot 1 : UNIQUEMENT l'enregistrement
+// local (Démarrer/Arrêter, réécoute, suppression de prises) — AUCUN envoi
+// réseau, aucune transcription (Lot 2), aucune écriture en base. L'écran n'est
+// rendu que pour François (même mécanique shadow que le LOT 1 « reconnaissance
+// magasin ») : invisible pour tout autre utilisateur en prod.
+// Prise plafonnée à 3 minutes (décision chantier), enchaînable à volonté.
+const MICRO_PRISE_MAX_S = 3 * 60;
+
+function MicroTab() {
+  const F = "'Nunito',sans-serif";
+  // Détection une seule fois au montage : getUserMedia + MediaRecorder requis.
+  // (SpeechRecognition volontairement PAS utilisée : cassée en PWA iOS.)
+  const [supporte] = useState(() =>
+    typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia &&
+    typeof window !== "undefined" && !!window.MediaRecorder
+  );
+  const [etat,   setEtat]   = useState("repos"); // repos | demande | ecoute
+  const [erreur, setErreur] = useState(null);
+  const [prises, setPrises] = useState([]);      // { id, url, duree }
+  const [chrono, setChrono] = useState(0);       // secondes de la prise en cours
+
+  const recorderRef    = useRef(null);
+  const streamRef      = useRef(null);
+  const chunksRef      = useRef([]);
+  const chronoRef      = useRef(null);
+  const debutRef       = useRef(0);
+  const interrompueRef = useRef(false); // écran éteint / app en arrière-plan
+  // Miroir des URLs de réécoute pour pouvoir les libérer au démontage
+  // (le cleanup d'effet n'a pas accès au dernier état `prises`).
+  const urlsRef        = useRef([]);
+  useEffect(() => { urlsRef.current = prises.map(p => p.url); }, [prises]);
+
+  const reducedMotion = typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
+  const stopperChrono = () => { if (chronoRef.current) { clearInterval(chronoRef.current); chronoRef.current = null; } };
+  const libererStream = () => { streamRef.current?.getTracks().forEach(t => t.stop()); streamRef.current = null; };
+
+  const arreter = () => {
+    stopperChrono();
+    const rec = recorderRef.current;
+    if (rec && rec.state !== "inactive") {
+      try { rec.stop(); return; } catch { /* onstop ne viendra pas : nettoyage direct */ }
+    }
+    libererStream();
+    setEtat("repos");
+    setChrono(0);
+  };
+
+  const demarrer = async () => {
+    if (etat !== "repos") return;
+    setErreur(null);
+    setEtat("demande");
+
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      const nom = e?.name || "";
+      if (nom === "NotAllowedError" || nom === "SecurityError" || nom === "PermissionDeniedError") {
+        setErreur("PrixMalin n'a pas l'autorisation d'utiliser le micro. Sur iPhone : Réglages > Apps > Safari > Micro, puis reviens ici et réessaie.");
+      } else if (nom === "NotFoundError" || nom === "OverconstrainedError") {
+        setErreur("Aucun microphone n'a été trouvé sur cet appareil.");
+      } else {
+        console.error("Erreur accès micro :", e);
+        setErreur("Impossible d'accéder au micro. Ferme les autres apps qui l'utilisent, puis réessaie.");
+      }
+      setEtat("repos");
+      return;
+    }
+    streamRef.current = stream;
+
+    // Format : Safari iOS ne sait produire que audio/mp4 (AAC) ; Chrome/Android
+    // préfère webm. Si isTypeSupported manque ou refuse tout, on laisse le
+    // navigateur choisir son format par défaut.
+    let options;
+    try {
+      if (window.MediaRecorder.isTypeSupported?.("audio/mp4"))       options = { mimeType: "audio/mp4" };
+      else if (window.MediaRecorder.isTypeSupported?.("audio/webm")) options = { mimeType: "audio/webm" };
+    } catch { /* on laisse options indéfini */ }
+
+    let rec;
+    try {
+      rec = options ? new MediaRecorder(stream, options) : new MediaRecorder(stream);
+    } catch {
+      try { rec = new MediaRecorder(stream); }
+      catch (e2) {
+        console.error("MediaRecorder indisponible :", e2);
+        libererStream();
+        setErreur("L'enregistrement audio n'est pas disponible sur ce navigateur.");
+        setEtat("repos");
+        return;
+      }
+    }
+
+    chunksRef.current = [];
+    rec.ondataavailable = ev => { if (ev.data && ev.data.size > 0) chunksRef.current.push(ev.data); };
+    // Erreur matérielle en cours de prise (micro repris par un appel, etc.)
+    rec.onerror = () => { interrompueRef.current = true; arreter(); };
+    rec.onstop = () => {
+      stopperChrono();
+      const duree = Math.max(1, Math.round((Date.now() - debutRef.current) / 1000));
+      const blob = new Blob(chunksRef.current, { type: rec.mimeType || "audio/mp4" });
+      chunksRef.current = [];
+      libererStream();
+      if (blob.size > 0) {
+        const url = URL.createObjectURL(blob);
+        setPrises(prev => [...prev, { id: Date.now() + Math.random(), url, duree }]);
+      } else if (!interrompueRef.current) {
+        setErreur("Rien n'a été enregistré, réessaie.");
+      }
+      if (interrompueRef.current) {
+        setErreur("⚠️ L'écoute a été interrompue (écran éteint, appel ou changement d'app). Ce qui a été dit avant la coupure est conservé ci-dessous.");
+      }
+      interrompueRef.current = false;
+      setEtat("repos");
+      setChrono(0);
+    };
+
+    recorderRef.current = rec;
+    debutRef.current = Date.now();
+    setChrono(0);
+    // timeslice 1 s : les morceaux arrivent au fil de l'eau — si iOS coupe
+    // brutalement, tout ce qui précède la coupure est déjà dans chunksRef.
+    rec.start(1000);
+    setEtat("ecoute");
+    chronoRef.current = setInterval(() => {
+      const s = Math.round((Date.now() - debutRef.current) / 1000);
+      setChrono(s);
+      if (s >= MICRO_PRISE_MAX_S) arreter(); // plafond 3 min : arrêt propre, prise conservée
+    }, 250);
+  };
+
+  // iOS coupe le micro quand l'app passe en arrière-plan : on arrête proprement
+  // nous-mêmes pour conserver la prise et l'expliquer, plutôt que de laisser un
+  // enregistreur zombie. Refs uniquement (pas de dépendance d'état).
+  useEffect(() => {
+    const onHide = () => {
+      const rec = recorderRef.current;
+      if (document.visibilityState === "hidden" && rec && rec.state === "recording") {
+        interrompueRef.current = true;
+        if (chronoRef.current) { clearInterval(chronoRef.current); chronoRef.current = null; }
+        try { rec.stop(); } catch { /* déjà arrêté */ }
+      }
+    };
+    document.addEventListener("visibilitychange", onHide);
+    return () => document.removeEventListener("visibilitychange", onHide);
+  }, []);
+
+  // Démontage : arrêt de l'enregistreur, libération du micro et des URLs de réécoute.
+  useEffect(() => () => {
+    if (chronoRef.current) clearInterval(chronoRef.current);
+    try { if (recorderRef.current?.state === "recording") recorderRef.current.stop(); } catch { /* ignore */ }
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    urlsRef.current.forEach(u => URL.revokeObjectURL(u));
+  }, []);
+
+  const supprimerPrise = (id) => {
+    setPrises(prev => {
+      const p = prev.find(x => x.id === id);
+      if (p) URL.revokeObjectURL(p.url);
+      return prev.filter(x => x.id !== id);
+    });
+  };
+
+  const fmtDuree = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  const ecoute = etat === "ecoute";
+
+  return (
+    <div style={{ padding:"16px 16px 110px" }}>
+
+      {/* Titre — même gabarit que le Catalogue */}
+      <div style={{ marginBottom:6 }}>
+        <div style={{ fontFamily:F, fontWeight:900, fontSize:24, color:C.text, letterSpacing:"-0.5px" }}>
+          Micro <span style={{ color:"#CC0000" }}>🎤</span>
+        </div>
+        <div style={{ fontFamily:F, fontSize:13, color:C.gray, marginTop:2 }}>
+          Dis ce qu'il te manque, on en fera ta liste de courses
+        </div>
+      </div>
+
+      {/* Badge shadow : rappel que cette version n'est visible que par François */}
+      <div style={{ display:"inline-block", background:"#FFF8E6", border:"1.5px solid #F5C200", borderRadius:99, padding:"4px 12px", marginBottom:14, fontFamily:F, fontSize:11, fontWeight:800, color:"#7A6000" }}>
+        🧪 Version test — visible uniquement par toi
+      </div>
+
+      {!supporte && (
+        <div style={{ background:"#FEE", borderRadius:12, padding:"14px", fontFamily:F, fontSize:13, color:C.red, fontWeight:700 }}>
+          ⚠️ Ce navigateur ne permet pas d'enregistrer le micro. Essaie avec Safari (iPhone) ou Chrome (Android) à jour.
+        </div>
+      )}
+
+      {supporte && (
+        <>
+          {/* Confidentialité — Lot 1 : tout reste local, rien ne part sur Internet */}
+          <div style={{ background:C.grayLight, borderRadius:12, padding:"10px 12px", marginBottom:18, fontFamily:F, fontSize:12, color:C.textLight }}>
+            🔒 Dans cette version de test, l'audio reste sur ton téléphone : rien n'est envoyé, rien n'est conservé après fermeture.
+          </div>
+
+          {/* Bouton principal Démarrer / Arrêter — état d'écoute impossible à rater */}
+          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:14, margin:"6px 0 24px" }}>
+            <button
+              onClick={ecoute ? arreter : demarrer}
+              disabled={etat === "demande"}
+              style={{
+                width:150, height:150, borderRadius:"50%",
+                background: ecoute ? "#E5181B" : (etat === "demande" ? "#F0A0A2" : "#E5181B"),
+                border:"5px solid #fff", cursor: etat === "demande" ? "default" : "pointer",
+                display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:6,
+                boxShadow:"0 8px 36px rgba(229,24,27,0.55)",
+                animation: ecoute && !reducedMotion ? "microPulse 1.4s ease-out infinite" : "none",
+              }}>
+              <span style={{ fontSize:34 }}>{ecoute ? "⏹" : "🎤"}</span>
+              <span style={{ fontFamily:F, fontWeight:900, fontSize:17, color:"#fff" }}>
+                {etat === "demande" ? "Autorisation…" : ecoute ? "Arrêter" : "Démarrer"}
+              </span>
+            </button>
+
+            {ecoute && (
+              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                <span style={{ width:10, height:10, borderRadius:99, background:"#E5181B", animation: reducedMotion ? "none" : "fadeIn 1s ease-in-out infinite alternate" }} />
+                <span style={{ fontFamily:F, fontWeight:900, fontSize:15, color:"#E5181B" }}>
+                  J'écoute… {fmtDuree(chrono)}
+                </span>
+                <span style={{ fontFamily:F, fontSize:12, color:C.gray }}>(max 3:00)</span>
+              </div>
+            )}
+            {!ecoute && etat === "repos" && (
+              <div style={{ fontFamily:F, fontSize:13, color:C.textLight, textAlign:"center", maxWidth:280 }}>
+                Garde l'écran allumé pendant que tu parles. Tu peux enchaîner plusieurs prises (frigo, placards…).
+              </div>
+            )}
+          </div>
+
+          {erreur && (
+            <div style={{ background:"#FEE", borderRadius:12, padding:"12px 14px", marginBottom:16, fontFamily:F, fontSize:13, color:C.red, fontWeight:700 }}>
+              {erreur}
+            </div>
+          )}
+
+          {/* Prises enregistrées — réécoute locale (le Lot 2 en fera la transcription) */}
+          {prises.length > 0 && (
+            <div>
+              <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:C.gray, letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:8 }}>
+                Prises enregistrées ({prises.length})
+              </div>
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                {prises.map((p, i) => (
+                  <div key={p.id} style={{ display:"flex", alignItems:"center", gap:10, background:C.white, border:`1px solid ${C.grayLight}`, borderRadius:12, padding:"10px 12px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+                    <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:C.text, flexShrink:0 }}>
+                      Prise {i + 1} · {fmtDuree(p.duree)}
+                    </div>
+                    <audio controls src={p.url} preload="metadata" style={{ flex:1, minWidth:0, height:36 }} />
+                    <button onClick={() => supprimerPrise(p.id)} aria-label={`Supprimer la prise ${i + 1}`}
+                      style={{ border:"none", background:"none", cursor:"pointer", fontSize:18, flexShrink:0, padding:4 }}>
+                      🗑️
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash, onResumeScan, archives = [], pseudo, onStats, onMesPrix, onFaq, onSignOut, pendingCagnotte, onConsumeCagnotteCelebration, pendingPotential, onConsumePotentialCelebration, estFrancois = false }) {
   const F = "'Nunito',sans-serif";
   // Chantier 79 (ajustement) — scan en cours visible dès l'accueil. HomeTab
   // n'étant monté que sur l'onglet home, la lecture au montage reflète l'état
@@ -7111,9 +7379,13 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash
       <div style={{ flex:1, display:"flex", alignItems:"flex-start", justifyContent:"center", position:"relative", zIndex:10, paddingTop:8 }}>
         <div style={{ position:"relative", width:300, height:290 }}>
 
-          {/* Catalogue — bas centre */}
-          <div style={{ position:"absolute", bottom:0, left:"50%", transform:"translateX(-50%)" }}>
+          {/* Catalogue — bas centre. Chantier « Micro » Lot 1 (shadow) : la
+              pastille Micro n'est rendue QUE pour François ; pour tout autre
+              utilisateur le rangée flex ne contient que Catalogue, centré
+              exactement comme avant. */}
+          <div style={{ position:"absolute", bottom:0, left:"50%", transform:"translateX(-50%)", display:"flex", gap:10 }}>
             <NavBtn label="Catalogue" icon="🛍️" target="catalog" />
+            {estFrancois && <NavBtn label="Micro" icon="🎤" target="micro" />}
           </div>
 
           {/* Bouton Flasher — centre */}
@@ -8129,6 +8401,7 @@ export default function App() {
       @keyframes spin   {to{transform:rotate(360deg)}}
       @keyframes popIn  {0%{opacity:0;transform:scale(0.85)}60%{transform:scale(1.04)}100%{opacity:1;transform:scale(1)}}
       @keyframes tabNeonPulse {0%,100%{box-shadow:0 4px 12px rgba(0,0,0,0.15), 0 0 10px 2px var(--tab-glow)}50%{box-shadow:0 4px 12px rgba(0,0,0,0.15), 0 0 32px 8px var(--tab-glow), 0 0 14px 3px var(--tab-glow)}}
+      @keyframes microPulse {0%,100%{box-shadow:0 8px 36px rgba(229,24,27,0.55), 0 0 0 0 rgba(229,24,27,0.35)}50%{box-shadow:0 8px 36px rgba(229,24,27,0.55), 0 0 0 22px rgba(229,24,27,0)}}
       .tabCircleBtn:active{transform:scale(0.9) !important;transition:transform 0.1s ease !important;}
       .tabBarRoot,.tabBarRoot *{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation;}
       input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;}
@@ -8186,7 +8459,10 @@ export default function App() {
             </div>
           )}
           <TabErrorBoundary key={tab}>
-          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} onResumeScan={handleResumeScan} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)}/>}
+          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} onResumeScan={handleResumeScan} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)} estFrancois={estFrancois}/>}
+          {/* Chantier « Micro » Lot 1 — même mécanique shadow que rejets (#56.3b) :
+              jamais rendu pour un autre utilisateur, même si tab="micro" traîne en state */}
+          {loaded && estFrancois && tab==="micro" && <MicroTab/>}
           {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} onSetMarquePref={setMarquePrefItem}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix}/>}
