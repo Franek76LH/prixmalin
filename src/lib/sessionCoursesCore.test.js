@@ -14,6 +14,7 @@ import {
   construireSessionCourses,
   grouperParRayon,
   calculerProgression,
+  appliquerEtatArticle,
 } from './sessionCoursesCore';
 
 const RAYON_EPICERIE = {
@@ -223,6 +224,62 @@ describe('calculerProgression', () => {
   it('liste vide ou absente -> zéros', () => {
     expect(calculerProgression([])).toEqual({ total: 0, pris: 0, introuvables: 0, restants: 0 });
     expect(calculerProgression(undefined)).toEqual({ total: 0, pris: 0, introuvables: 0, restants: 0 });
+  });
+});
+
+describe('appliquerEtatArticle', () => {
+  const sessionBase = () => construireSessionCourses({
+    utilisateurId: 'u1',
+    magasin: { magasin_id: 'm1', nom: 'Magasin Test' },
+    articles: [
+      { cle: 'a', etat: 'a_prendre', coche_le: null, rayon: RAYON_FRUITS },
+      { cle: 'b', etat: 'a_prendre', coche_le: null, rayon: RAYON_FRUITS },
+      { cle: 'c', etat: 'a_prendre', coche_le: null, rayon: RAYON_EPICERIE },
+    ],
+    totalPrevu: 10,
+    creeLeISO: '2026-08-11T10:00:00.000Z',
+  });
+
+  it('coche un article (au_caddie) : etat + coche_le + modifie_le, sans réordonner', () => {
+    const next = appliquerEtatArticle(sessionBase(), 'b', 'au_caddie', '2026-08-11T10:05:00.000Z');
+    expect(next.articles.map(a => a.cle)).toEqual(['a', 'b', 'c']); // ordre intact
+    expect(next.articles[1].etat).toBe('au_caddie');
+    expect(next.articles[1].coche_le).toBe('2026-08-11T10:05:00.000Z');
+    expect(next.articles[0].etat).toBe('a_prendre'); // voisins intacts
+    expect(next.modifie_le).toBe('2026-08-11T10:05:00.000Z');
+  });
+
+  it('décoche : retour a_prendre, coche_le remis à null, place d’origine dans le rayon', () => {
+    const coche = appliquerEtatArticle(sessionBase(), 'a', 'au_caddie', 'T1');
+    const decoche = appliquerEtatArticle(coche, 'a', 'a_prendre', 'T2');
+    expect(decoche.articles[0].etat).toBe('a_prendre');
+    expect(decoche.articles[0].coche_le).toBeNull();
+    // Remonte à sa place logique : premier de son rayon dans « À prendre »
+    const groupes = grouperParRayon(decoche.articles.filter(a => a.etat === 'a_prendre'));
+    expect(groupes[0].articles.map(a => a.cle)).toEqual(['a', 'b']);
+  });
+
+  it('marque introuvable puis restaure', () => {
+    const intro = appliquerEtatArticle(sessionBase(), 'c', 'introuvable', 'T1');
+    expect(intro.articles[2].etat).toBe('introuvable');
+    expect(calculerProgression(intro.articles)).toEqual({ total: 3, pris: 0, introuvables: 1, restants: 2 });
+    const retour = appliquerEtatArticle(intro, 'c', 'a_prendre', 'T2');
+    expect(retour.articles[2].etat).toBe('a_prendre');
+  });
+
+  it('clé inconnue, état invalide ou identique -> MÊME référence (aucune écriture inutile)', () => {
+    const session = sessionBase();
+    expect(appliquerEtatArticle(session, 'zzz', 'au_caddie', 'T1')).toBe(session);
+    expect(appliquerEtatArticle(session, 'a', 'etat_bidon', 'T1')).toBe(session);
+    expect(appliquerEtatArticle(session, 'a', 'a_prendre', 'T1')).toBe(session);
+    expect(appliquerEtatArticle(null, 'a', 'au_caddie', 'T1')).toBeNull();
+  });
+
+  it('ne mute jamais la session d’origine (immutabilité)', () => {
+    const session = sessionBase();
+    appliquerEtatArticle(session, 'a', 'au_caddie', 'T1');
+    expect(session.articles[0].etat).toBe('a_prendre');
+    expect(session.modifie_le).toBe('2026-08-11T10:00:00.000Z');
   });
 });
 

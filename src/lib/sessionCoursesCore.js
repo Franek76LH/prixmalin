@@ -170,6 +170,34 @@ export function grouperParRayon(articles) {
   return [...groupes.values()].sort((a, b) => a.rayon.categorie_ordre - b.rayon.categorie_ordre);
 }
 
+// Lot 2 — états possibles d'un article de session. Trois états, tous
+// réversibles ; toute autre valeur est refusée (jamais d'état inconnu écrit).
+export const ETATS_ARTICLE = Object.freeze(['a_prendre', 'au_caddie', 'introuvable']);
+
+// Lot 2 — change l'état d'un article (cocher / décocher / introuvable) sans
+// jamais réordonner la liste : un article décoché retrouve sa place d'origine
+// dans son rayon par construction (l'ordre du tableau est stable et
+// grouperParRayon ne fait que filtrer). Fonction pure : renvoie une NOUVELLE
+// session (modifie_le mis à jour), ou la session inchangée (même référence)
+// si la clé est inconnue, l'état invalide ou identique — l'appelant peut
+// ainsi éviter une écriture localStorage inutile.
+export function appliquerEtatArticle(session, cle, nouvelEtat, modifieLeISO) {
+  if (!session || !ETATS_ARTICLE.includes(nouvelEtat)) return session;
+  let modifie = false;
+  const articles = (session.articles || []).map(article => {
+    if (article.cle !== cle || article.etat === nouvelEtat) return article;
+    modifie = true;
+    return {
+      ...article,
+      etat: nouvelEtat,
+      // coche_le trace la sortie de « à prendre » ; remis à null au retour.
+      coche_le: nouvelEtat === 'a_prendre' ? null : modifieLeISO,
+    };
+  });
+  if (!modifie) return session;
+  return { ...session, articles, modifie_le: modifieLeISO };
+}
+
 // Progression globale de la session. Les introuvables ne comptent ni comme
 // pris ni comme restants dans le ratio principal (ils ont leur section).
 export function calculerProgression(articles) {

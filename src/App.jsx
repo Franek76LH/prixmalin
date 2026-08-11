@@ -8,7 +8,7 @@ import { urlPhotoVariante, offLargeSource, offFullUrl, cloudinaryAgrandi } from 
 import { nomComposeVariante, formatEtiquetteVariante } from "./lib/nomProduit";
 import { transcrireAudioListe, normaliserNomElement, comptesParNom, fusionnerParNom } from "./lib/microVocal";
 // Chantier « Courses » Lot 1 — session de courses figée (shadow estFrancois).
-import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon } from "./lib/sessionCoursesCore";
+import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle } from "./lib/sessionCoursesCore";
 import { capturerEvenement } from "./lib/posthog";
 import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
 import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
@@ -7827,34 +7827,38 @@ function MicroTab({ onAdd, setTab }) {
   );
 }
 
-// ── CHANTIER « COURSES » — LOT 1 (shadow estFrancois) ────────────────────────
-// Écran de courses STATIQUE : affiche la session figée créée à la validation
-// du comparatif (en-tête magasin + total prévu + progression, sections par
-// rayon = CATÉGORIE dans l'ordre ordre_affichage de la base — arbitrage
-// François 2026-08-11). Le cochage arrive au Lot 2, la carte d'accueil au
-// Lot 3, la clôture (« Terminer mes courses ») au Lot 6 : les cases sont donc
-// rendues inertes ici, volontairement.
-function CoursesTab({ session, setTab }) {
+// ── CHANTIER « COURSES » — LOTS 1-2 (shadow estFrancois) ─────────────────────
+// Écran de courses : session FIGÉE créée à la validation du comparatif
+// (en-tête magasin + total prévu + progression, sections par rayon =
+// CATÉGORIE dans l'ordre ordre_affichage de la base). Lot 2 — interactions :
+// cocher → « Dans le caddie » (repliée par défaut), décocher → retour à sa
+// place d'origine dans son rayon (l'ordre du tableau de la session est
+// stable), bouton 🚫 → « Introuvables » (réversible ↩︎, la case restant
+// cochable si l'article est finalement trouvé). Chaque action est persistée
+// immédiatement en localStorage par la racine (onChangerEtat). Un rayon
+// entièrement pris disparaît de « À prendre » (repli automatique). Carte
+// d'accueil au Lot 3, clôture (« Terminer mes courses ») au Lot 6.
+function LigneArticleCourses({ article, variante, onCocher, onIntrouvable, onRestaurer }) {
   const F = "'Nunito',sans-serif";
-  if (!session) return null;
-  const articles = session.articles || [];
-  const prog = calculerProgression(articles);
-  const groupes = grouperParRayon(articles.filter(a => a.etat === 'a_prendre'));
-  const ratio = prog.total > 0 ? prog.pris / prog.total : 0;
-  const magasin = session.magasin || {};
-  const villeLigne = [magasin.adresse, magasin.code_postal && magasin.ville ? `${magasin.code_postal} ${magasin.ville}` : magasin.ville]
-    .filter(Boolean).join(', ');
-
-  const LigneArticle = ({ article }) => (
-    <div style={{ display:"flex", alignItems:"center", gap:12, background:C.white, borderRadius:12, padding:"12px 14px", border:`1px solid ${C.grayLight}`, boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
-      {/* Case inerte au Lot 1 (le cochage est le Lot 2) — grande zone prévue 44 px */}
-      <div aria-hidden="true" style={{ width:28, height:28, borderRadius:8, border:`2px solid ${C.blue}`, background:C.white, flexShrink:0 }} />
-      <div style={{ width:44, height:44, flexShrink:0 }}>
+  const prise = variante === 'au_caddie';
+  const introuvable = variante === 'introuvable';
+  const attenue = prise || introuvable;
+  return (
+    <div style={{ display:"flex", alignItems:"center", gap:8, background: prise ? "#F3FAF5" : introuvable ? "#FFF8E6" : C.white, borderRadius:12, padding:"8px 10px 8px 2px", border:`1px solid ${prise ? "#C8E6C9" : introuvable ? C.yellow : C.grayLight}`, boxShadow: prise ? "inset 3px 0 0 #4CAF50" : "0 1px 4px rgba(0,0,0,0.06)" }}>
+      {/* Zone tactile 44×44, case visuelle 28 px */}
+      <button onClick={onCocher}
+        aria-label={prise ? `Retirer « ${article.nom_affiche} » du caddie` : `Mettre « ${article.nom_affiche} » dans le caddie`}
+        style={{ width:44, height:44, flexShrink:0, background:"none", border:"none", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", padding:0 }}>
+        <span aria-hidden="true" style={{ width:28, height:28, borderRadius:8, border:`2px solid ${prise ? C.green : C.blue}`, background: prise ? C.green : C.white, color:C.white, display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, fontWeight:900 }}>
+          {prise ? "✓" : ""}
+        </span>
+      </button>
+      <div style={{ width:44, height:44, flexShrink:0, opacity: attenue ? 0.65 : 1 }}>
         <PhotoProduit varianteId={article.variante_produit_id} taille="thumb" radius={8}
           fallback={<div style={{ width:"100%", height:"100%", borderRadius:8, background:C.grayLight, display:"flex", alignItems:"center", justifyContent:"center", fontSize:20 }}>{emojiRayon(article.rayon)}</div>} />
       </div>
-      <div style={{ flex:1, minWidth:0 }}>
-        <div style={{ fontFamily:F, fontWeight:800, fontSize:14, color:C.text }}>
+      <div style={{ flex:1, minWidth:0, opacity: attenue ? 0.75 : 1 }}>
+        <div style={{ fontFamily:F, fontWeight:800, fontSize:14, color:C.text, textDecoration: prise ? "line-through" : "none" }}>
           {article.nom_affiche}
           {article.est_mdd && (
             <span style={{ marginLeft:6, background:C.grayLight, color:C.gray, borderRadius:5, padding:"1px 5px", fontSize:9, fontWeight:900, verticalAlign:"middle", whiteSpace:"nowrap" }}>Marque Distributeur</span>
@@ -7864,7 +7868,7 @@ function CoursesTab({ session, setTab }) {
           <div style={{ fontFamily:F, fontSize:11, color:C.gray, marginTop:1 }}>{article.rayon.sous_categorie_nom}</div>
         )}
       </div>
-      <div style={{ textAlign:"right", flexShrink:0 }}>
+      <div style={{ textAlign:"right", flexShrink:0, opacity: attenue ? 0.75 : 1 }}>
         {article.quantite > 1 && (
           <div style={{ fontFamily:F, fontWeight:900, fontSize:12, color:C.white, background:C.blue, borderRadius:8, padding:"2px 8px", display:"inline-block", marginBottom:3 }}>×{article.quantite}</div>
         )}
@@ -7874,8 +7878,34 @@ function CoursesTab({ session, setTab }) {
           <div style={{ fontFamily:F, fontWeight:800, fontSize:11, color:C.orange }}>prix inconnu</div>
         )}
       </div>
+      {variante === 'a_prendre' && (
+        <button onClick={onIntrouvable} aria-label={`Marquer « ${article.nom_affiche} » introuvable`}
+          style={{ width:38, height:44, flexShrink:0, background:"none", border:"none", cursor:"pointer", fontSize:16, padding:0, opacity:0.55 }}>🚫</button>
+      )}
+      {introuvable && (
+        <button onClick={onRestaurer} aria-label={`Remettre « ${article.nom_affiche} » à prendre`}
+          style={{ width:38, height:44, flexShrink:0, background:"none", border:"none", cursor:"pointer", fontSize:19, color:C.blue, fontWeight:900, padding:0 }}>↩︎</button>
+      )}
     </div>
   );
+}
+
+function CoursesTab({ session, setTab, onChangerEtat }) {
+  const F = "'Nunito',sans-serif";
+  // « Dans le caddie » repliée par défaut — hook déclaré AVANT le early
+  // return (règle des Hooks : ordre stable entre rendus).
+  const [caddieOuvert, setCaddieOuvert] = useState(false);
+  if (!session) return null;
+  const articles = session.articles || [];
+  const prog = calculerProgression(articles);
+  const groupes = grouperParRayon(articles.filter(a => a.etat === 'a_prendre'));
+  const introuvables = articles.filter(a => a.etat === 'introuvable');
+  const auCaddie = articles.filter(a => a.etat === 'au_caddie');
+  const toutPris = prog.total > 0 && prog.restants === 0;
+  const ratio = prog.total > 0 ? prog.pris / prog.total : 0;
+  const magasin = session.magasin || {};
+  const villeLigne = [magasin.adresse, magasin.code_postal && magasin.ville ? `${magasin.code_postal} ${magasin.ville}` : magasin.ville]
+    .filter(Boolean).join(', ');
 
   return (
     <div style={{ padding:"16px 16px 110px" }}>
@@ -7901,7 +7931,9 @@ function CoursesTab({ session, setTab }) {
         </div>
       </div>
 
-      {/* À PRENDRE — sections par rayon (catégorie), ordre de la base */}
+      {/* À PRENDRE — sections par rayon (catégorie), ordre de la base. Un
+          rayon entièrement pris n'a plus d'article ici : il disparaît de
+          lui-même (repli automatique). */}
       {groupes.length > 0 && (
         <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:C.gray, letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:8 }}>
           À prendre ({prog.restants})
@@ -7915,10 +7947,67 @@ function CoursesTab({ session, setTab }) {
             <span style={{ fontFamily:F, fontWeight:800, fontSize:12, color:C.gray }}>({groupe.articles.length})</span>
           </div>
           <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-            {groupe.articles.map(article => <LigneArticle key={article.cle} article={article} />)}
+            {groupe.articles.map(article => (
+              <LigneArticleCourses key={article.cle} article={article} variante="a_prendre"
+                onCocher={()=>onChangerEtat?.(article.cle, 'au_caddie')}
+                onIntrouvable={()=>onChangerEtat?.(article.cle, 'introuvable')} />
+            ))}
           </div>
         </div>
       ))}
+
+      {/* Tout est pris — état célébratoire (remplace la liste vide de rayons) */}
+      {toutPris && (
+        <div style={{ background:"#F3FAF5", borderRadius:14, padding:"20px", textAlign:"center", border:"2px solid #C8E6C9", marginBottom:14 }}>
+          <div style={{ fontSize:36, marginBottom:6 }}>🎉</div>
+          <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:C.green }}>
+            Tout est dans le caddie !
+          </div>
+        </div>
+      )}
+      {!toutPris && groupes.length === 0 && introuvables.length > 0 && (
+        <div style={{ background:"#FFF8E6", borderRadius:14, padding:"14px 16px", textAlign:"center", border:`1px solid ${C.yellow}`, marginBottom:14, fontFamily:F, fontWeight:800, fontSize:13, color:"#7A6000" }}>
+          Il ne reste que des articles introuvables 👇
+        </div>
+      )}
+
+      {/* INTROUVABLES — visible seulement s'il y en a ; toujours dépliée
+          (peu d'articles, et il faut les garder à l'œil). */}
+      {introuvables.length > 0 && (
+        <div style={{ marginBottom:14 }}>
+          <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:"#7A6000", letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:8 }}>
+            🚫 Introuvables ({introuvables.length})
+          </div>
+          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+            {introuvables.map(article => (
+              <LigneArticleCourses key={article.cle} article={article} variante="introuvable"
+                onCocher={()=>onChangerEtat?.(article.cle, 'au_caddie')}
+                onRestaurer={()=>onChangerEtat?.(article.cle, 'a_prendre')} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* DANS LE CADDIE — repliée par défaut, en-tête cliquable */}
+      {auCaddie.length > 0 && (
+        <div style={{ marginBottom:14 }}>
+          <button onClick={()=>setCaddieOuvert(o=>!o)}
+            aria-expanded={caddieOuvert}
+            style={{ width:"100%", display:"flex", alignItems:"center", gap:8, background:"#F3FAF5", border:"1px solid #C8E6C9", borderRadius:12, padding:"12px 14px", cursor:"pointer", marginBottom: caddieOuvert ? 8 : 0 }}>
+            <span style={{ fontFamily:F, fontWeight:900, fontSize:13, color:C.green }}>✓ Dans le caddie ({auCaddie.length})</span>
+            <span style={{ marginLeft:"auto", fontFamily:F, fontWeight:900, fontSize:14, color:C.green }}>{caddieOuvert ? "▾" : "▸"}</span>
+          </button>
+          {caddieOuvert && (
+            <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+              {auCaddie.map(article => (
+                <LigneArticleCourses key={article.cle} article={article} variante="au_caddie"
+                  onCocher={()=>onChangerEtat?.(article.cle, 'a_prendre')} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {prog.total === 0 && (
         <div style={{ background:C.orangeLight, borderRadius:14, padding:"24px 20px", textAlign:"center", border:`2px dashed ${C.orange}` }}>
           <div style={{ fontSize:40, marginBottom:10 }}>🛒</div>
@@ -9042,6 +9131,18 @@ export default function App() {
     setTab("courses");
   };
 
+  // Chantier « Courses » Lot 2 (shadow estFrancois) — cocher / décocher /
+  // introuvable. La sauvegarde localStorage est IMMÉDIATE, avant même le
+  // re-rendu : chaque action survit à une fermeture instantanée de l'app.
+  // appliquerEtatArticle renvoie la même référence si rien ne change
+  // (clé inconnue, état identique) : aucune écriture inutile dans ce cas.
+  const changerEtatArticleSession = (cle, nouvelEtat) => {
+    const suivante = appliquerEtatArticle(sessionCourses, cle, nouvelEtat, new Date().toISOString());
+    if (suivante === sessionCourses) return;
+    ecrireSessionCourses(suivante);
+    setSessionCourses(suivante);
+  };
+
   const handleValidate = async (store, potentialSaving = 0, extrasCourses = null) => {
     let totalSaving = 0;
     const details = [];
@@ -9330,7 +9431,7 @@ export default function App() {
           {/* Chantier « Courses » Lot 1 (shadow estFrancois) — écran de courses,
               accessible uniquement via la validation du comparatif (aucun
               onglet TabBar). Session absente -> rien n'est rendu. */}
-          {loaded && estFrancois && tab==="courses" && sessionCourses && <CoursesTab session={sessionCourses} setTab={setTab}/>}
+          {loaded && estFrancois && tab==="courses" && sessionCourses && <CoursesTab session={sessionCourses} setTab={setTab} onChangerEtat={changerEtatArticleSession}/>}
           {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} onSetMarquePref={setMarquePrefItem}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix} estFrancois={estFrancois}/>}
