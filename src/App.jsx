@@ -6879,6 +6879,151 @@ function runConfettiRain(layer, onDone) {
   setTimeout(() => onDone?.(), 3600);
 }
 
+// ── CHANTIER « MICRO » — LOT 4 : liaison d'un élément vocal au Catalogue ─────
+// Feuille de recherche : même RPC que l'onglet Catalogue
+// (rechercher_produits_catalogue) puis la MÊME fiche produit
+// (ProductPickerSheet), réutilisée en mode « capture » : son onAdd ne touche
+// PAS au caddie, il renvoie le choix (produit/variante/marque_pref) à
+// l'élément de « Ma liste ». L'ajout réel au caddie est le Lot 5.
+// Jamais de rattachement automatique : 0, 1 ou 50 résultats, c'est toujours
+// l'utilisateur qui tape sur le produit voulu.
+function MicroLienSheet({ element, onClose, onResolu, onIntrouvable }) {
+  const F = "'Nunito',sans-serif";
+  const [query,     setQuery]     = useState(element.nom || "");
+  const [results,   setResults]   = useState([]);
+  // true d'emblée seulement si la recherche initiale va réellement partir.
+  const [searching, setSearching] = useState(() => (element.nom || "").trim().length >= 2);
+  const [searchErr, setSearchErr] = useState(null);
+  const [produitChoisi, setProduitChoisi] = useState(null);
+  const seq = useRef(0);
+
+  // Même colonnes que la recherche du Catalogue (rayon + catégorie pour
+  // l'emoji), même protection anti-désordre.
+  const chercher = useCallback(async (q) => {
+    const mySeq = ++seq.current;
+    setSearching(true);
+    setSearchErr(null);
+    try {
+      const COLS = 'id, nom_reference, famille, sous_famille, sous_categorie_id, sous_categories(id, nom, categorie_id, categories(id, nom, slug, icone))';
+      const { data: matches, error: errRpc } = await supabase
+        .rpc('rechercher_produits_catalogue', { p_terme: q });
+      if (mySeq !== seq.current) return;
+      if (errRpc) { setSearchErr("Recherche impossible."); setSearching(false); return; }
+      const ids = (matches || []).map(m => m.produit_id);
+      if (ids.length === 0) { setResults([]); setSearching(false); return; }
+      const { data, error } = await supabase.from('produits').select(COLS).in('id', ids);
+      if (mySeq !== seq.current) return;
+      if (error) { setSearchErr("Recherche impossible."); setSearching(false); return; }
+      const parId = new Map((data || []).map(p => [p.id, p]));
+      setResults(ids.map(id => parId.get(id)).filter(Boolean));
+      setSearching(false);
+    } catch (e) {
+      if (mySeq !== seq.current) return;
+      console.error("Erreur recherche liaison Micro :", e);
+      setSearchErr("Recherche impossible.");
+      setSearching(false);
+    }
+  }, []);
+
+  // Recherche lancée d'emblée avec le nom de l'élément, puis à la frappe
+  // (debounce ~280 ms, min 2 caractères — mêmes règles que le Catalogue).
+  // Aucun setState synchrone dans l'effet (règle react-hooks) : le nettoyage
+  // « moins de 2 caractères » se fait dans le onChange du champ, comme au
+  // Catalogue.
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) return;
+    const timer = setTimeout(() => chercher(q), 280);
+    return () => clearTimeout(timer);
+  }, [query, chercher]);
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", zIndex:300, animation:"fadeIn 0.2s ease" }} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{ background:C.white, borderRadius:"20px 20px 0 0", width:"100%", maxHeight:"85vh", display:"flex", flexDirection:"column", animation:"slideUp 0.3s ease", overflow:"hidden" }}>
+
+        <div style={{ background:C.blue, padding:"14px 18px", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0 }}>
+          <div>
+            <div style={{ fontFamily:F, fontWeight:900, fontSize:16, color:C.white }}>Relier « {element.nom} »</div>
+            <div style={{ fontFamily:F, fontSize:11, color:"rgba(255,255,255,0.75)" }}>Choisis le produit du catalogue qui correspond</div>
+          </div>
+          <button onClick={onClose} style={{ background:"rgba(255,255,255,0.2)", border:"none", borderRadius:99, width:32, height:32, color:C.white, fontSize:16, cursor:"pointer" }}>✕</button>
+        </div>
+
+        <div style={{ padding:"12px 14px", overflowY:"auto", flex:1 }}>
+          <input value={query} onChange={e=>{
+              const val = e.target.value;
+              setQuery(val);
+              if (val.trim().length < 2) {
+                seq.current++; // invalide toute requête en cours
+                setResults([]);
+                setSearchErr(null);
+                setSearching(false);
+              }
+            }}
+            placeholder="🔍 Chercher dans le catalogue…"
+            style={{ width:"100%", padding:"11px 14px", borderRadius:11, border:`2px solid ${C.blue}`, background:C.white, fontFamily:F, fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:12 }} />
+
+          {searching && <div style={{ fontFamily:F, fontSize:13, color:C.gray }}>Recherche…</div>}
+          {searchErr && !searching && (
+            <div style={{ background:"#FEE", borderRadius:10, padding:"10px 12px", marginBottom:10, display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+              <span style={{ fontFamily:F, fontSize:12, color:C.red, fontWeight:700 }}>⚠️ {searchErr}</span>
+              <button onClick={()=>chercher(query.trim())} style={{ background:"none", border:"none", color:C.blue, fontWeight:700, cursor:"pointer", fontSize:12, textDecoration:"underline" }}>Réessayer</button>
+            </div>
+          )}
+
+          {!searching && !searchErr && results.length === 0 && query.trim().length >= 2 && (
+            <div style={{ background:C.grayLight, borderRadius:10, padding:"12px", textAlign:"center", marginBottom:10, fontFamily:F, fontSize:12.5, color:C.gray }}>
+              Aucun produit du catalogue pour « {query.trim()} ».<br/>Modifie la recherche, ou marque l'élément introuvable.
+            </div>
+          )}
+
+          {!searching && results.map(r => {
+            const pres = getCategoryPresentation(r.sous_categories?.categories || {});
+            const rayon = r.sous_categories?.nom || r.sous_categories?.categories?.nom || null;
+            return (
+              <button key={r.id} onClick={()=>setProduitChoisi(r)}
+                style={{ width:"100%", display:"flex", alignItems:"center", gap:12, background:C.white, border:`1px solid ${C.grayLight}`, borderRadius:12, padding:"11px 13px", marginBottom:8, cursor:"pointer", textAlign:"left", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+                <span style={{ fontSize:20 }}>{pres.emoji}</span>
+                <span style={{ flex:1, minWidth:0 }}>
+                  <span style={{ display:"block", fontFamily:F, fontWeight:800, fontSize:14, color:C.text }}>{r.nom_reference}</span>
+                  {rayon && <span style={{ display:"block", fontFamily:F, fontSize:11, color:pres.color, fontWeight:700, marginTop:1 }}>{rayon}</span>}
+                </span>
+                <span style={{ fontFamily:F, fontSize:16, color:C.gray }}>›</span>
+              </button>
+            );
+          })}
+
+          <button onClick={()=>onIntrouvable(element.id)}
+            style={{ width:"100%", marginTop:6, padding:"11px", border:`1.5px dashed ${C.grayLight}`, borderRadius:11, background:"transparent", fontFamily:F, fontWeight:800, fontSize:13, color:C.textLight, cursor:"pointer" }}>
+            🚫 Marquer « {element.nom} » introuvable au catalogue
+          </button>
+        </div>
+
+        {/* Fiche produit habituelle en mode capture : le choix revient sur
+            l'élément, rien ne part au caddie (Lot 5). */}
+        {produitChoisi && (
+          <ProductPickerSheet
+            produit={produitChoisi}
+            categoryPresentation={getCategoryPresentation(produitChoisi.sous_categories?.categories || {})}
+            items={[]}
+            onAdd={async (item) => {
+              onResolu(element.id, {
+                produit_id:          item.produit_id,
+                variante_produit_id: item.variante_produit_id ?? null,
+                marque_pref:         item.marque_pref === 'mdd' ? 'mdd' : 'nationale',
+                produit_nom:         item.product,
+                qty:                 item.qty,
+              });
+              return true;
+            }}
+            onClose={()=>setProduitChoisi(null)}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── CHANTIER « MICRO » — LOTS 1-2 (shadow estFrancois) ───────────────────────
 // Création vocale de la liste de courses. Lot 1 : enregistrement local
 // (Démarrer/Arrêter, réécoute, suppression). Lot 2 : à l'arrêt de chaque
@@ -6915,8 +7060,14 @@ function MicroTab() {
   // anciennes prises, lui, n'est pas conservé — texte seulement).
   const [elementsListe, setElementsListe] = useState(() => {
     const d = lireMicroDraft();
-    return Array.isArray(d?.elements) ? d.elements : [];
+    // Lot 4 — un brouillon d'avant le Lot 4 n'a pas de statut de liaison :
+    // défauts appliqués à la lecture (les valeurs présentes gagnent).
+    return (Array.isArray(d?.elements) ? d.elements : []).map(e => ({
+      statut_resolution: "a_relier", produit_id: null, variante_produit_id: null, produit_nom: null, ...e,
+    }));
   });
+  // Lot 4 — élément en cours de liaison au Catalogue (feuille ouverte).
+  const [lienElement, setLienElement] = useState(null);
   const [listeRestauree] = useState(() => (lireMicroDraft()?.elements?.length ?? 0) > 0);
   const [nouvelElement, setNouvelElement] = useState("");
   const [editionId,  setEditionId]  = useState(null);
@@ -7098,7 +7249,7 @@ function MicroTab() {
       if (resultat.elements.length > 0) {
         setElementsListe(prev => [
           ...prev,
-          ...resultat.elements.map(e => ({ ...e, id: genIdElementMicro(), origine: "vocal" })),
+          ...resultat.elements.map(e => ({ ...e, id: genIdElementMicro(), origine: "vocal", statut_resolution: "a_relier", produit_id: null, variante_produit_id: null, produit_nom: null })),
         ]);
       }
     } catch (e) {
@@ -7114,7 +7265,7 @@ function MicroTab() {
   const ajouterElementManuel = () => {
     const nom = nouvelElement.trim();
     if (!nom) return;
-    setElementsListe(prev => [...prev, { id: genIdElementMicro(), texte_entendu: "", nom, quantite: null, unite: null, qualificatifs: null, confiance: "haute", origine: "manuel" }]);
+    setElementsListe(prev => [...prev, { id: genIdElementMicro(), texte_entendu: "", nom, quantite: null, unite: null, qualificatifs: null, confiance: "haute", origine: "manuel", statut_resolution: "a_relier", produit_id: null, variante_produit_id: null, produit_nom: null }]);
     setNouvelElement("");
   };
   const changerQuantite = (id, delta) => {
@@ -7124,8 +7275,37 @@ function MicroTab() {
   const demarrerEdition = (el) => { setEditionId(el.id); setEditionNom(el.nom); };
   const validerEdition = () => {
     const nom = editionNom.trim();
-    if (nom) setElementsListe(prev => prev.map(e => e.id === editionId ? { ...e, nom, confiance: "haute" } : e));
+    // Renommer remet aussi la liaison Catalogue à zéro : le nouveau nom peut
+    // correspondre à un tout autre produit (statut « à relier »).
+    if (nom) setElementsListe(prev => prev.map(e => e.id === editionId
+      ? { ...e, nom, confiance: "haute", statut_resolution: "a_relier", produit_id: null, variante_produit_id: null, produit_nom: null }
+      : e));
     setEditionId(null); setEditionNom("");
+  };
+
+  // Lot 4 — issue de la feuille de liaison : le choix (produit/variante/marque)
+  // est écrit SUR l'élément ; la quantité choisie dans la fiche remplace celle
+  // de l'élément seulement si elle a été modifiée (≠ 1).
+  const resoudreElement = (id, liaison) => {
+    setElementsListe(prev => prev.map(e => e.id === id
+      ? {
+          ...e,
+          statut_resolution:   "resolu",
+          produit_id:          liaison.produit_id,
+          variante_produit_id: liaison.variante_produit_id,
+          marque_pref:         liaison.marque_pref,
+          produit_nom:         liaison.produit_nom,
+          quantite:            (liaison.qty && liaison.qty !== 1) ? liaison.qty : e.quantite,
+          confiance:           "haute", // choix humain = validé
+        }
+      : e));
+    setLienElement(null);
+  };
+  const marquerIntrouvable = (id) => {
+    setElementsListe(prev => prev.map(e => e.id === id
+      ? { ...e, statut_resolution: "introuvable", produit_id: null, variante_produit_id: null, produit_nom: null }
+      : e));
+    setLienElement(null);
   };
   // Fusion : TOUJOURS à la demande de l'utilisateur, jamais automatique.
   const fusionner = (nomNorm) => setElementsListe(prev => fusionnerParNom(prev, nomNorm));
@@ -7141,6 +7321,16 @@ function MicroTab() {
     () => [...comptesParNom(elementsListe).entries()].filter(([, c]) => c > 1),
     [elementsListe]
   );
+
+  // Lot 4 — bilan de liaison affiché sous le titre de la liste.
+  const bilanLiaison = useMemo(() => {
+    let ok = 0, ko = 0, todo = 0;
+    for (const e of elementsListe) {
+      const s = e.statut_resolution ?? "a_relier";
+      if (s === "resolu") ok++; else if (s === "introuvable") ko++; else todo++;
+    }
+    return { ok, ko, todo };
+  }, [elementsListe]);
 
   const fmtDuree = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   const ecoute = etat === "ecoute";
@@ -7228,8 +7418,17 @@ function MicroTab() {
           {(elementsListe.length > 0 || listeRestauree) && (
             <div style={{ marginBottom:20 }}>
               <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8 }}>
-                <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:C.gray, letterSpacing:"0.06em", textTransform:"uppercase" }}>
-                  Ma liste ({elementsListe.length})
+                <div>
+                  <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:C.gray, letterSpacing:"0.06em", textTransform:"uppercase" }}>
+                    Ma liste ({elementsListe.length})
+                  </div>
+                  {elementsListe.length > 0 && (
+                    <div style={{ fontFamily:F, fontSize:10.5, fontWeight:700, color:C.gray, marginTop:1 }}>
+                      <span style={{ color:C.green }}>{bilanLiaison.ok} relié{bilanLiaison.ok > 1 ? "s" : ""}</span>
+                      {" · "}{bilanLiaison.todo} à relier
+                      {bilanLiaison.ko > 0 && <span style={{ color:"#B45309" }}>{" · "}{bilanLiaison.ko} introuvable{bilanLiaison.ko > 1 ? "s" : ""}</span>}
+                    </div>
+                  )}
                 </div>
                 {elementsListe.length > 0 && (
                   <button onClick={() => setConfirmVider(true)}
@@ -7247,7 +7446,8 @@ function MicroTab() {
 
               <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
                 {elementsListe.map((e) => (
-                  <div key={e.id} style={{ display:"flex", alignItems:"center", gap:8, background:C.white, border:`1px solid ${C.grayLight}`, borderRadius:12, padding:"9px 12px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+                  <div key={e.id} style={{ background:C.white, border:`1px solid ${C.grayLight}`, borderRadius:12, padding:"9px 12px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+                   <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                     {editionId === e.id ? (
                       <>
                         <input value={editionNom} autoFocus onChange={ev => setEditionNom(ev.target.value)}
@@ -7291,6 +7491,41 @@ function MicroTab() {
                         </button>
                       </>
                     )}
+                   </div>
+
+                   {/* Lot 4 — statut de liaison au Catalogue (hors mode édition) */}
+                   {editionId !== e.id && (
+                     <div style={{ marginTop:6, display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+                       {(e.statut_resolution ?? "a_relier") === "a_relier" && (
+                         <button onClick={() => setLienElement(e)}
+                           style={{ border:"1px solid #BFDBFE", borderRadius:99, background:"#EFF6FF", color:"#1D4ED8", fontFamily:F, fontWeight:800, fontSize:11.5, padding:"5px 11px", cursor:"pointer" }}>
+                           🔗 Relier au catalogue
+                         </button>
+                       )}
+                       {e.statut_resolution === "resolu" && (
+                         <>
+                           <span style={{ fontFamily:F, fontSize:11.5, fontWeight:800, color:C.green }}>
+                             ✓ {e.produit_nom}
+                           </span>
+                           <button onClick={() => setLienElement(e)}
+                             style={{ border:"none", background:"none", fontFamily:F, fontSize:11, fontWeight:700, color:C.gray, cursor:"pointer", textDecoration:"underline", padding:0 }}>
+                             changer
+                           </button>
+                         </>
+                       )}
+                       {e.statut_resolution === "introuvable" && (
+                         <>
+                           <span style={{ fontFamily:F, fontSize:11, fontWeight:800, color:"#B45309", background:"#FFF7ED", border:"1px solid #FDBA74", borderRadius:99, padding:"3px 10px" }}>
+                             🚫 Introuvable au catalogue
+                           </span>
+                           <button onClick={() => setLienElement(e)}
+                             style={{ border:"none", background:"none", fontFamily:F, fontSize:11, fontWeight:700, color:C.gray, cursor:"pointer", textDecoration:"underline", padding:0 }}>
+                             chercher quand même
+                           </button>
+                         </>
+                       )}
+                     </div>
+                   )}
                   </div>
                 ))}
               </div>
@@ -7320,6 +7555,16 @@ function MicroTab() {
                 </button>
               </div>
             </div>
+          )}
+
+          {/* Lot 4 — feuille de liaison au Catalogue */}
+          {lienElement && (
+            <MicroLienSheet
+              element={lienElement}
+              onClose={() => setLienElement(null)}
+              onResolu={resoudreElement}
+              onIntrouvable={marquerIntrouvable}
+            />
           )}
 
           {/* Confirmation « Vider et recommencer » */}
