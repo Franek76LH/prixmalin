@@ -7,6 +7,8 @@ import { calculerPrixReferenceParUnite } from "./lib/unitesCore";
 import { urlPhotoVariante, offLargeSource, offFullUrl, cloudinaryAgrandi } from "./lib/photosProduits";
 import { nomComposeVariante, formatEtiquetteVariante } from "./lib/nomProduit";
 import { transcrireAudioListe, normaliserNomElement, comptesParNom, fusionnerParNom } from "./lib/microVocal";
+// Chantier « Courses » Lot 1 — session de courses figée (shadow estFrancois).
+import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon } from "./lib/sessionCoursesCore";
 import { capturerEvenement } from "./lib/posthog";
 import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
 import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
@@ -1219,6 +1221,20 @@ function effacerMicroDraft() {
 // composant (compteur module) : pas d'appel impur dans le corps du composant
 // (règle react-hooks/purity), unicité garantie au sein de la session.
 let microSeqElement = 0;
+// ── SESSION DE COURSES (Chantier « Courses », Lot 1 — shadow estFrancois) ────
+// Même mécanique éprouvée que les brouillons de scan et de micro : la session
+// de courses figée survit à un rechargement / une fermeture via localStorage.
+// Clé versionnée. Le filet Supabase arrive au Lot 4 (obligatoire avant toute
+// sortie du shadow — arbitrage François du 2026-08-11).
+const SESSION_COURSES_KEY = 'prixmalin_sessionCourses_v1';
+function lireSessionCourses() {
+  try { const s = localStorage.getItem(SESSION_COURSES_KEY); return s ? JSON.parse(s) : null; }
+  catch { return null; }
+}
+function ecrireSessionCourses(sessionCourses) {
+  try { localStorage.setItem(SESSION_COURSES_KEY, JSON.stringify(sessionCourses)); } catch { /* quota/mode privé : on ignore */ }
+}
+// L'effacement (localStorage.removeItem) arrivera avec la clôture au Lot 6.
 function genIdElementMicro() {
   microSeqElement += 1;
   return `el_${microSeqElement}_${Math.random().toString(36).slice(2, 8)}`;
@@ -4789,7 +4805,7 @@ function cleCoords(lat, lng) {
   return `${Number(lat).toFixed(4)},${Number(lng).toFixed(4)}`;
 }
 
-function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearchRadius, userPos, setUserPos, zoneLabel, setZoneLabel, zonePrete = true, userId, isAdmin, modeCoreActif, coreActifGlobal, categorieMagasin = 'grande_surface', setCategorieMagasin }) {
+function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearchRadius, userPos, setUserPos, zoneLabel, setZoneLabel, zonePrete = true, userId, isAdmin, modeCoreActif, coreActifGlobal, categorieMagasin = 'grande_surface', setCategorieMagasin, estFrancois = false }) {
   const F = "'Nunito',sans-serif";
 
   // Chantier géoloc comparateur — sélecteur de zone (point de référence).
@@ -5676,7 +5692,27 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
 
             {/* Bouton valider */}
             <div style={{ padding:"0 12px 16px" }}>
-              <button onClick={()=>onValidate(bestAffiche, savingsVsSecondAffiche)} style={{ width:"100%", padding:"15px", border:"none", borderRadius:12, background:C.orange, fontFamily:F, fontWeight:900, fontSize:16, color:"#111", cursor:"pointer", boxShadow:"0 4px 16px rgba(0,0,0,0.25)" }}>
+              <button onClick={()=>{
+                // Chantier « Courses » Lot 1 (shadow estFrancois) — en mode
+                // Core uniquement, transmet en 3e argument (additif) les
+                // lignes de prix RETENUES du magasin gagnant, pour figer la
+                // session de courses côté racine. Pour tout autre utilisateur
+                // (ou en mode legacy, sans magasin réel), extrasCourses est
+                // null et onValidate garde exactement son comportement actuel.
+                const extrasCourses = (estFrancois && utiliserCore && coreResultat)
+                  ? {
+                      magasinId: bestAffiche.id,
+                      nomEnseigne: coreResultat.regroupement[bestAffiche.id]?.[0]?.prix?.nom_enseigne ?? null,
+                      adresse: bestStoreEntryAffiche ? {
+                        adresse: bestStoreEntryAffiche.store_address ?? null,
+                        code_postal: bestStoreEntryAffiche.code_postal ?? null,
+                        ville: bestStoreEntryAffiche.ville ?? null,
+                      } : null,
+                      lignesPrix: coreResultat.regroupement[bestAffiche.id] ?? [],
+                    }
+                  : null;
+                onValidate(bestAffiche, savingsVsSecondAffiche, extrasCourses);
+              }} style={{ width:"100%", padding:"15px", border:"none", borderRadius:12, background:C.orange, fontFamily:F, fontWeight:900, fontSize:16, color:"#111", cursor:"pointer", boxShadow:"0 4px 16px rgba(0,0,0,0.25)" }}>
                 ✅ Je fais mes courses chez {bestAffiche.name}
               </button>
 
@@ -7791,6 +7827,108 @@ function MicroTab({ onAdd, setTab }) {
   );
 }
 
+// ── CHANTIER « COURSES » — LOT 1 (shadow estFrancois) ────────────────────────
+// Écran de courses STATIQUE : affiche la session figée créée à la validation
+// du comparatif (en-tête magasin + total prévu + progression, sections par
+// rayon = CATÉGORIE dans l'ordre ordre_affichage de la base — arbitrage
+// François 2026-08-11). Le cochage arrive au Lot 2, la carte d'accueil au
+// Lot 3, la clôture (« Terminer mes courses ») au Lot 6 : les cases sont donc
+// rendues inertes ici, volontairement.
+function CoursesTab({ session, setTab }) {
+  const F = "'Nunito',sans-serif";
+  if (!session) return null;
+  const articles = session.articles || [];
+  const prog = calculerProgression(articles);
+  const groupes = grouperParRayon(articles.filter(a => a.etat === 'a_prendre'));
+  const ratio = prog.total > 0 ? prog.pris / prog.total : 0;
+  const magasin = session.magasin || {};
+  const villeLigne = [magasin.adresse, magasin.code_postal && magasin.ville ? `${magasin.code_postal} ${magasin.ville}` : magasin.ville]
+    .filter(Boolean).join(', ');
+
+  const LigneArticle = ({ article }) => (
+    <div style={{ display:"flex", alignItems:"center", gap:12, background:C.white, borderRadius:12, padding:"12px 14px", border:`1px solid ${C.grayLight}`, boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+      {/* Case inerte au Lot 1 (le cochage est le Lot 2) — grande zone prévue 44 px */}
+      <div aria-hidden="true" style={{ width:28, height:28, borderRadius:8, border:`2px solid ${C.blue}`, background:C.white, flexShrink:0 }} />
+      <div style={{ width:44, height:44, flexShrink:0 }}>
+        <PhotoProduit varianteId={article.variante_produit_id} taille="thumb" radius={8}
+          fallback={<div style={{ width:"100%", height:"100%", borderRadius:8, background:C.grayLight, display:"flex", alignItems:"center", justifyContent:"center", fontSize:20 }}>{emojiRayon(article.rayon)}</div>} />
+      </div>
+      <div style={{ flex:1, minWidth:0 }}>
+        <div style={{ fontFamily:F, fontWeight:800, fontSize:14, color:C.text }}>
+          {article.nom_affiche}
+          {article.est_mdd && (
+            <span style={{ marginLeft:6, background:C.grayLight, color:C.gray, borderRadius:5, padding:"1px 5px", fontSize:9, fontWeight:900, verticalAlign:"middle", whiteSpace:"nowrap" }}>Marque Distributeur</span>
+          )}
+        </div>
+        {article.rayon?.sous_categorie_nom && (
+          <div style={{ fontFamily:F, fontSize:11, color:C.gray, marginTop:1 }}>{article.rayon.sous_categorie_nom}</div>
+        )}
+      </div>
+      <div style={{ textAlign:"right", flexShrink:0 }}>
+        {article.quantite > 1 && (
+          <div style={{ fontFamily:F, fontWeight:900, fontSize:12, color:C.white, background:C.blue, borderRadius:8, padding:"2px 8px", display:"inline-block", marginBottom:3 }}>×{article.quantite}</div>
+        )}
+        {article.prix_prevu != null ? (
+          <div style={{ fontFamily:F, fontWeight:900, fontSize:14, color:C.text }}>{(article.prix_prevu * article.quantite).toFixed(2)} €</div>
+        ) : (
+          <div style={{ fontFamily:F, fontWeight:800, fontSize:11, color:C.orange }}>prix inconnu</div>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ padding:"16px 16px 110px" }}>
+      <button onClick={()=>setTab?.("home")} aria-label="Retour à l'accueil"
+        style={{ display:"inline-flex", alignItems:"center", gap:6, marginBottom:14, padding:"9px 16px 9px 12px", background:C.orange, border:"none", borderRadius:12, fontFamily:F, fontWeight:900, fontSize:15, color:"#111111", cursor:"pointer", boxShadow:"0 3px 10px rgba(0,0,0,0.15)" }}>
+        <span style={{ fontSize:24, lineHeight:1, marginTop:-2 }}>‹</span> Accueil
+      </button>
+
+      {/* En-tête de session — magasin + total prévu + progression */}
+      <div style={{ background:"linear-gradient(145deg,#CC0000,#E00000)", borderRadius:16, padding:"16px 18px", marginBottom:16, boxShadow:"0 8px 24px rgba(204,0,0,0.35)" }}>
+        <div style={{ fontFamily:F, fontWeight:900, fontSize:18, color:C.white }}>🛒 Courses en cours chez {magasin.nom}</div>
+        {villeLigne && <div style={{ fontFamily:F, fontSize:12, color:"rgba(255,255,255,0.7)", marginTop:2 }}>{villeLigne}</div>}
+        <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", marginTop:12 }}>
+          <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:"rgba(255,255,255,0.85)" }}>
+            {prog.pris} article{prog.pris > 1 ? "s" : ""} sur {prog.total} dans le caddie
+          </div>
+          {session.total_prevu != null && (
+            <div style={{ fontFamily:F, fontWeight:900, fontSize:18, color:"#FFD700" }}>{session.total_prevu.toFixed(2)} €</div>
+          )}
+        </div>
+        <div style={{ marginTop:8, height:8, borderRadius:99, background:"rgba(255,255,255,0.25)", overflow:"hidden" }}>
+          <div style={{ width:`${Math.round(ratio*100)}%`, height:"100%", borderRadius:99, background:"#FFD700", transition:"width 0.3s ease" }} />
+        </div>
+      </div>
+
+      {/* À PRENDRE — sections par rayon (catégorie), ordre de la base */}
+      {groupes.length > 0 && (
+        <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:C.gray, letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:8 }}>
+          À prendre ({prog.restants})
+        </div>
+      )}
+      {groupes.map(groupe => (
+        <div key={`${groupe.rayon.categorie_ordre}-${groupe.rayon.categorie_nom}`} style={{ marginBottom:14 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
+            <span style={{ fontSize:18 }}>{emojiRayon(groupe.rayon)}</span>
+            <span style={{ fontFamily:F, fontWeight:900, fontSize:14, color:C.text }}>{groupe.rayon.categorie_nom}</span>
+            <span style={{ fontFamily:F, fontWeight:800, fontSize:12, color:C.gray }}>({groupe.articles.length})</span>
+          </div>
+          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+            {groupe.articles.map(article => <LigneArticle key={article.cle} article={article} />)}
+          </div>
+        </div>
+      ))}
+      {prog.total === 0 && (
+        <div style={{ background:C.orangeLight, borderRadius:14, padding:"24px 20px", textAlign:"center", border:`2px dashed ${C.orange}` }}>
+          <div style={{ fontSize:40, marginBottom:10 }}>🛒</div>
+          <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:C.orange }}>Aucun article dans cette session</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash, onResumeScan, archives = [], pseudo, onStats, onMesPrix, onFaq, onSignOut, pendingCagnotte, onConsumeCagnotteCelebration, pendingPotential, onConsumePotentialCelebration, estFrancois = false }) {
   const F = "'Nunito',sans-serif";
   // Chantier 79 (ajustement) — scan en cours visible dès l'accueil. HomeTab
@@ -8244,6 +8382,10 @@ export default function App() {
 
   const [tab, setTab]           = useState("home");
   const [items, setItems]       = useState([]);
+  // Chantier « Courses » Lot 1 (shadow estFrancois) — session de courses figée,
+  // réhydratée depuis localStorage à l'init (survit au rechargement). Rendue
+  // uniquement pour François via tab==="courses" (aucun onglet TabBar ajouté).
+  const [sessionCourses, setSessionCourses] = useState(() => lireSessionCourses());
   const [priceDB, setPriceDB]     = useState([]);
   // Chantier 81 — zone du comparateur (point + rayon + libellé) réhydratée
   // depuis localStorage à l'init : au retour, l'utilisateur retrouve sa zone
@@ -8868,7 +9010,39 @@ export default function App() {
     return { error };
   };
 
-  const handleValidate = async (store, potentialSaving = 0) => {
+  // Chantier « Courses » Lot 1 (shadow estFrancois) — construit l'instantané
+  // FIGÉ de la session depuis les lignes de prix retenues du magasin gagnant
+  // (transmises par CompareTab) puis ouvre l'écran de courses. Rayon =
+  // catégorie (arbitrage 2026-08-11) ; un rayon non résolu (erreur réseau
+  // comprise) retombe sur « Autres articles », jamais un blocage.
+  const demarrerSessionCourses = async (store, extrasCourses) => {
+    let rayons = new Map();
+    try {
+      rayons = await chargerRayonsProduits(items.map(i => i.produit_id).filter(Boolean));
+    } catch (e) {
+      console.error("Rayons non résolus (repli « Autres articles ») :", e);
+    }
+    const articles = construireArticlesSession({ items, lignesPrix: extrasCourses.lignesPrix, rayons });
+    const nouvelleSession = construireSessionCourses({
+      utilisateurId: session?.user?.id ?? null,
+      magasin: {
+        magasin_id: extrasCourses.magasinId ?? null,
+        nom: store?.name ?? 'Magasin',
+        enseigne: extrasCourses.nomEnseigne ?? null,
+        adresse: extrasCourses.adresse?.adresse ?? null,
+        code_postal: extrasCourses.adresse?.code_postal ?? null,
+        ville: extrasCourses.adresse?.ville ?? null,
+      },
+      articles,
+      totalPrevu: store?.total,
+      creeLeISO: new Date().toISOString(),
+    });
+    ecrireSessionCourses(nouvelleSession);
+    setSessionCourses(nouvelleSession);
+    setTab("courses");
+  };
+
+  const handleValidate = async (store, potentialSaving = 0, extrasCourses = null) => {
     let totalSaving = 0;
     const details = [];
     items.forEach(item => {
@@ -8893,6 +9067,24 @@ export default function App() {
       ticket_scanned: false,
     };
     saveArchives([...archives, arc]);
+
+    // Chantier « Courses » Lot 1 (shadow estFrancois) — l'archive vient d'être
+    // créée À L'IDENTIQUE (cagnotte et scan de ticket inchangés) ; pour
+    // François, la validation ouvre directement l'écran de courses : le caddie
+    // est CONSERVÉ jusqu'à la clôture (Lot 6), l'écran succès et l'Historique
+    // sont sautés. En cas d'échec de création de session, repli complet sur le
+    // flux standard ci-dessous — jamais de perte silencieuse. Pour tout autre
+    // utilisateur, extrasCourses est null : comportement strictement identique
+    // à avant.
+    if (estFrancois && extrasCourses) {
+      try {
+        await demarrerSessionCourses(store, extrasCourses);
+        return;
+      } catch (e) {
+        console.error("Création de la session de courses échouée, flux standard :", e);
+      }
+    }
+
     setItems([]);
     try {
       await supabase.from('liste_courses').delete().eq('utilisateur_id', session?.user?.id);
@@ -9135,9 +9327,13 @@ export default function App() {
               jamais rendu pour un autre utilisateur, même si tab="micro" traîne en state.
               Lot 5 : onAdd = le addItem OFFICIEL du caddie (même chemin que le Catalogue). */}
           {loaded && estFrancois && tab==="micro" && <MicroTab onAdd={addItem} setTab={setTab}/>}
+          {/* Chantier « Courses » Lot 1 (shadow estFrancois) — écran de courses,
+              accessible uniquement via la validation du comparatif (aucun
+              onglet TabBar). Session absente -> rien n'est rendu. */}
+          {loaded && estFrancois && tab==="courses" && sessionCourses && <CoursesTab session={sessionCourses} setTab={setTab}/>}
           {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} onSetMarquePref={setMarquePrefItem}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab}/>}
-          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix}/>}
+          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix} estFrancois={estFrancois}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
           {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} estFrancois={estFrancois} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;
