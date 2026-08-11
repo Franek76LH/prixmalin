@@ -8,7 +8,7 @@ import { urlPhotoVariante, offLargeSource, offFullUrl, cloudinaryAgrandi } from 
 import { nomComposeVariante, formatEtiquetteVariante } from "./lib/nomProduit";
 import { transcrireAudioListe, normaliserNomElement, comptesParNom, fusionnerParNom } from "./lib/microVocal";
 // Chantier « Courses » Lot 1 — session de courses figée (shadow estFrancois).
-import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession, ajouterNoteSession, supprimerNoteSession } from "./lib/sessionCoursesCore";
+import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession, ajouterNoteSession, supprimerNoteSession, cloreSession, idsCaddieASupprimer } from "./lib/sessionCoursesCore";
 import { capturerEvenement } from "./lib/posthog";
 import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
 import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
@@ -7909,7 +7909,7 @@ function LigneArticleCourses({ article, variante, onCocher, onIntrouvable, onRes
   );
 }
 
-function CoursesTab({ session, setTab, onChangerEtat, onAjouterNote, onSupprimerNote, syncEchec = false }) {
+function CoursesTab({ session, setTab, onChangerEtat, onAjouterNote, onSupprimerNote, onTerminer, syncEchec = false }) {
   const F = "'Nunito',sans-serif";
   // « Dans le caddie » repliée par défaut — hooks déclarés AVANT le early
   // return (règle des Hooks : ordre stable entre rendus).
@@ -8096,6 +8096,16 @@ function CoursesTab({ session, setTab, onChangerEtat, onAjouterNote, onSupprimer
           <div style={{ fontSize:40, marginBottom:10 }}>🛒</div>
           <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:C.orange }}>Aucun article dans cette session</div>
         </div>
+      )}
+
+      {/* Lot 6 — clôture explicite, en fin de liste. Vert quand tout est pris,
+          neutre sinon (la confirmation « il reste X articles » est gérée par
+          la racine — jamais de clôture silencieuse). */}
+      {prog.total > 0 && (
+        <button onClick={()=>onTerminer?.()}
+          style={{ width:"100%", padding:"15px", marginTop:6, border:"none", borderRadius:14, background: toutPris ? C.green : "linear-gradient(135deg,#CC0000,#FF1A1A)", fontFamily:F, fontWeight:900, fontSize:15, color:"#fff", cursor:"pointer", boxShadow: toutPris ? "0 6px 20px rgba(0,140,60,0.35)" : "0 6px 20px rgba(180,0,0,0.45)" }}>
+          🏁 Terminer mes courses
+        </button>
       )}
     </div>
   );
@@ -8625,6 +8635,10 @@ export default function App() {
   // mémorise la validation en attente ({store, potentialSaving, extrasCourses})
   // le temps que François choisisse « reprendre » ou « remplacer ».
   const [confirmCoursesExistantes, setConfirmCoursesExistantes] = useState(null);
+  // Lot 6 — étape de clôture en cours : null (rien), 'confirmation' (il reste
+  // des articles à prendre, jamais de clôture silencieuse), 'choixCaddie'
+  // (récap + sort du caddie).
+  const [clotureCourses, setClotureCourses] = useState(null);
   // Lot 3 — session réellement exploitable : active ET appartenant à
   // l'utilisateur connecté (le localStorage est partagé par appareil — une
   // session d'un autre compte ne doit ni s'afficher ni être reprise).
@@ -9417,6 +9431,52 @@ export default function App() {
     })();
   };
 
+  // Lot 6 — demande de clôture depuis l'écran de courses : s'il reste des
+  // articles à prendre, confirmation d'abord (jamais de clôture silencieuse) ;
+  // sinon, directement le choix du sort du caddie.
+  const demanderTerminerCourses = () => {
+    if (!sessionCoursesActive) return;
+    const prog = calculerProgression(sessionCoursesActive.articles);
+    setClotureCourses(prog.restants > 0 ? 'confirmation' : 'choixCaddie');
+  };
+
+  // Lot 6 — clôture effective. actionCaddie : 'vider' | 'garder_introuvables'
+  // | 'garder'. La session est close d'abord (localStorage effacé, carte
+  // disparue, retour accueil) ; l'écriture base (statut 'terminee') et
+  // l'éventuel vidage du caddie sont best effort, avec toast explicite en cas
+  // d'échec — supprimer moins que prévu n'est jamais une perte de données.
+  const executerClotureCourses = async (actionCaddie) => {
+    const sessionAClore = sessionCoursesActive;
+    if (!sessionAClore) { setClotureCourses(null); return; }
+    const terminee = cloreSession(sessionAClore, new Date().toISOString());
+    setClotureCourses(null);
+    effacerSessionCourses();
+    setSessionCourses(null);
+    setTab("home");
+    showAppToast("🎉 Courses terminées !");
+
+    try {
+      await sauvegarderSessionSupabase(terminee);
+    } catch (e) {
+      console.error("Filet Supabase courses (clôture) :", e);
+    }
+
+    if (actionCaddie === 'garder') return;
+    const ids = idsCaddieASupprimer(terminee, { garderIntrouvables: actionCaddie === 'garder_introuvables' });
+    if (ids.length === 0) return;
+    try {
+      const { error } = await supabase.from('liste_courses')
+        .delete()
+        .eq('utilisateur_id', session?.user?.id)
+        .in('id', ids);
+      if (error) throw error;
+      await chargerListe();
+    } catch (e) {
+      console.error("Vidage du caddie post-courses :", e);
+      showAppToast("⚠️ Le caddie n'a pas pu être vidé — tu peux le faire depuis « Ma liste ».", false);
+    }
+  };
+
   const handleValidate = async (store, potentialSaving = 0, extrasCourses = null, forcerRemplacement = false) => {
     // Lot 3 (shadow estFrancois) — une session est déjà active : on demande
     // AVANT toute écriture (ni archive ni session créées à ce stade) si
@@ -9721,7 +9781,7 @@ export default function App() {
           {/* Chantier « Courses » Lot 1 (shadow estFrancois) — écran de courses,
               accessible uniquement via la validation du comparatif (aucun
               onglet TabBar). Session absente -> rien n'est rendu. */}
-          {loaded && estFrancois && tab==="courses" && sessionCoursesActive && <CoursesTab session={sessionCoursesActive} setTab={setTab} onChangerEtat={changerEtatArticleSession} onAjouterNote={ajouterNoteCourses} onSupprimerNote={supprimerNoteCourses} syncEchec={syncCoursesEchec}/>}
+          {loaded && estFrancois && tab==="courses" && sessionCoursesActive && <CoursesTab session={sessionCoursesActive} setTab={setTab} onChangerEtat={changerEtatArticleSession} onAjouterNote={ajouterNoteCourses} onSupprimerNote={supprimerNoteCourses} onTerminer={demanderTerminerCourses} syncEchec={syncCoursesEchec}/>}
           {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} onSetMarquePref={setMarquePrefItem}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix} estFrancois={estFrancois}/>}
@@ -9867,6 +9927,73 @@ export default function App() {
             </div>
           </div>
         )}
+        {/* Lot 6 (shadow estFrancois) — étape 1 : il reste des articles à
+            prendre, jamais de clôture silencieuse. */}
+        {clotureCourses === 'confirmation' && sessionCoursesActive && (() => {
+          const prog = calculerProgression(sessionCoursesActive.articles);
+          return (
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:9999, padding:24 }} onClick={()=>setClotureCourses(null)}>
+              <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:16, padding:"20px", maxWidth:340, width:"100%" }}>
+                <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:"#1a1a1a", marginBottom:6 }}>
+                  Il reste {prog.restants} article{prog.restants > 1 ? "s" : ""} à prendre
+                </div>
+                <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:"#888", marginBottom:16 }}>
+                  Veux-tu quand même terminer tes courses ?
+                </div>
+                <button onClick={()=>setClotureCourses('choixCaddie')}
+                  style={{ width:"100%", padding:"13px", border:"none", borderRadius:10, background:"#CC0000", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer", marginBottom:8 }}>
+                  Terminer quand même
+                </button>
+                <button onClick={()=>setClotureCourses(null)}
+                  style={{ width:"100%", padding:"12px", border:"1.5px solid #eee", borderRadius:10, background:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:"#333", cursor:"pointer" }}>
+                  Continuer mes courses
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Lot 6 — étape 2 : récap + sort du caddie « Ma liste » (arbitrage
+            Q6 : proposer, jamais de vidage automatique). Chaque bouton clôt
+            la session ; « Annuler » ramène aux courses sans rien clore. */}
+        {clotureCourses === 'choixCaddie' && sessionCoursesActive && (() => {
+          const prog = calculerProgression(sessionCoursesActive.articles);
+          return (
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:9999, padding:24 }} onClick={()=>setClotureCourses(null)}>
+              <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:16, padding:"20px", maxWidth:340, width:"100%" }}>
+                <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:"#1a1a1a", marginBottom:6 }}>🎉 Terminer mes courses</div>
+                <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:"#555", marginBottom:4 }}>
+                  {prog.pris} article{prog.pris > 1 ? "s" : ""} dans le caddie
+                  {prog.introuvables > 0 ? ` · ${prog.introuvables} introuvable${prog.introuvables > 1 ? "s" : ""}` : ""}
+                  {prog.restants > 0 ? ` · ${prog.restants} non pris` : ""}
+                  {sessionCoursesActive.total_prevu != null ? ` · total prévu ${Number(sessionCoursesActive.total_prevu).toFixed(2)} €` : ""}
+                </div>
+                <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:"#888", marginBottom:16 }}>
+                  Que fait-on de ton caddie « Ma liste » ?
+                </div>
+                <button onClick={()=>executerClotureCourses('vider')}
+                  style={{ width:"100%", padding:"13px", border:"none", borderRadius:10, background:C.green, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer", marginBottom:8 }}>
+                  🧹 Vider le caddie
+                </button>
+                {prog.introuvables > 0 && (
+                  <button onClick={()=>executerClotureCourses('garder_introuvables')}
+                    style={{ width:"100%", padding:"13px", border:"none", borderRadius:10, background:C.orange, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:"#111", cursor:"pointer", marginBottom:8 }}>
+                    🚫 Garder seulement les introuvables ({prog.introuvables})
+                  </button>
+                )}
+                <button onClick={()=>executerClotureCourses('garder')}
+                  style={{ width:"100%", padding:"13px", border:"none", borderRadius:10, background:"#4A90D9", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer", marginBottom:8 }}>
+                  🛒 Garder le caddie tel quel
+                </button>
+                <button onClick={()=>setClotureCourses(null)}
+                  style={{ width:"100%", padding:"12px", border:"1.5px solid #eee", borderRadius:10, background:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:"#333", cursor:"pointer" }}>
+                  Annuler
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+
         {showSuccess && (
           <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:300, animation:"fadeIn 0.2s ease", padding:"20px", overflowY:"auto" }}>
             <div style={{ background:C.white, borderRadius:20, padding:"32px 24px", textAlign:"center", maxWidth:340, width:"100%", animation:"popIn 0.35s ease", boxShadow:"0 20px 60px rgba(0,0,0,0.25)" }}>

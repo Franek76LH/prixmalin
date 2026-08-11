@@ -338,6 +338,26 @@ export function appliquerEtatArticle(session, cle, nouvelEtat, modifieLeISO) {
   return { ...session, articles, modifie_le: modifieLeISO };
 }
 
+// Lot 6 — clôture explicite (« Terminer mes courses »). Ne clôt qu'une
+// session active ; sinon même référence (une session déjà terminée ne doit
+// jamais être re-clôturée ni réécrite).
+export function cloreSession(session, termineeLeISO) {
+  if (!session || session.statut !== 'active') return session;
+  return { ...session, statut: 'terminee', terminee_le: termineeLeISO, modifie_le: termineeLeISO };
+}
+
+// Lot 6 — lignes liste_courses à supprimer au vidage du caddie post-courses.
+// Uniquement les articles de type 'caddie' de CETTE session (leur cle est
+// l'id de la ligne liste_courses d'origine) : un article ajouté au caddie
+// APRÈS le démarrage des courses n'est jamais supprimé (pas de perte
+// silencieuse), et les notes libres n'ont rien en base. garderIntrouvables :
+// épargne les articles marqués introuvables (pour la prochaine fois).
+export function idsCaddieASupprimer(session, { garderIntrouvables = false } = {}) {
+  return (session?.articles || [])
+    .filter(a => a.type === 'caddie' && (!garderIntrouvables || a.etat !== 'introuvable'))
+    .map(a => a.cle);
+}
+
 // Progression globale de la session. Les introuvables ne comptent ni comme
 // pris ni comme restants dans le ratio principal (ils ont leur section).
 export function calculerProgression(articles) {

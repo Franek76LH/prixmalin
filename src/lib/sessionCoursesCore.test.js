@@ -18,6 +18,8 @@ import {
   RAYON_NOTE,
   ajouterNoteSession,
   supprimerNoteSession,
+  cloreSession,
+  idsCaddieASupprimer,
   genererIdSession,
   ligneSupabaseDepuisSession,
   sauvegarderSessionSupabase,
@@ -353,6 +355,37 @@ describe('Lot 5 — notes libres (« Ajoutés en route »)', () => {
       { cle: 'a', rayon: RAYON_FRUITS },
     ]);
     expect(groupes.map(g => g.rayon.categorie_nom)).toEqual(['Fruits & légumes', 'Autres articles', 'Ajoutés en route']);
+  });
+});
+
+describe('Lot 6 — clôture', () => {
+  const sessionCloture = () => construireSessionCourses({
+    id: 'sess-1', utilisateurId: 'u1', magasin: { magasin_id: 'm1', nom: 'Magasin' },
+    articles: [
+      { cle: 'lc-1', type: 'caddie', etat: 'au_caddie' },
+      { cle: 'lc-2', type: 'caddie', etat: 'introuvable' },
+      { cle: 'lc-3', type: 'caddie', etat: 'a_prendre' },
+      { cle: 'note:n1', type: 'note', etat: 'au_caddie' },
+    ],
+    totalPrevu: 9, creeLeISO: 'T0',
+  });
+
+  it('cloreSession : active -> terminee avec terminee_le ; jamais deux fois', () => {
+    const close = cloreSession(sessionCloture(), 'T9');
+    expect(close.statut).toBe('terminee');
+    expect(close.terminee_le).toBe('T9');
+    expect(close.modifie_le).toBe('T9');
+    expect(cloreSession(close, 'T10')).toBe(close); // déjà terminée : même référence
+    expect(cloreSession(null, 'T9')).toBeNull();
+  });
+
+  it('idsCaddieASupprimer : uniquement les lignes caddie de la session, jamais les notes', () => {
+    expect(idsCaddieASupprimer(sessionCloture())).toEqual(['lc-1', 'lc-2', 'lc-3']);
+  });
+
+  it('garderIntrouvables : épargne les articles introuvables', () => {
+    expect(idsCaddieASupprimer(sessionCloture(), { garderIntrouvables: true })).toEqual(['lc-1', 'lc-3']);
+    expect(idsCaddieASupprimer(null)).toEqual([]);
   });
 });
 
