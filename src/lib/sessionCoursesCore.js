@@ -35,6 +35,7 @@ const EMOJI_CATEGORIE = {
   'hygiene-beaute':           '🧴',
   'bebe':                     '🍼',
   'animalerie':               '🐾',
+  'ajout-note':               '📝', // Lot 5 — notes libres « Ajoutés en route »
 };
 
 export function emojiRayon(rayon) {
@@ -264,6 +265,54 @@ export function grouperParRayon(articles) {
 // Lot 2 — états possibles d'un article de session. Trois états, tous
 // réversibles ; toute autre valeur est refusée (jamais d'état inconnu écrit).
 export const ETATS_ARTICLE = Object.freeze(['a_prendre', 'au_caddie', 'introuvable']);
+
+// Lot 5 — pseudo-rayon des notes libres ajoutées en cours de courses
+// (« Ajoutés en route »). Toujours après « Autres articles ».
+export const RAYON_NOTE = Object.freeze({
+  categorie_nom: 'Ajoutés en route',
+  categorie_slug: 'ajout-note',
+  categorie_ordre: 10000,
+  sous_categorie_nom: null,
+});
+
+// Lot 5 — ajoute une NOTE LIBRE à la session : un simple texte, sans prix,
+// sans photo, sans variante, et surtout AUCUNE écriture dans le Core
+// (produits/variantes_produit/prix) — la note ne vit que dans le document de
+// session (localStorage + sessions_courses.donnees). Texte vide/blanc :
+// session inchangée (même référence). idNote est fourni par l'appelant
+// (genererIdSession) pour rester pur.
+export function ajouterNoteSession(session, texte, modifieLeISO, idNote) {
+  const texteNet = (texte || '').trim();
+  if (!session || !texteNet || !idNote) return session;
+  const note = {
+    cle: `note:${idNote}`,
+    type: 'note',
+    produit_id: null,
+    nom_reference: texteNet,
+    nom_marque: null,
+    est_mdd: false,
+    format_libelle: '',
+    nom_affiche: texteNet,
+    quantite: 1,
+    prix_prevu: null,
+    variante_produit_id: null,
+    rayon: RAYON_NOTE,
+    etat: 'a_prendre',
+    coche_le: null,
+  };
+  return { ...session, articles: [...(session.articles || []), note], modifie_le: modifieLeISO };
+}
+
+// Lot 5 — supprime une note libre (faute de frappe). REFUSE de supprimer un
+// article du caddie (type 'caddie') : la suppression n'existe que pour les
+// notes. Clé inconnue ou article non-note : session inchangée (même référence).
+export function supprimerNoteSession(session, cle, modifieLeISO) {
+  if (!session) return session;
+  const articles = session.articles || [];
+  const cible = articles.find(a => a.cle === cle);
+  if (!cible || cible.type !== 'note') return session;
+  return { ...session, articles: articles.filter(a => a.cle !== cle), modifie_le: modifieLeISO };
+}
 
 // Lot 2 — change l'état d'un article (cocher / décocher / introuvable) sans
 // jamais réordonner la liste : un article décoché retrouve sa place d'origine

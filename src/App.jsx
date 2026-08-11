@@ -8,7 +8,7 @@ import { urlPhotoVariante, offLargeSource, offFullUrl, cloudinaryAgrandi } from 
 import { nomComposeVariante, formatEtiquetteVariante } from "./lib/nomProduit";
 import { transcrireAudioListe, normaliserNomElement, comptesParNom, fusionnerParNom } from "./lib/microVocal";
 // Chantier « Courses » Lot 1 — session de courses figée (shadow estFrancois).
-import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession } from "./lib/sessionCoursesCore";
+import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession, ajouterNoteSession, supprimerNoteSession } from "./lib/sessionCoursesCore";
 import { capturerEvenement } from "./lib/posthog";
 import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
 import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
@@ -7848,11 +7848,14 @@ function MicroTab({ onAdd, setTab }) {
 // immédiatement en localStorage par la racine (onChangerEtat). Un rayon
 // entièrement pris disparaît de « À prendre » (repli automatique). Carte
 // d'accueil au Lot 3, clôture (« Terminer mes courses ») au Lot 6.
-function LigneArticleCourses({ article, variante, onCocher, onIntrouvable, onRestaurer }) {
+function LigneArticleCourses({ article, variante, onCocher, onIntrouvable, onRestaurer, onSupprimer }) {
   const F = "'Nunito',sans-serif";
   const prise = variante === 'au_caddie';
   const introuvable = variante === 'introuvable';
   const attenue = prise || introuvable;
+  // Lot 5 — une note libre n'a ni prix ni marquage « introuvable » ; elle est
+  // supprimable (✕) depuis sa section tant qu'elle n'est pas cochée.
+  const estNote = article.type === 'note';
   return (
     <div style={{ display:"flex", alignItems:"center", gap:8, background: prise ? "#F3FAF5" : introuvable ? "#FFF8E6" : C.white, borderRadius:12, padding:"8px 10px 8px 2px", border:`1px solid ${prise ? "#C8E6C9" : introuvable ? C.yellow : C.grayLight}`, boxShadow: prise ? "inset 3px 0 0 #4CAF50" : "0 1px 4px rgba(0,0,0,0.06)" }}>
       {/* Zone tactile 44×44, case visuelle 28 px */}
@@ -7878,19 +7881,25 @@ function LigneArticleCourses({ article, variante, onCocher, onIntrouvable, onRes
           <div style={{ fontFamily:F, fontSize:11, color:C.gray, marginTop:1 }}>{article.rayon.sous_categorie_nom}</div>
         )}
       </div>
-      <div style={{ textAlign:"right", flexShrink:0, opacity: attenue ? 0.75 : 1 }}>
-        {article.quantite > 1 && (
-          <div style={{ fontFamily:F, fontWeight:900, fontSize:12, color:C.white, background:C.blue, borderRadius:8, padding:"2px 8px", display:"inline-block", marginBottom:3 }}>×{article.quantite}</div>
-        )}
-        {article.prix_prevu != null ? (
-          <div style={{ fontFamily:F, fontWeight:900, fontSize:14, color:C.text }}>{(article.prix_prevu * article.quantite).toFixed(2)} €</div>
-        ) : (
-          <div style={{ fontFamily:F, fontWeight:800, fontSize:11, color:C.orange }}>prix inconnu</div>
-        )}
-      </div>
-      {variante === 'a_prendre' && (
+      {!estNote && (
+        <div style={{ textAlign:"right", flexShrink:0, opacity: attenue ? 0.75 : 1 }}>
+          {article.quantite > 1 && (
+            <div style={{ fontFamily:F, fontWeight:900, fontSize:12, color:C.white, background:C.blue, borderRadius:8, padding:"2px 8px", display:"inline-block", marginBottom:3 }}>×{article.quantite}</div>
+          )}
+          {article.prix_prevu != null ? (
+            <div style={{ fontFamily:F, fontWeight:900, fontSize:14, color:C.text }}>{(article.prix_prevu * article.quantite).toFixed(2)} €</div>
+          ) : (
+            <div style={{ fontFamily:F, fontWeight:800, fontSize:11, color:C.orange }}>prix inconnu</div>
+          )}
+        </div>
+      )}
+      {variante === 'a_prendre' && !estNote && (
         <button onClick={onIntrouvable} aria-label={`Marquer « ${article.nom_affiche} » introuvable`}
           style={{ width:38, height:44, flexShrink:0, background:"none", border:"none", cursor:"pointer", fontSize:16, padding:0, opacity:0.55 }}>🚫</button>
+      )}
+      {estNote && onSupprimer && (
+        <button onClick={onSupprimer} aria-label={`Supprimer la note « ${article.nom_affiche} »`}
+          style={{ width:38, height:44, flexShrink:0, background:"none", border:"none", cursor:"pointer", fontSize:16, color:C.gray, padding:0 }}>✕</button>
       )}
       {introuvable && (
         <button onClick={onRestaurer} aria-label={`Remettre « ${article.nom_affiche} » à prendre`}
@@ -7900,17 +7909,28 @@ function LigneArticleCourses({ article, variante, onCocher, onIntrouvable, onRes
   );
 }
 
-function CoursesTab({ session, setTab, onChangerEtat, syncEchec = false }) {
+function CoursesTab({ session, setTab, onChangerEtat, onAjouterNote, onSupprimerNote, syncEchec = false }) {
   const F = "'Nunito',sans-serif";
-  // « Dans le caddie » repliée par défaut — hook déclaré AVANT le early
+  // « Dans le caddie » repliée par défaut — hooks déclarés AVANT le early
   // return (règle des Hooks : ordre stable entre rendus).
   const [caddieOuvert, setCaddieOuvert] = useState(false);
+  // Lot 5 — saisie d'une note libre (null = champ fermé).
+  const [texteNote, setTexteNote] = useState(null);
   if (!session) return null;
   const articles = session.articles || [];
   const prog = calculerProgression(articles);
-  const groupes = grouperParRayon(articles.filter(a => a.etat === 'a_prendre'));
+  // Les notes libres ont leur propre section « Ajoutés en route » : elles ne
+  // sont jamais mélangées aux rayons du magasin.
+  const aPrendreRayons = articles.filter(a => a.etat === 'a_prendre' && a.type !== 'note');
+  const groupes = grouperParRayon(aPrendreRayons);
+  const notesAPrendre = articles.filter(a => a.etat === 'a_prendre' && a.type === 'note');
   const introuvables = articles.filter(a => a.etat === 'introuvable');
   const auCaddie = articles.filter(a => a.etat === 'au_caddie');
+  const validerNote = () => {
+    const texte = (texteNote || '').trim();
+    if (texte) onAjouterNote?.(texte);
+    setTexteNote(null);
+  };
   const toutPris = prog.total > 0 && prog.restants === 0;
   const ratio = prog.total > 0 ? prog.pris / prog.total : 0;
   const magasin = session.magasin || {};
@@ -7954,7 +7974,7 @@ function CoursesTab({ session, setTab, onChangerEtat, syncEchec = false }) {
           lui-même (repli automatique). */}
       {groupes.length > 0 && (
         <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:C.gray, letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:8 }}>
-          À prendre ({prog.restants})
+          À prendre ({aPrendreRayons.length})
         </div>
       )}
       {groupes.map(groupe => (
@@ -8025,6 +8045,51 @@ function CoursesTab({ session, setTab, onChangerEtat, syncEchec = false }) {
           )}
         </div>
       )}
+
+      {/* Lot 5 — AJOUTÉS EN ROUTE : notes libres tapées pendant les courses.
+          Cochables comme le reste (elles filent alors dans « Dans le caddie »),
+          supprimables (✕), comptées dans la progression. Aucune écriture Core. */}
+      <div style={{ marginBottom:14 }}>
+        {notesAPrendre.length > 0 && (
+          <>
+            <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:C.gray, letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:8 }}>
+              📝 Ajoutés en route ({notesAPrendre.length})
+            </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:8 }}>
+              {notesAPrendre.map(article => (
+                <LigneArticleCourses key={article.cle} article={article} variante="a_prendre"
+                  onCocher={()=>onChangerEtat?.(article.cle, 'au_caddie')}
+                  onSupprimer={()=>onSupprimerNote?.(article.cle)} />
+              ))}
+            </div>
+          </>
+        )}
+        {texteNote === null ? (
+          <button onClick={()=>setTexteNote("")}
+            style={{ width:"100%", padding:"13px", border:`2px dashed ${C.grayLight}`, borderRadius:12, background:"transparent", fontFamily:F, fontWeight:800, fontSize:14, color:C.gray, cursor:"pointer" }}>
+            ＋ Ajouter un article oublié
+          </button>
+        ) : (
+          <div style={{ display:"flex", gap:8 }}>
+            <input
+              autoFocus
+              value={texteNote}
+              onChange={e=>setTexteNote(e.target.value)}
+              onKeyDown={e=>{ if (e.key === 'Enter') validerNote(); if (e.key === 'Escape') setTexteNote(null); }}
+              placeholder="Ex. : Sopalin"
+              style={{ flex:1, minWidth:0, padding:"12px 14px", borderRadius:12, border:`2px solid ${C.blue}`, fontFamily:F, fontSize:15, boxSizing:"border-box" }}
+            />
+            <button onClick={validerNote} aria-label="Ajouter la note"
+              style={{ padding:"0 16px", border:"none", borderRadius:12, background:C.blue, fontFamily:F, fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer" }}>
+              Ajouter
+            </button>
+            <button onClick={()=>setTexteNote(null)} aria-label="Annuler l'ajout"
+              style={{ padding:"0 12px", border:`1.5px solid ${C.grayLight}`, borderRadius:12, background:"#fff", fontFamily:F, fontWeight:800, fontSize:14, color:C.gray, cursor:"pointer" }}>
+              ✕
+            </button>
+          </div>
+        )}
+      </div>
 
       {prog.total === 0 && (
         <div style={{ background:C.orangeLight, borderRadius:14, padding:"24px 20px", textAlign:"center", border:`2px dashed ${C.orange}` }}>
@@ -9311,11 +9376,25 @@ export default function App() {
   // re-rendu : chaque action survit à une fermeture instantanée de l'app.
   // appliquerEtatArticle renvoie la même référence si rien ne change
   // (clé inconnue, état identique) : aucune écriture inutile dans ce cas.
-  const changerEtatArticleSession = (cle, nouvelEtat) => {
-    const suivante = appliquerEtatArticle(sessionCourses, cle, nouvelEtat, new Date().toISOString());
+  const appliquerSessionCourses = (suivante) => {
     if (suivante === sessionCourses) return;
     ecrireSessionCourses(suivante);
     setSessionCourses(suivante);
+  };
+
+  const changerEtatArticleSession = (cle, nouvelEtat) => {
+    appliquerSessionCourses(appliquerEtatArticle(sessionCourses, cle, nouvelEtat, new Date().toISOString()));
+  };
+
+  // Lot 5 — notes libres « Ajoutés en route » : données de session uniquement
+  // (localStorage + sessions_courses.donnees via la synchro débouncée),
+  // JAMAIS d'écriture dans produits/variantes_produit/prix.
+  const ajouterNoteCourses = (texte) => {
+    appliquerSessionCourses(ajouterNoteSession(sessionCourses, texte, new Date().toISOString(), genererIdSession()));
+  };
+
+  const supprimerNoteCourses = (cle) => {
+    appliquerSessionCourses(supprimerNoteSession(sessionCourses, cle, new Date().toISOString()));
   };
 
   // Lot 3 — abandon explicite depuis la carte d'accueil (jamais automatique).
@@ -9642,7 +9721,7 @@ export default function App() {
           {/* Chantier « Courses » Lot 1 (shadow estFrancois) — écran de courses,
               accessible uniquement via la validation du comparatif (aucun
               onglet TabBar). Session absente -> rien n'est rendu. */}
-          {loaded && estFrancois && tab==="courses" && sessionCoursesActive && <CoursesTab session={sessionCoursesActive} setTab={setTab} onChangerEtat={changerEtatArticleSession} syncEchec={syncCoursesEchec}/>}
+          {loaded && estFrancois && tab==="courses" && sessionCoursesActive && <CoursesTab session={sessionCoursesActive} setTab={setTab} onChangerEtat={changerEtatArticleSession} onAjouterNote={ajouterNoteCourses} onSupprimerNote={supprimerNoteCourses} syncEchec={syncCoursesEchec}/>}
           {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} onSetMarquePref={setMarquePrefItem}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix} estFrancois={estFrancois}/>}

@@ -15,6 +15,9 @@ import {
   grouperParRayon,
   calculerProgression,
   appliquerEtatArticle,
+  RAYON_NOTE,
+  ajouterNoteSession,
+  supprimerNoteSession,
   genererIdSession,
   ligneSupabaseDepuisSession,
   sauvegarderSessionSupabase,
@@ -294,6 +297,62 @@ describe('emojiRayon', () => {
     expect(emojiRayon(RAYON_FRUITS)).toBe('🥦');
     expect(emojiRayon(RAYON_AUTRES)).toBe('🧺');
     expect(emojiRayon({ categorie_slug: 'inconnu' })).toBe('🧺');
+  });
+});
+
+describe('Lot 5 — notes libres (« Ajoutés en route »)', () => {
+  const sessionNotes = () => construireSessionCourses({
+    id: 'sess-1',
+    utilisateurId: 'u1',
+    magasin: { magasin_id: 'm1', nom: 'Magasin Test' },
+    articles: [{ cle: 'a', type: 'caddie', etat: 'a_prendre', rayon: RAYON_EPICERIE }],
+    totalPrevu: 5,
+    creeLeISO: 'T0',
+  });
+
+  it('ajoute une note : texte seul, sans prix ni photo ni variante, état a_prendre', () => {
+    const next = ajouterNoteSession(sessionNotes(), '  Sopalin  ', 'T1', 'id-note-1');
+    expect(next.articles).toHaveLength(2);
+    const note = next.articles[1];
+    expect(note).toMatchObject({
+      cle: 'note:id-note-1', type: 'note', nom_affiche: 'Sopalin', etat: 'a_prendre',
+      prix_prevu: null, variante_produit_id: null, produit_id: null, quantite: 1,
+      rayon: RAYON_NOTE,
+    });
+    expect(next.modifie_le).toBe('T1');
+  });
+
+  it('texte vide/blanc ou id manquant -> même référence (aucune écriture)', () => {
+    const session = sessionNotes();
+    expect(ajouterNoteSession(session, '   ', 'T1', 'id')).toBe(session);
+    expect(ajouterNoteSession(session, null, 'T1', 'id')).toBe(session);
+    expect(ajouterNoteSession(session, 'Sopalin', 'T1', null)).toBe(session);
+  });
+
+  it('la note se coche/décoche comme un article et compte dans la progression', () => {
+    const avecNote = ajouterNoteSession(sessionNotes(), 'Sopalin', 'T1', 'n1');
+    expect(calculerProgression(avecNote.articles).total).toBe(2);
+    const cochee = appliquerEtatArticle(avecNote, 'note:n1', 'au_caddie', 'T2');
+    expect(cochee.articles[1].etat).toBe('au_caddie');
+    expect(calculerProgression(cochee.articles)).toEqual({ total: 2, pris: 1, introuvables: 0, restants: 1 });
+  });
+
+  it('supprime une note ; refuse de supprimer un article du caddie ou une clé inconnue', () => {
+    const avecNote = ajouterNoteSession(sessionNotes(), 'Sopalin', 'T1', 'n1');
+    const sansNote = supprimerNoteSession(avecNote, 'note:n1', 'T2');
+    expect(sansNote.articles).toHaveLength(1);
+    expect(sansNote.modifie_le).toBe('T2');
+    expect(supprimerNoteSession(avecNote, 'a', 'T2')).toBe(avecNote);      // article caddie : refus
+    expect(supprimerNoteSession(avecNote, 'inconnue', 'T2')).toBe(avecNote); // clé inconnue
+  });
+
+  it('RAYON_NOTE se classe toujours après « Autres articles » dans grouperParRayon', () => {
+    const groupes = grouperParRayon([
+      { cle: 'n', rayon: RAYON_NOTE },
+      { cle: 'x', rayon: RAYON_AUTRES },
+      { cle: 'a', rayon: RAYON_FRUITS },
+    ]);
+    expect(groupes.map(g => g.rayon.categorie_nom)).toEqual(['Fruits & légumes', 'Autres articles', 'Ajoutés en route']);
   });
 });
 
