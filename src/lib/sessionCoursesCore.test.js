@@ -20,6 +20,7 @@ import {
   supprimerNoteSession,
   cloreSession,
   idsCaddieASupprimer,
+  chargerMarquesVariantes,
   genererIdSession,
   ligneSupabaseDepuisSession,
   sauvegarderSessionSupabase,
@@ -355,6 +356,84 @@ describe('Lot 5 — notes libres (« Ajoutés en route »)', () => {
       { cle: 'a', rayon: RAYON_FRUITS },
     ]);
     expect(groupes.map(g => g.rayon.categorie_nom)).toEqual(['Fruits & légumes', 'Autres articles', 'Ajoutés en route']);
+  });
+});
+
+describe('Lot 7 — finitions (formats naturels, marque des articles sans prix)', () => {
+  it('format en unité naturelle : 0,295 kg -> « 295 g » (prix retenu comme variante caddie)', () => {
+    const articlesPrix = construireArticlesSession({
+      items: [itemBase()],
+      lignesPrix: [{ itemId: 'lc1', produit_id: 'p1', prix: prixBase({ quantite_nette: 0.295, unite_quantite: 'kg' }) }],
+      rayons: new Map(),
+    });
+    expect(articlesPrix[0].format_libelle).toBe('295 g');
+
+    const articlesSansPrix = construireArticlesSession({
+      items: [itemBase({ variante: { libelle: '0,295 kg', quantite_nette: 0.295, unite_quantite: 'kg', nombre_unites: 1 } })],
+      lignesPrix: [],
+      rayons: new Map(),
+    });
+    expect(articlesSansPrix[0].format_libelle).toBe('295 g'); // structuré prioritaire sur le libellé legacy
+  });
+
+  it('petit volume : 0,5 L -> « 500 ml »', () => {
+    const articles = construireArticlesSession({
+      items: [itemBase()],
+      lignesPrix: [{ itemId: 'lc1', produit_id: 'p1', prix: prixBase({ quantite_nette: 0.5, unite_quantite: 'l' }) }],
+      rayons: new Map(),
+    });
+    expect(articles[0].format_libelle).toBe('500 ml');
+  });
+
+  it('article sans prix : la marque de la variante du caddie complète le nom (cohérence photo)', () => {
+    const articles = construireArticlesSession({
+      items: [itemBase()],
+      lignesPrix: [],
+      rayons: new Map(),
+      marquesVariantes: new Map([['v-caddie', { nom: "Lay's", est_mdd: false }]]),
+    });
+    expect(articles[0].nom_marque).toBe("Lay's");
+    expect(articles[0].nom_affiche).toBe("Chips aromatisées Lay's 120 g");
+  });
+
+  it('article sans prix, variante MDD : marque masquée mais badge est_mdd', () => {
+    const articles = construireArticlesSession({
+      items: [itemBase()],
+      lignesPrix: [],
+      rayons: new Map(),
+      marquesVariantes: new Map([['v-caddie', { nom: 'Marque Repère', est_mdd: true }]]),
+    });
+    expect(articles[0].nom_marque).toBeNull();
+    expect(articles[0].est_mdd).toBe(true);
+  });
+
+  it('avec prix retenu, la marque du caddie est ignorée (le produit concret prime)', () => {
+    const articles = construireArticlesSession({
+      items: [itemBase()],
+      lignesPrix: [{ itemId: 'lc1', produit_id: 'p1', prix: prixBase({ nom_marque: 'Bret’s' }) }],
+      rayons: new Map(),
+      marquesVariantes: new Map([['v-caddie', { nom: "Lay's", est_mdd: false }]]),
+    });
+    expect(articles[0].nom_marque).toBe('Bret’s');
+  });
+
+  it('chargerMarquesVariantes : aucune requête si vide ; variante sans marque ignorée', async () => {
+    vi.clearAllMocks();
+    expect((await chargerMarquesVariantes([])).size).toBe(0);
+    expect(supabase.from).not.toHaveBeenCalled();
+
+    const inMock = vi.fn().mockResolvedValue({
+      data: [
+        { id: 'v1', marques: { nom: "Lay's", est_mdd: false } },
+        { id: 'v2', marques: null },
+      ],
+      error: null,
+    });
+    supabase.from.mockReturnValue({ select: vi.fn().mockReturnValue({ in: inMock }) });
+    const marques = await chargerMarquesVariantes(['v1', 'v2', 'v1', null]);
+    expect(inMock).toHaveBeenCalledWith('id', ['v1', 'v2']);
+    expect(marques.get('v1')).toEqual({ nom: "Lay's", est_mdd: false });
+    expect(marques.has('v2')).toBe(false);
   });
 });
 

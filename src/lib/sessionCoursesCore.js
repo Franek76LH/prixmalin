@@ -88,31 +88,63 @@ function formatConcret(libelle) {
   return l && l !== 'Format indifférent' ? l : '';
 }
 
+// Lot 7 — marques des variantes du caddie, pour les articles SANS prix retenu
+// dans le magasin : la photo affichée est celle de la variante choisie au
+// caddie, le nom doit donc porter la même marque (cohérence nom/photo).
+// Map variante_produit_id -> { nom, est_mdd }. Jamais de requête si vide.
+export async function chargerMarquesVariantes(varianteIds) {
+  const ids = [...new Set((varianteIds || []).filter(id => id != null))];
+  if (ids.length === 0) return new Map();
+
+  const { data, error } = await supabase
+    .from('variantes_produit')
+    .select('id, marques(nom, est_mdd)')
+    .in('id', ids);
+  if (error) throw error;
+
+  const marques = new Map();
+  for (const row of data || []) {
+    if (row.marques?.nom) marques.set(row.id, { nom: row.marques.nom, est_mdd: row.marques.est_mdd === true });
+  }
+  return marques;
+}
+
 // Construit les articles FIGÉS de la session à partir :
 //   - des items du caddie (forme mapperLigneListeCourses) ;
 //   - des lignes de prix retenues pour le magasin choisi
 //     (coreResultat.regroupement[magasinId] : { itemId, produit_id, prix }) ;
-//   - de la Map des rayons (chargerRayonsProduits).
+//   - de la Map des rayons (chargerRayonsProduits) ;
+//   - de la Map des marques de variantes (chargerMarquesVariantes, Lot 7) pour
+//     les articles sans prix retenu.
 // Le produit CONCRET (marque, format, prix, variante pour la photo) vient de
 // la ligne de prix retenue quand elle existe — c'est ce que le comparateur a
 // réellement affiché. Un article sans prix dans ce magasin est conservé avec
 // prix_prevu null (jamais écarté en silence). Fonction pure.
-export function construireArticlesSession({ items, lignesPrix, rayons }) {
+export function construireArticlesSession({ items, lignesPrix, rayons, marquesVariantes }) {
   const parItem = new Map((lignesPrix || []).map(l => [l.itemId, l]));
   const mapRayons = rayons instanceof Map ? rayons : new Map();
+  const mapMarques = marquesVariantes instanceof Map ? marquesVariantes : new Map();
 
   return (items || []).map(item => {
     const prix = parItem.get(item.id)?.prix ?? null;
 
     const nomReference = item.produit?.nom_reference ?? prix?.nom_produit ?? item.product ?? 'Article';
-    const estMdd = prix?.est_mdd === true;
-    const nomMarque = estMdd ? null : (prix?.nom_marque ?? null);
+    // Marque : celle du prix retenu ; sans prix, celle de la variante du
+    // caddie (Lot 7 — la photo vient de cette variante, le nom doit suivre).
+    // Règle Chantier 84 dans les deux cas : jamais la sous-marque distributeur.
+    const marqueCaddie = (!prix && item.variante_produit_id) ? mapMarques.get(item.variante_produit_id) : null;
+    const estMdd = prix ? prix.est_mdd === true : marqueCaddie?.est_mdd === true;
+    const nomMarque = estMdd ? null : (prix ? (prix.nom_marque ?? null) : (marqueCaddie?.nom ?? null));
 
-    // Format : celui de la ligne de prix retenue (champs structurés de la vue),
-    // sinon celui de la variante du caddie, sinon le libellé d'affichage.
+    // Format : champs structurés d'abord (formatFormatStructure convertit en
+    // unité naturelle — 0,295 kg -> « 295 g », Lot 7), puis libellé de la
+    // variante, puis libellé d'affichage du caddie.
+    const formatDepuisVariante = item.variante
+      ? (formatFormatStructure(item.variante) ?? formatVariante(item.variante))
+      : '';
     const formatLibelle = prix
-      ? formatConcret(formatFormatStructure(prix) ?? (item.variante ? formatVariante(item.variante) : ''))
-      : formatConcret(item.variante ? formatVariante(item.variante) : (item.formatDisplay ?? item.format ?? ''));
+      ? formatConcret(formatFormatStructure(prix) ?? formatDepuisVariante)
+      : formatConcret(formatDepuisVariante || (item.formatDisplay ?? item.format ?? ''));
 
     const article = {
       cle: String(item.id),

@@ -8,7 +8,7 @@ import { urlPhotoVariante, offLargeSource, offFullUrl, cloudinaryAgrandi } from 
 import { nomComposeVariante, formatEtiquetteVariante } from "./lib/nomProduit";
 import { transcrireAudioListe, normaliserNomElement, comptesParNom, fusionnerParNom } from "./lib/microVocal";
 // Chantier « Courses » Lot 1 — session de courses figée (shadow estFrancois).
-import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession, ajouterNoteSession, supprimerNoteSession, cloreSession, idsCaddieASupprimer } from "./lib/sessionCoursesCore";
+import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession, ajouterNoteSession, supprimerNoteSession, cloreSession, idsCaddieASupprimer, chargerMarquesVariantes } from "./lib/sessionCoursesCore";
 import { capturerEvenement } from "./lib/posthog";
 import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
 import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
@@ -7916,6 +7916,31 @@ function CoursesTab({ session, setTab, onChangerEtat, onAjouterNote, onSupprimer
   const [caddieOuvert, setCaddieOuvert] = useState(false);
   // Lot 5 — saisie d'une note libre (null = champ fermé).
   const [texteNote, setTexteNote] = useState(null);
+  // Lot 7 — annulation immédiate du dernier cochage ({cle, nom}, effacé après 4 s).
+  const [derniereCoche, setDerniereCoche] = useState(null);
+  useEffect(() => {
+    if (!derniereCoche) return;
+    const t = setTimeout(() => setDerniereCoche(null), 4000);
+    return () => clearTimeout(t);
+  }, [derniereCoche]);
+  // Lot 7 — verrou d'écran pendant les courses (même pattern que le Micro,
+  // Lot 6 du chantier Micro) : l'écran ne s'éteint pas en magasin. Optionnel
+  // et silencieux (refus batterie faible, API absente...). iOS relâche le
+  // verrou quand l'app passe en arrière-plan : on le redemande au retour.
+  useEffect(() => {
+    let verrou = null;
+    const demander = async () => {
+      try { verrou = await navigator.wakeLock?.request?.("screen") ?? null; }
+      catch { verrou = null; /* refusé : non bloquant */ }
+    };
+    demander();
+    const surVisibilite = () => { if (document.visibilityState === 'visible') demander(); };
+    document.addEventListener('visibilitychange', surVisibilite);
+    return () => {
+      document.removeEventListener('visibilitychange', surVisibilite);
+      try { verrou?.release?.(); } catch { /* déjà relâché */ }
+    };
+  }, []);
   if (!session) return null;
   const articles = session.articles || [];
   const prog = calculerProgression(articles);
@@ -7949,7 +7974,7 @@ function CoursesTab({ session, setTab, onChangerEtat, onAjouterNote, onSupprimer
         <div style={{ fontFamily:F, fontWeight:900, fontSize:18, color:C.white }}>🛒 Courses en cours chez {magasin.nom}</div>
         {villeLigne && <div style={{ fontFamily:F, fontSize:12, color:"rgba(255,255,255,0.7)", marginTop:2 }}>{villeLigne}</div>}
         <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", marginTop:12 }}>
-          <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:"rgba(255,255,255,0.85)" }}>
+          <div aria-live="polite" style={{ fontFamily:F, fontWeight:800, fontSize:13, color:"rgba(255,255,255,0.85)" }}>
             {prog.pris} article{prog.pris > 1 ? "s" : ""} sur {prog.total} dans le caddie
           </div>
           {session.total_prevu != null && (
@@ -7987,7 +8012,7 @@ function CoursesTab({ session, setTab, onChangerEtat, onAjouterNote, onSupprimer
           <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
             {groupe.articles.map(article => (
               <LigneArticleCourses key={article.cle} article={article} variante="a_prendre"
-                onCocher={()=>onChangerEtat?.(article.cle, 'au_caddie')}
+                onCocher={()=>{ onChangerEtat?.(article.cle, 'au_caddie'); setDerniereCoche({ cle: article.cle, nom: article.nom_affiche }); }}
                 onIntrouvable={()=>onChangerEtat?.(article.cle, 'introuvable')} />
             ))}
           </div>
@@ -8019,7 +8044,7 @@ function CoursesTab({ session, setTab, onChangerEtat, onAjouterNote, onSupprimer
           <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
             {introuvables.map(article => (
               <LigneArticleCourses key={article.cle} article={article} variante="introuvable"
-                onCocher={()=>onChangerEtat?.(article.cle, 'au_caddie')}
+                onCocher={()=>{ onChangerEtat?.(article.cle, 'au_caddie'); setDerniereCoche({ cle: article.cle, nom: article.nom_affiche }); }}
                 onRestaurer={()=>onChangerEtat?.(article.cle, 'a_prendre')} />
             ))}
           </div>
@@ -8039,7 +8064,7 @@ function CoursesTab({ session, setTab, onChangerEtat, onAjouterNote, onSupprimer
             <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
               {auCaddie.map(article => (
                 <LigneArticleCourses key={article.cle} article={article} variante="au_caddie"
-                  onCocher={()=>onChangerEtat?.(article.cle, 'a_prendre')} />
+                  onCocher={()=>{ onChangerEtat?.(article.cle, 'a_prendre'); setDerniereCoche(null); }} />
               ))}
             </div>
           )}
@@ -8058,7 +8083,7 @@ function CoursesTab({ session, setTab, onChangerEtat, onAjouterNote, onSupprimer
             <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:8 }}>
               {notesAPrendre.map(article => (
                 <LigneArticleCourses key={article.cle} article={article} variante="a_prendre"
-                  onCocher={()=>onChangerEtat?.(article.cle, 'au_caddie')}
+                  onCocher={()=>{ onChangerEtat?.(article.cle, 'au_caddie'); setDerniereCoche({ cle: article.cle, nom: article.nom_affiche }); }}
                   onSupprimer={()=>onSupprimerNote?.(article.cle)} />
               ))}
             </div>
@@ -8106,6 +8131,21 @@ function CoursesTab({ session, setTab, onChangerEtat, onAjouterNote, onSupprimer
           style={{ width:"100%", padding:"15px", marginTop:6, border:"none", borderRadius:14, background: toutPris ? C.green : "linear-gradient(135deg,#CC0000,#FF1A1A)", fontFamily:F, fontWeight:900, fontSize:15, color:"#fff", cursor:"pointer", boxShadow: toutPris ? "0 6px 20px rgba(0,140,60,0.35)" : "0 6px 20px rgba(180,0,0,0.45)" }}>
           🏁 Terminer mes courses
         </button>
+      )}
+
+      {/* Lot 7 — annulation immédiate du dernier cochage (4 s), au-dessus de
+          la TabBar. Le cochage reste de toute façon réversible depuis « Dans
+          le caddie » ; ce raccourci évite d'ouvrir la section repliée. */}
+      {derniereCoche && (
+        <div role="status" style={{ position:"fixed", bottom:92, left:"50%", transform:"translateX(-50%)", width:"calc(100% - 48px)", maxWidth:380, background:"rgba(20,20,20,0.92)", borderRadius:12, padding:"10px 14px", display:"flex", alignItems:"center", gap:10, zIndex:60, boxShadow:"0 6px 20px rgba(0,0,0,0.35)" }}>
+          <span style={{ fontFamily:F, fontWeight:700, fontSize:13, color:"#fff", flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+            ✓ {derniereCoche.nom}
+          </span>
+          <button onClick={()=>{ onChangerEtat?.(derniereCoche.cle, 'a_prendre'); setDerniereCoche(null); }}
+            style={{ background:"none", border:"none", fontFamily:F, fontWeight:900, fontSize:13, color:"#FFD700", cursor:"pointer", padding:"4px 6px", flexShrink:0 }}>
+            Annuler
+          </button>
+        </div>
       )}
     </div>
   );
@@ -9340,13 +9380,15 @@ export default function App() {
   // catégorie (arbitrage 2026-08-11) ; un rayon non résolu (erreur réseau
   // comprise) retombe sur « Autres articles », jamais un blocage.
   const demarrerSessionCourses = async (store, extrasCourses) => {
-    let rayons = new Map();
-    try {
-      rayons = await chargerRayonsProduits(items.map(i => i.produit_id).filter(Boolean));
-    } catch (e) {
-      console.error("Rayons non résolus (repli « Autres articles ») :", e);
-    }
-    const articles = construireArticlesSession({ items, lignesPrix: extrasCourses.lignesPrix, rayons });
+    // Rayons + marques des variantes du caddie (Lot 7), en parallèle et chacun
+    // avec son repli : un échec réseau ne bloque jamais le démarrage.
+    const [rayons, marquesVariantes] = await Promise.all([
+      chargerRayonsProduits(items.map(i => i.produit_id).filter(Boolean))
+        .catch(e => { console.error("Rayons non résolus (repli « Autres articles ») :", e); return new Map(); }),
+      chargerMarquesVariantes(items.map(i => i.variante_produit_id).filter(Boolean))
+        .catch(e => { console.error("Marques de variantes non résolues (nom sans marque) :", e); return new Map(); }),
+    ]);
+    const articles = construireArticlesSession({ items, lignesPrix: extrasCourses.lignesPrix, rayons, marquesVariantes });
     const nouvelleSession = construireSessionCourses({
       // Lot 4 — id client : clé primaire de la ligne Supabase (upsert
       // idempotent). genererIdSession et non crypto.randomUUID : ce dernier
@@ -9398,6 +9440,10 @@ export default function App() {
 
   const changerEtatArticleSession = (cle, nouvelEtat) => {
     appliquerSessionCourses(appliquerEtatArticle(sessionCourses, cle, nouvelEtat, new Date().toISOString()));
+    // Lot 7 — retour haptique léger quand un article rejoint le caddie
+    // (Android ; l'API n'existe pas sur Safari iOS → no-op silencieux, le
+    // retour visuel — case verte, bascule de section — fait l'équivalent).
+    if (nouvelEtat === 'au_caddie') { try { navigator.vibrate?.(15); } catch { /* ignore */ } }
   };
 
   // Lot 5 — notes libres « Ajoutés en route » : données de session uniquement
