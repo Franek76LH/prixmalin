@@ -390,6 +390,18 @@ export function idsCaddieASupprimer(session, { garderIntrouvables = false } = {}
     .map(a => a.cle);
 }
 
+// Chantier 88 Lot 2 (« À acheter plus tard ») — parmi les articles que le
+// vidage choisi s'apprête à supprimer (même périmètre qu'idsCaddieASupprimer,
+// mêmes options), ceux qui étaient PRÉVUS MAIS NON ACHETÉS : type 'caddie'
+// (leur cle est l'id de la ligne liste_courses) et hors du caddie au moment
+// de clôturer (a_prendre ou introuvable). Retourne les articles entiers, pas
+// seulement les cles : le dialogue « Choisir » affiche nom et quantité.
+export function articlesNonAchetesASupprimer(session, { garderIntrouvables = false } = {}) {
+  return (session?.articles || [])
+    .filter(a => a.type === 'caddie' && a.etat !== 'au_caddie'
+      && (!garderIntrouvables || a.etat !== 'introuvable'));
+}
+
 // Lot 8 (ajustement) — total DYNAMIQUE du panier : somme des prix prévus des
 // articles déjà cochés (« au_caddie »), recalculée à chaque coche/décoche par
 // simple re-rendu. Aucune requête : uniquement les prix déjà figés dans la

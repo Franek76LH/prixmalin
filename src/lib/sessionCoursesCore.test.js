@@ -20,6 +20,7 @@ import {
   supprimerNoteSession,
   cloreSession,
   idsCaddieASupprimer,
+  articlesNonAchetesASupprimer,
   chargerMarquesVariantes,
   calculerTotalPanier,
   genererIdSession,
@@ -504,6 +505,16 @@ describe('Lot 6 — clôture', () => {
   it('garderIntrouvables : épargne les articles introuvables', () => {
     expect(idsCaddieASupprimer(sessionCloture(), { garderIntrouvables: true })).toEqual(['lc-1', 'lc-3']);
     expect(idsCaddieASupprimer(null)).toEqual([]);
+  });
+
+  // Chantier 88 Lot 2 — « À acheter plus tard ».
+  it('articlesNonAchetesASupprimer : lignes caddie hors du caddie (a_prendre, introuvable), jamais les achetés ni les notes', () => {
+    expect(articlesNonAchetesASupprimer(sessionCloture()).map(a => a.cle)).toEqual(['lc-2', 'lc-3']);
+  });
+
+  it('articlesNonAchetesASupprimer + garderIntrouvables : les introuvables épargnés du vidage ne sont plus concernés', () => {
+    expect(articlesNonAchetesASupprimer(sessionCloture(), { garderIntrouvables: true }).map(a => a.cle)).toEqual(['lc-3']);
+    expect(articlesNonAchetesASupprimer(null)).toEqual([]);
   });
 });
 

@@ -8,7 +8,7 @@ import { urlPhotoVariante, offLargeSource, offFullUrl, cloudinaryAgrandi } from 
 import { nomComposeVariante, formatEtiquetteVariante } from "./lib/nomProduit";
 import { transcrireAudioListe, normaliserNomElement, comptesParNom, fusionnerParNom } from "./lib/microVocal";
 // Chantier « Courses » Lot 1 — session de courses figée (shadow estFrancois).
-import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession, ajouterNoteSession, supprimerNoteSession, cloreSession, idsCaddieASupprimer, chargerMarquesVariantes, calculerTotalPanier } from "./lib/sessionCoursesCore";
+import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession, ajouterNoteSession, supprimerNoteSession, cloreSession, idsCaddieASupprimer, articlesNonAchetesASupprimer, chargerMarquesVariantes, calculerTotalPanier } from "./lib/sessionCoursesCore";
 import { capturerEvenement } from "./lib/posthog";
 import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
 import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
@@ -4034,7 +4034,7 @@ function EditItemSheet({ item, onClose, onSave }) {
 }
 
 // ── LIST TAB ──────────────────────────────────────────────────────────────────
-function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites, saveFavorites, onSetMarquePref }) {
+function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites, saveFavorites, onSetMarquePref, itemsReportes = [], onReactiverReporte, onSupprimerReporte }) {
   const [showFavModal, setShowFavModal] = useState(false);
   const [editItem,     setEditItem]     = useState(null);
 
@@ -4146,6 +4146,38 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
           <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:8 }}>Dans le panier ({checked.length})</div>
           <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:14 }}>
             {checked.map(item=><ItemRow key={item.id} item={item} done={true}/>)}
+          </div>
+        </>
+      )}
+      {/* Chantier 88 Lot 2 — section « À acheter plus tard » : lignes
+          liste_courses de statut 'reporte' (gardées à la clôture des
+          courses). Jamais comptées comme achetées, jamais dans la liste
+          active ni le comparateur. ↩︎ les remet dans la liste active
+          ('a_acheter'), ✕ les supprime définitivement. */}
+      {itemsReportes.length>0 && (
+        <>
+          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:8 }}>⏳ À acheter plus tard ({itemsReportes.length})</div>
+          <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:14 }}>
+            {itemsReportes.map(item=>(
+              <div key={item.id} style={{ display:"flex", alignItems:"center", gap:12, background:"#FAF7F0", borderRadius:12, padding:"12px 14px", border:"1px dashed #D8CFBB" }}>
+                <div style={{ width:38, height:38, flexShrink:0, opacity:0.75 }}>
+                  <PhotoProduit varianteId={item.variante_produit_id} taille="thumb" radius={8}
+                    fallback={<div style={{ width:"100%", height:"100%", borderRadius:8, background:C.grayLight }} />} />
+                </div>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:"#6B6152" }}>
+                    {item.product}
+                  </div>
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.gray, marginTop:1 }}>
+                    {item.formatDisplay ?? item.format}
+                  </div>
+                </div>
+                <div style={{ background:"#D8CFBB", color:"#4A4436", borderRadius:8, padding:"3px 9px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13 }}>×{item.qty}</div>
+                <button onClick={()=>onReactiverReporte?.(item.id)} title="Remettre dans la liste"
+                  style={{ background:C.blue, border:"none", borderRadius:8, padding:"6px 9px", fontSize:13, cursor:"pointer", color:C.white, fontWeight:900 }}>↩︎</button>
+                <button onClick={()=>onSupprimerReporte?.(item.id)} style={{ background:"none", border:"none", fontSize:15, cursor:"pointer", color:C.gray }}>✕</button>
+              </div>
+            ))}
           </div>
         </>
       )}
@@ -8720,6 +8752,16 @@ export default function App() {
   // des articles à prendre, jamais de clôture silencieuse), 'choixCaddie'
   // (récap + sort du caddie).
   const [clotureCourses, setClotureCourses] = useState(null);
+  // Chantier 88 Lot 2 — dialogue « À acheter plus tard » à la clôture :
+  // null (rien) ou { actionCaddie, articles, mode: 'simple' | 'choisir',
+  // selection: { [cle]: bool } } pour les articles prévus mais non achetés
+  // que le vidage choisi s'apprête à supprimer. Posé APRÈS le choix du sort
+  // du caddie, AVANT toute clôture effective (Annuler ramène au choix).
+  const [plusTardCourses, setPlusTardCourses] = useState(null);
+  // Chantier 88 Lot 2 — lignes liste_courses de statut 'reporte', tenues à
+  // l'écart de `items` (liste active, comparateur, session) : elles ne
+  // comptent jamais comme achetées et ne polluent pas la liste active.
+  const [itemsReportes, setItemsReportes] = useState([]);
   // Lot 3 — session réellement exploitable : active ET appartenant à
   // l'utilisateur connecté (le localStorage est partagé par appareil — une
   // session d'un autre compte ne doit ni s'afficher ni être reprise).
@@ -9106,7 +9148,11 @@ export default function App() {
           setLibelleVersNomProduit(map);
         }
         if (list.data) {
-          setItems((list.data || []).map(mapperLigneListeCourses));
+          // Chantier 88 Lot 2 — les lignes 'reporte' vivent à part (section
+          // « À acheter plus tard »), jamais dans la liste active.
+          const lignes = (list.data || []).map(mapperLigneListeCourses);
+          setItems(lignes.filter(l => l.statut !== 'reporte'));
+          setItemsReportes(lignes.filter(l => l.statut === 'reporte'));
         }
         if (prices.data) {
           setPriceDB(prices.data.map(p => ({ ...p, storeId: p.storeId || 'autre', category: p.category || guessCategory(p.product) })));
@@ -9196,7 +9242,11 @@ export default function App() {
       console.error("Erreur rechargement liste_courses :", error);
       throw error;
     }
-    setItems((data || []).map(mapperLigneListeCourses));
+    // Chantier 88 Lot 2 — même partition qu'au chargement initial : les
+    // lignes 'reporte' à part, hors liste active et hors comparateur.
+    const lignes = (data || []).map(mapperLigneListeCourses);
+    setItems(lignes.filter(l => l.statut !== 'reporte'));
+    setItemsReportes(lignes.filter(l => l.statut === 'reporte'));
     return true;
   };
 
@@ -9552,13 +9602,42 @@ export default function App() {
     setClotureCourses(prog.restants > 0 ? 'confirmation' : 'choixCaddie');
   };
 
+  // Chantier 88 Lot 2 — aiguillage après le choix du sort du caddie : si le
+  // vidage choisi s'apprête à supprimer des articles PRÉVUS MAIS NON ACHETÉS
+  // (a_prendre ou introuvable), on propose D'ABORD, une seule fois, de les
+  // garder pour plus tard — rien n'est clos ni écrit à ce stade (Annuler
+  // ramène au choix du caddie). Sinon (« garder » ou aucun non-acheté
+  // concerné) : clôture immédiate, strictement comme avant.
+  const choisirActionCaddie = (actionCaddie) => {
+    if (actionCaddie !== 'garder') {
+      const nonAchetes = articlesNonAchetesASupprimer(sessionCoursesActive, { garderIntrouvables: actionCaddie === 'garder_introuvables' });
+      if (nonAchetes.length > 0) {
+        setClotureCourses(null);
+        setPlusTardCourses({
+          actionCaddie,
+          articles: nonAchetes,
+          mode: 'simple',
+          // « Choisir » : tout coché par défaut (cocher = garder pour plus tard).
+          selection: Object.fromEntries(nonAchetes.map(a => [a.cle, true])),
+        });
+        return;
+      }
+    }
+    executerClotureCourses(actionCaddie);
+  };
+
   // Lot 6 — clôture effective. actionCaddie : 'vider' | 'garder_introuvables'
   // | 'garder'. La session est close d'abord (localStorage effacé, carte
   // disparue, retour accueil) ; l'écriture base (statut 'terminee') et
   // l'éventuel vidage du caddie sont best effort, avec toast explicite en cas
   // d'échec — supprimer moins que prévu n'est jamais une perte de données.
-  const executerClotureCourses = async (actionCaddie) => {
+  // Chantier 88 Lot 2 (additif) — reporteIds : lignes liste_courses à passer
+  // en statut 'reporte' (« À acheter plus tard ») AU LIEU d'être supprimées.
+  // Best effort aussi : en cas d'échec, la ligne reste dans son état actuel
+  // (toujours visible dans « Ma liste »), jamais de perte ni de blocage.
+  const executerClotureCourses = async (actionCaddie, { reporteIds = [] } = {}) => {
     const sessionAClore = sessionCoursesActive;
+    setPlusTardCourses(null);
     if (!sessionAClore) { setClotureCourses(null); return; }
     const terminee = cloreSession(sessionAClore, new Date().toISOString());
     setClotureCourses(null);
@@ -9568,24 +9647,105 @@ export default function App() {
     showAppToast("🎉 Courses terminées !");
 
     try {
-      await sauvegarderSessionSupabase(terminee);
+      // Correctif (test 2026-08-12) — un doc d'avant le Lot 4 (sans id, vieux
+      // localStorage) rendait l'upsert silencieusement muet : la ligne base
+      // restait « active » pour toujours et ressuscitait à chaque
+      // restauration. Id de secours + trace explicite quand rien n'est écrit.
+      const aSauver = terminee?.id ? terminee : { ...terminee, id: genererIdSession() };
+      const sauvee = await sauvegarderSessionSupabase(aSauver);
+      if (!sauvee) console.error("Clôture : session non synchronisable (id ou compte manquant) — le balayage ci-dessous ferme la ligne base.");
     } catch (e) {
       console.error("Filet Supabase courses (clôture) :", e);
     }
+    // Invariant Lot 4 « une seule session active par compte », étendu à la
+    // clôture : après « Terminer mes courses », plus AUCUNE ligne active ne
+    // doit rester en base pour ce compte — même si l'upsert ci-dessus a
+    // échoué ou visait un autre id que la ligne base. Best effort, comme
+    // l'abandon depuis la carte d'accueil.
+    try {
+      await abandonnerSessionsActivesSupabase(session?.user?.id, new Date().toISOString());
+    } catch (e) {
+      console.error("Filet Supabase courses (clôture, balayage) :", e);
+    }
 
     if (actionCaddie === 'garder') return;
-    const ids = idsCaddieASupprimer(terminee, { garderIntrouvables: actionCaddie === 'garder_introuvables' });
-    if (ids.length === 0) return;
+    const idsSupprimables = idsCaddieASupprimer(terminee, { garderIntrouvables: actionCaddie === 'garder_introuvables' });
+    // Garde-fou : on ne reporte que des lignes que le vidage allait supprimer.
+    const aReporter = reporteIds.filter(id => idsSupprimables.includes(id));
+    const ids = idsSupprimables.filter(id => !aReporter.includes(id));
+    let listeATouchee = false;
+    if (ids.length > 0) {
+      try {
+        const { error } = await supabase.from('liste_courses')
+          .delete()
+          .eq('utilisateur_id', session?.user?.id)
+          .in('id', ids);
+        if (error) throw error;
+        listeATouchee = true;
+      } catch (e) {
+        console.error("Vidage du caddie post-courses :", e);
+        showAppToast("⚠️ Le caddie n'a pas pu être vidé — tu peux le faire depuis « Ma liste ».", false);
+      }
+    }
+    if (aReporter.length > 0) {
+      try {
+        const { error } = await supabase.from('liste_courses')
+          .update({ statut: 'reporte' })
+          .eq('utilisateur_id', session?.user?.id)
+          .in('id', aReporter);
+        if (error) throw error;
+        listeATouchee = true;
+      } catch (e) {
+        console.error("Report « à acheter plus tard » post-courses :", e);
+        showAppToast("⚠️ Ces articles n'ont pas pu être mis de côté — ils restent dans « Ma liste ».", false);
+      }
+    }
+    if (listeATouchee) {
+      try {
+        await chargerListe();
+      } catch (e) {
+        console.error("Rechargement de la liste post-clôture :", e);
+      }
+    }
+  };
+
+  // Chantier 88 Lot 2 — depuis la section « À acheter plus tard » de Ma liste :
+  // remettre une ligne dans la liste active ('reporte' -> 'a_acheter'). Si le
+  // même article a été rajouté entre-temps, on supprime la ligne reportée au
+  // lieu de créer un doublon (même identité que le dédoublonnage d'addItem).
+  const reactiverReporte = async (id) => {
+    const ligne = itemsReportes.find(i => i.id === id);
+    if (!ligne) return;
     try {
-      const { error } = await supabase.from('liste_courses')
-        .delete()
-        .eq('utilisateur_id', session?.user?.id)
-        .in('id', ids);
-      if (error) throw error;
+      if (items.some(i => cleArticle(i) === cleArticle(ligne))) {
+        const { error } = await supabase.from('liste_courses').delete().eq('id', id);
+        if (error) throw error;
+        showAppToast("Article déjà dans la liste", false);
+      } else {
+        const { error } = await supabase.from('liste_courses')
+          .update({ statut: 'a_acheter' })
+          .eq('id', id);
+        if (error) throw error;
+      }
       await chargerListe();
     } catch (e) {
-      console.error("Vidage du caddie post-courses :", e);
-      showAppToast("⚠️ Le caddie n'a pas pu être vidé — tu peux le faire depuis « Ma liste ».", false);
+      console.error("Réactivation d'un article reporté :", e);
+      showAppToast("⚠️ Sauvegarde échouée, vérifie ta connexion", false);
+    }
+  };
+
+  // Chantier 88 Lot 2 — suppression individuelle d'une ligne reportée
+  // (optimiste + restauration, même mécanique que removeItem).
+  const supprimerReporte = async (id) => {
+    const previous = itemsReportes.find(i => i.id === id);
+    setItemsReportes(prev => prev.filter(i => i.id !== id));
+    try {
+      const { error } = await supabase.from('liste_courses').delete().eq('id', id);
+      if (error) throw error;
+    } catch (e) {
+      console.error("Suppression d'un article reporté :", e);
+      if (previous) setItemsReportes(prev => [...prev, previous]);
+      showAppToast("⚠️ Sauvegarde échouée, vérifie ta connexion", false);
     }
   };
 
@@ -9896,7 +10056,7 @@ export default function App() {
           {/* Chantier 87 Lot 1 — jamais rendu sans accès (flag OU François),
               même si tab="courses" traîne en state. */}
           {loaded && tab==="courses" && sessionCoursesAccessible && sessionCoursesActive && <CoursesTab session={sessionCoursesActive} onChangerEtat={changerEtatArticleSession} onAjouterNote={ajouterNoteCourses} onSupprimerNote={supprimerNoteCourses} onTerminer={demanderTerminerCourses} syncEchec={syncCoursesEchec}/>}
-          {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} onSetMarquePref={setMarquePrefItem}/>}
+          {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} onSetMarquePref={setMarquePrefItem} itemsReportes={itemsReportes} onReactiverReporte={reactiverReporte} onSupprimerReporte={supprimerReporte}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix} sessionCoursesAccessible={sessionCoursesAccessible}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
@@ -10085,22 +10245,95 @@ export default function App() {
                 <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:"#888", marginBottom:16 }}>
                   Que fait-on de ton caddie « Ma liste » ?
                 </div>
-                <button onClick={()=>executerClotureCourses('vider')}
+                <button onClick={()=>choisirActionCaddie('vider')}
                   style={{ width:"100%", padding:"13px", border:"none", borderRadius:10, background:C.green, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer", marginBottom:8 }}>
                   🧹 Vider le caddie
                 </button>
                 {prog.introuvables > 0 && (
-                  <button onClick={()=>executerClotureCourses('garder_introuvables')}
+                  <button onClick={()=>choisirActionCaddie('garder_introuvables')}
                     style={{ width:"100%", padding:"13px", border:"none", borderRadius:10, background:C.orange, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:"#111", cursor:"pointer", marginBottom:8 }}>
                     🚫 Garder seulement les introuvables ({prog.introuvables})
                   </button>
                 )}
-                <button onClick={()=>executerClotureCourses('garder')}
+                <button onClick={()=>choisirActionCaddie('garder')}
                   style={{ width:"100%", padding:"13px", border:"none", borderRadius:10, background:"#4A90D9", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer", marginBottom:8 }}>
                   🛒 Garder le caddie tel quel
                 </button>
                 <button onClick={()=>setClotureCourses(null)}
                   style={{ width:"100%", padding:"12px", border:"1.5px solid #eee", borderRadius:10, background:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:"#333", cursor:"pointer" }}>
+                  Annuler
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Chantier 88 Lot 2 — étape 3 : des articles prévus mais non achetés
+            allaient être supprimés par le vidage choisi. Un seul dialogue,
+            jamais bloquant : « Garder pour plus tard » (défaut), « Tout
+            supprimer » (comportement d'avant), ou « Choisir » article par
+            article (coché = gardé). Annuler ramène au choix du caddie —
+            rien n'est clos tant qu'un des trois choix n'est pas fait. */}
+        {plusTardCourses && sessionCoursesActive && (() => {
+          const { actionCaddie, articles, mode, selection } = plusTardCourses;
+          const nbChoisis = articles.filter(a => selection[a.cle]).length;
+          const F2 = "'Nunito',sans-serif";
+          return (
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:9999, padding:24 }}>
+              <div style={{ background:"#fff", borderRadius:16, padding:"20px", maxWidth:340, width:"100%", maxHeight:"80vh", overflowY:"auto" }}>
+                <div style={{ fontFamily:F2, fontWeight:900, fontSize:15, color:"#1a1a1a", marginBottom:6 }}>
+                  ⏳ {articles.length} article{articles.length > 1 ? "s" : ""} non acheté{articles.length > 1 ? "s" : ""}
+                </div>
+                <div style={{ fontFamily:F2, fontSize:13, color:"#888", marginBottom:16 }}>
+                  Tu ne les as pas pris cette fois. Veux-tu les garder pour tes prochaines courses ?
+                </div>
+                {mode === 'simple' && (
+                  <>
+                    <button onClick={()=>executerClotureCourses(actionCaddie, { reporteIds: articles.map(a => a.cle) })}
+                      style={{ width:"100%", padding:"13px", border:"none", borderRadius:10, background:C.green, fontFamily:F2, fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer", marginBottom:8 }}>
+                      ⏳ Garder pour plus tard
+                    </button>
+                    <button onClick={()=>executerClotureCourses(actionCaddie, { reporteIds: [] })}
+                      style={{ width:"100%", padding:"13px", border:"none", borderRadius:10, background:"#fff", fontFamily:F2, fontWeight:800, fontSize:14, color:"#CC0000", cursor:"pointer", marginBottom:8, borderStyle:"solid", borderWidth:1.5, borderColor:"rgba(204,0,0,0.3)" }}>
+                      🧹 Tout supprimer
+                    </button>
+                    <button onClick={()=>setPlusTardCourses({ ...plusTardCourses, mode:'choisir' })}
+                      style={{ width:"100%", padding:"13px", border:"1.5px solid #eee", borderRadius:10, background:"#fff", fontFamily:F2, fontWeight:800, fontSize:14, color:"#333", cursor:"pointer", marginBottom:8 }}>
+                      ☑️ Choisir…
+                    </button>
+                  </>
+                )}
+                {mode === 'choisir' && (
+                  <>
+                    <div style={{ fontFamily:F2, fontSize:12, color:"#888", marginBottom:8 }}>
+                      Coche les articles à garder — les autres seront supprimés.
+                    </div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:14 }}>
+                      {articles.map(a => {
+                        const coche = !!selection[a.cle];
+                        return (
+                          <button key={a.cle}
+                            onClick={()=>setPlusTardCourses(prev => prev ? { ...prev, selection: { ...prev.selection, [a.cle]: !prev.selection[a.cle] } } : prev)}
+                            style={{ display:"flex", alignItems:"center", gap:10, width:"100%", textAlign:"left", padding:"10px 12px", borderRadius:10, border:`1.5px solid ${coche ? C.green : "#eee"}`, background: coche ? "#F3FAF5" : "#fff", cursor:"pointer" }}>
+                            <span style={{ width:22, height:22, borderRadius:6, border:`2px solid ${coche ? C.green : "#bbb"}`, background: coche ? C.green : "#fff", color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, flexShrink:0 }}>
+                              {coche ? "✓" : ""}
+                            </span>
+                            <span style={{ fontFamily:F2, fontWeight:800, fontSize:13, color:"#1a1a1a", flex:1, minWidth:0 }}>
+                              {a.nom_affiche ?? a.nom_reference ?? "Article"}{Number(a.quantite) > 1 ? ` ×${Number(a.quantite)}` : ""}
+                            </span>
+                            {a.etat === 'introuvable' && <span style={{ fontFamily:F2, fontSize:11, fontWeight:800, color:"#7A6000" }}>🚫</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <button onClick={()=>executerClotureCourses(actionCaddie, { reporteIds: articles.filter(a => selection[a.cle]).map(a => a.cle) })}
+                      style={{ width:"100%", padding:"13px", border:"none", borderRadius:10, background:C.green, fontFamily:F2, fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer", marginBottom:8 }}>
+                      Valider ({nbChoisis} gardé{nbChoisis > 1 ? "s" : ""})
+                    </button>
+                  </>
+                )}
+                <button onClick={()=>{ setPlusTardCourses(null); setClotureCourses('choixCaddie'); }}
+                  style={{ width:"100%", padding:"12px", border:"1.5px solid #eee", borderRadius:10, background:"#fff", fontFamily:F2, fontWeight:800, fontSize:14, color:"#333", cursor:"pointer" }}>
                   Annuler
                 </button>
               </div>

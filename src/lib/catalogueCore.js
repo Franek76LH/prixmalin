@@ -46,6 +46,9 @@ export function mapperLigneListeCourses(row) {
     formatDisplay,
     brand:               '',
     checked:             row.statut === 'achete',
+    // Chantier 88 Lot 2 — statut brut conservé pour distinguer les lignes
+    // « reporte » (À acheter plus tard) des lignes actives. Champ additif.
+    statut:              row.statut,
     produit_id:          row.produit_id,
     variante_produit_id: row.variante_produit_id,
     // Chantier 84 — préférence marque PAR ARTICLE ('nationale' | 'mdd').
