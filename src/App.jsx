@@ -11,6 +11,9 @@ import { transcrireAudioListe, normaliserNomElement, comptesParNom, fusionnerPar
 import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession, ajouterNoteSession, supprimerNoteSession, cloreSession, idsCaddieASupprimer, articlesNonAchetesASupprimer, construireBilanCourses, doitRattacherTicketSession, chargerMarquesVariantes, calculerTotalPanier } from "./lib/sessionCoursesCore";
 // Chantier 91 Lot 5 — rapprochement liste / cochés / ticket.
 import { rapprocherSessionTicket, appliquerRapprochementSession, deciderAchatArticle, construireNormaliseur, textesARapprocher } from "./lib/rapprochementCoursesCore";
+// Chantier 92 Lot 6 — favoris Core (par format) & récurrents. Distinct des
+// « courses habituelles » (legacy favorites), qui ne bougent pas.
+import { chargerFavoris, ajouterFavori, retirerFavori, chercherFavori, chargerRecurrents, proposerFavorisApresTicket } from "./lib/favorisCore";
 import { capturerEvenement } from "./lib/posthog";
 import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
 import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
@@ -787,6 +790,88 @@ function StatsSheet({ userId, archives, onClose }) {
           <div style={{ fontFamily:F, fontSize:12, color:C.textLight, textAlign:"center", marginTop:16, lineHeight:1.6, padding:"0 8px" }}>
             Le rang reflète ta contribution dans ton cercle. Plus tu partages de prix, plus tu grimpes !
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Chantier 92 Lot 6 — « Mes Favoris » (table Core favoris, par format).
+// Même mécanique de sheet que « Mes Statistiques ». Distinct des « courses
+// habituelles » (legacy favorites), qui ne bougent pas. Lecture best effort :
+// un échec affiche un message, jamais un plantage.
+function FavorisSheet({ userId, onClose }) {
+  const F = "'Nunito',sans-serif";
+  const [favoris, setFavoris] = useState(null); // null = chargement
+  const [chargeErreur, setChargeErreur] = useState(false);
+
+  useEffect(() => {
+    let annule = false;
+    (async () => {
+      try {
+        const data = await chargerFavoris(userId);
+        if (!annule) setFavoris(data);
+      } catch {
+        if (!annule) { setFavoris([]); setChargeErreur(true); }
+      }
+    })();
+    return () => { annule = true; };
+  }, [userId]);
+
+  // Retrait optimiste, restauré si la suppression échoue.
+  const retirer = async (fav) => {
+    setFavoris(prev => (prev || []).filter(f => f.id !== fav.id));
+    const ok = await retirerFavori(fav.id);
+    if (!ok) setFavoris(prev => [...(prev || []), fav]);
+  };
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", zIndex:300, animation:"fadeIn 0.2s ease" }} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{ background:C.white, borderRadius:"24px 24px 0 0", width:"100%", maxWidth:430, margin:"0 auto", maxHeight:"90vh", display:"flex", flexDirection:"column", animation:"slideUp 0.3s ease" }}>
+        <div style={{ background:C.red, padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0, borderRadius:"24px 24px 0 0" }}>
+          <div>
+            <div style={{ fontFamily:F, fontSize:11, fontWeight:700, color:"rgba(255,255,255,0.6)" }}>PrixMalin</div>
+            <div style={{ fontFamily:F, fontSize:20, fontWeight:900, color:"#fff" }}>Mes Favoris</div>
+          </div>
+          <button onClick={onClose} style={{ background:"rgba(255,255,255,0.2)", borderRadius:99, width:36, height:36, border:"none", fontSize:16, color:"#fff", cursor:"pointer" }}>✕</button>
+        </div>
+        <div style={{ overflowY:"auto", flex:1, padding:"16px 16px 40px" }}>
+          {favoris === null && (
+            <div style={{ fontFamily:F, fontSize:13, color:C.textLight, textAlign:"center", padding:"24px 0" }}>⏳ Chargement…</div>
+          )}
+          {favoris !== null && chargeErreur && (
+            <div style={{ fontFamily:F, fontSize:13, color:C.textLight, textAlign:"center", padding:"24px 0" }}>⚠️ Favoris indisponibles pour le moment — réessaie plus tard.</div>
+          )}
+          {favoris !== null && !chargeErreur && favoris.length === 0 && (
+            <div style={{ background:"#FFF0F0", borderRadius:16, padding:"28px 20px", textAlign:"center", border:"2px dashed #CC0000" }}>
+              <div style={{ fontSize:44, marginBottom:8 }}>❤️</div>
+              <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:"#CC0000", marginBottom:6 }}>Aucun favori pour l'instant</div>
+              <div style={{ fontFamily:F, fontSize:13, color:C.textLight }}>Ajoute un format en favori depuis une fiche produit (❤️), ou laisse PrixMalin te proposer tes achats réguliers après un ticket.</div>
+            </div>
+          )}
+          {favoris !== null && favoris.length > 0 && (
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {favoris.map(f => (
+                <div key={f.id} style={{ display:"flex", alignItems:"center", gap:12, background:C.white, borderRadius:12, padding:"12px 14px", border:`1px solid ${C.grayLight}`, boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+                  <div style={{ width:38, height:38, flexShrink:0 }}>
+                    <PhotoProduit varianteId={f.variante_produit_id} taille="thumb" radius={8}
+                      fallback={<div style={{ width:"100%", height:"100%", borderRadius:8, background:C.grayLight, display:"flex", alignItems:"center", justifyContent:"center", fontSize:16 }}>❤️</div>} />
+                  </div>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontFamily:F, fontWeight:800, fontSize:14, color:C.text }}>
+                      {f.variante?.marques?.nom ? `${f.variante.marques.nom} · ` : ""}{f.produit?.nom_reference ?? "Produit"}
+                    </div>
+                    <div style={{ fontFamily:F, fontSize:12, color:C.gray, marginTop:1 }}>
+                      {f.variante ? (formatFormatStructure(f.variante) || f.variante.libelle || "Format") : "Tous formats"}
+                      {f.magasin?.nom ? ` · 🏪 ${f.magasin.nom}` : ""}
+                    </div>
+                  </div>
+                  <button onClick={()=>retirer(f)} title="Retirer des favoris"
+                    style={{ background:"none", border:"none", fontSize:15, cursor:"pointer", color:C.gray }}>✕</button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -2662,6 +2747,11 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
   // Chantier 83 (ajustement) — agrandi/lightbox de la photo de fiche.
   const [offLarge,      setOffLarge]      = useState(null);   // URL OFF brute (400) ou null
   const [agrandi,       setAgrandi]       = useState(false);  // overlay ouvert ? (repli géré dans LightboxPhoto)
+  // Chantier 92 Lot 6 — favori du FORMAT résolu (table Core favoris, jamais
+  // les « courses habituelles » legacy). statut : 'inconnu' (pas de format
+  // précis ou vérification en cours), 'aucun', 'favori', 'travail'.
+  const [favoriEtat, setFavoriEtat] = useState({ statut: 'inconnu', id: null });
+  const [favoriMsg,  setFavoriMsg]  = useState(null);
 
   const loadVariantes = async () => {
     setVarianteError(null);
@@ -2758,6 +2848,43 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
       (formatSelectionne === 'all' || formatFormatStructure(v) === formatSelectionne)
     );
   }, [variantesSegment, marqueSelectionnee, formatSelectionne, segmentMarque]);
+
+  // Chantier 92 Lot 6 — le cœur ne s'applique qu'à un FORMAT précis :
+  // exactement une variante résolue par (segment, marque, format). Vérification
+  // d'existence best effort (anti-doublon rejoué de toute façon à l'écriture).
+  const varianteResolueId = variantesResolues.length === 1 ? variantesResolues[0].id : null;
+  useEffect(() => {
+    setFavoriMsg(null);
+    if (!varianteResolueId) { setFavoriEtat({ statut: 'inconnu', id: null }); return; }
+    let annule = false;
+    chercherFavori({ produitId: produit.id, varianteProduitId: varianteResolueId })
+      .then(f => { if (!annule) setFavoriEtat(f ? { statut: 'favori', id: f.id } : { statut: 'aucun', id: null }); });
+    return () => { annule = true; };
+  }, [varianteResolueId, produit.id]);
+
+  const basculerFavori = async () => {
+    if (!varianteResolueId || favoriEtat.statut === 'travail') return;
+    const avant = favoriEtat;
+    setFavoriMsg(null);
+    setFavoriEtat({ statut: 'travail', id: avant.id });
+    if (avant.statut === 'favori') {
+      const ok = avant.id ? await retirerFavori(avant.id) : false;
+      setFavoriEtat(ok ? { statut: 'aucun', id: null } : avant);
+      if (!ok) setFavoriMsg("Retrait impossible, réessaie.");
+    } else {
+      const res = await ajouterFavori({ produitId: produit.id, varianteProduitId: varianteResolueId });
+      if (res.statut === 'ajoute') {
+        setFavoriEtat({ statut: 'favori', id: res.id ?? null });
+      } else if (res.statut === 'deja') {
+        // Anti-doublon : jamais réinséré, l'index unique reste le filet.
+        setFavoriEtat({ statut: 'favori', id: res.id ?? null });
+        setFavoriMsg("Déjà en favori");
+      } else {
+        setFavoriEtat(avant);
+        setFavoriMsg("Favori non enregistré, réessaie.");
+      }
+    }
+  };
 
   // Chantier 74 (suite) — un seul bouton vert plein par rangée (le choix actif),
   // tous les autres en gris neutre (jamais un contour vert qui donnerait
@@ -2948,6 +3075,23 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
                   </button>
                 ))}
               </div>
+
+              {/* Chantier 92 Lot 6 — favori du FORMAT résolu (Core favoris).
+                  Visible seulement quand le couple (marque, format) désigne
+                  exactement une variante. Best effort, jamais bloquant. */}
+              {varianteResolueId && favoriEtat.statut !== 'inconnu' && (
+                <div style={{ marginBottom:14 }}>
+                  <button onClick={basculerFavori} disabled={favoriEtat.statut === 'travail'}
+                    style={{ width:"100%", padding:"11px 14px", borderRadius:12, border:`2px solid ${favoriEtat.statut === 'favori' ? "#E5181B" : C.grayLight}`, background: favoriEtat.statut === 'favori' ? "#FFF0F0" : C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color: favoriEtat.statut === 'favori' ? "#E5181B" : C.textLight, cursor: favoriEtat.statut === 'travail' ? "default" : "pointer" }}>
+                    {favoriEtat.statut === 'travail' ? "⏳ …"
+                      : favoriEtat.statut === 'favori' ? "❤️ Ce format est en favori — retirer"
+                      : "🤍 Mettre ce format en favori"}
+                  </button>
+                  {favoriMsg && (
+                    <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.orange, fontWeight:700, marginTop:5 }}>{favoriMsg}</div>
+                  )}
+                </div>
+              )}
             </>
           )}
 
@@ -8273,7 +8417,7 @@ function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, on
   );
 }
 
-function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash, onResumeScan, archives = [], pseudo, onStats, onMesPrix, onFaq, onSignOut, pendingCagnotte, onConsumeCagnotteCelebration, pendingPotential, onConsumePotentialCelebration, estFrancois = false, sessionCourses = null, onReprendreCourses, onAbandonnerCourses }) {
+function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash, onResumeScan, archives = [], pseudo, onStats, onMesPrix, onFavoris, onFaq, onSignOut, pendingCagnotte, onConsumeCagnotteCelebration, pendingPotential, onConsumePotentialCelebration, estFrancois = false, sessionCourses = null, onReprendreCourses, onAbandonnerCourses }) {
   const F = "'Nunito',sans-serif";
   // Chantier 79 (ajustement) — scan en cours visible dès l'accueil. HomeTab
   // n'étant monté que sur l'onglet home, la lecture au montage reflète l'état
@@ -8439,12 +8583,17 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash
                 { img:"/menu-cercle.png",     label:"Mon Cercle",          action: () => { setShowMenuProfil(false); onCircle(); } },
                 { img:"/menu-stats.png",       label:"Mes Statistiques",    action: () => { setShowMenuProfil(false); onStats?.(); } },
                 { img:"/menu-prix.png",        label:"Mes Prix",            action: () => { setShowMenuProfil(false); onMesPrix?.(); } },
+                // Chantier 92 — favoris Core (par format), entrée à emoji
+                // (pas d'image dédiée dans /public).
+                { emoji:"❤️",                  label:"Mes Favoris",         action: () => { setShowMenuProfil(false); onFavoris?.(); } },
                 { img:"/menu-faq.png",         label:"Nous contacter",      action: () => { setShowMenuProfil(false); onFaq?.(); } },
-              ].map(({ img, label, action }) => (
+              ].map(({ img, emoji, label, action }) => (
                 <div key={label} onClick={action} style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 16px", cursor:"pointer", borderBottom:"1px solid #F0F0F0" }}
                   onMouseEnter={e => e.currentTarget.style.background="#F9F9F9"}
                   onMouseLeave={e => e.currentTarget.style.background="transparent"}>
-                  <img src={img} alt="" width={32} height={32} style={{ borderRadius:6, flexShrink:0 }} />
+                  {img
+                    ? <img src={img} alt="" width={32} height={32} style={{ borderRadius:6, flexShrink:0 }} />
+                    : <span style={{ width:32, height:32, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, flexShrink:0 }}>{emoji}</span>}
                   <span style={{ fontFamily:F, fontWeight:700, fontSize:14, color:"#111" }}>{label}</span>
                 </div>
               ))}
@@ -9085,6 +9234,12 @@ export default function App() {
   const [showStatsSheet,   setShowStatsSheet]   = useState(false);
   const [showFaqSheet,     setShowFaqSheet]     = useState(false);
   const [showMesPrixSheet, setShowMesPrixSheet] = useState(false);
+  // Chantier 92 Lot 6 — sheet « Mes Favoris » (même mécanique que Stats/Prix).
+  const [showFavorisSheet, setShowFavorisSheet] = useState(false);
+  // Chantier 92 Lot 6 — proposition post-rapprochement : null ou
+  // { propositions: [...], selection: { [cle]: bool } }. Rien n'est jamais
+  // ajouté aux favoris sans action explicite.
+  const [propositionFavoris, setPropositionFavoris] = useState(null);
   const [pseudo,        setPseudo]        = useState(null);
   const [cguAcceptedAt, setCguAcceptedAt] = useState(undefined);
   const [profileMap, setProfileMap] = useState({});
@@ -9805,9 +9960,54 @@ export default function App() {
       });
       setVerifCourses(resultat.articles.filter(a => a?.type === 'caddie' && a.achat === 'a_verifier').map(a => a.cle));
       setRapprochementCourses({ compteurs: resultat.compteurs, totalReel });
+
+      // Chantier 92 Lot 6 — proposition de favoris : parmi les achats
+      // CONFIRMÉS (articles + hors liste), ceux qui sont RÉCURRENTS (>= 3
+      // tickets distincts) et pas déjà favoris. Jamais d'ajout automatique —
+      // le dialogue attend une action explicite. Best effort intégral.
+      try {
+        const achatsConfirmes = [
+          ...resultat.articles.filter(a => a?.type === 'caddie' && a.achat === 'confirme'),
+          ...(resultat.achats_hors_liste || []),
+        ];
+        if (achatsConfirmes.length > 0) {
+          const [recurrents, favorisExistants] = await Promise.all([
+            chargerRecurrents(session?.user?.id),
+            chargerFavoris(session?.user?.id),
+          ]);
+          const propositions = proposerFavorisApresTicket({ achatsConfirmes, recurrents, favorisExistants });
+          if (propositions.length > 0) {
+            setPropositionFavoris({ propositions, selection: Object.fromEntries(propositions.map(p => [p.cle, true])) });
+          }
+        }
+      } catch (e) {
+        console.error("Proposition de favoris post-ticket (best effort) :", e);
+      }
     } catch (e) {
       console.error("Rapprochement ticket <-> session (sauté, best effort) :", e);
     }
+  };
+
+  // Chantier 92 Lot 6 — ajout des favoris sélectionnés (action explicite).
+  // Anti-doublon rejoué par ajouterFavori (vérification + index unique) ;
+  // bilan en toast, jamais bloquant.
+  const validerPropositionFavoris = async () => {
+    const p = propositionFavoris;
+    setPropositionFavoris(null);
+    const choisis = (p?.propositions || []).filter(x => p.selection?.[x.cle]);
+    if (choisis.length === 0) return;
+    let ajoutes = 0, dejas = 0, echecs = 0;
+    for (const c of choisis) {
+      const res = await ajouterFavori({ utilisateurId: session?.user?.id, produitId: c.produit_id, varianteProduitId: c.variante_produit_id });
+      if (res.statut === 'ajoute') ajoutes += 1;
+      else if (res.statut === 'deja') dejas += 1;
+      else echecs += 1;
+    }
+    const morceaux = [];
+    if (ajoutes) morceaux.push(`${ajoutes} favori${ajoutes > 1 ? "s" : ""} ajouté${ajoutes > 1 ? "s" : ""}`);
+    if (dejas) morceaux.push(`${dejas} déjà en favori`);
+    if (echecs) morceaux.push(`${echecs} non enregistré${echecs > 1 ? "s" : ""}`);
+    if (morceaux.length) showAppToast(`${echecs ? "⚠️" : "❤️"} ${morceaux.join(" · ")}`, !echecs);
   };
 
   // Chantier 91 Lot 5 — décision utilisateur sur un article 'a_verifier' :
@@ -10287,7 +10487,7 @@ export default function App() {
             </div>
           )}
           <TabErrorBoundary key={tab}>
-          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} onResumeScan={handleResumeScan} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)} estFrancois={estFrancois} sessionCourses={sessionCoursesAccessible ? sessionCoursesActive : null} onReprendreCourses={()=>setTab("courses")} onAbandonnerCourses={abandonnerSessionCourses}/>}
+          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} onResumeScan={handleResumeScan} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFavoris={()=>setShowFavorisSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)} estFrancois={estFrancois} sessionCourses={sessionCoursesAccessible ? sessionCoursesActive : null} onReprendreCourses={()=>setTab("courses")} onAbandonnerCourses={abandonnerSessionCourses}/>}
           {/* Chantier « Micro » Lot 1 — même mécanique shadow que rejets (#56.3b) :
               jamais rendu pour un autre utilisateur, même si tab="micro" traîne en state.
               Lot 5 : onAdd = le addItem OFFICIEL du caddie (même chemin que le Catalogue). */}
@@ -10370,6 +10570,7 @@ export default function App() {
         {appToast && <Toast msg={appToast.msg} ok={appToast.ok}/>}
         {showCircleSheet  && <CircleSheet  circles={circles} userId={session.user.id} userEmail={session.user.email} profileMap={profileMap} pseudo={pseudo} archives={archives} onClose={()=>setShowCircleSheet(false)} onInvite={inviteByPseudo} onUpdateStatus={updateCircleStatus}/>}
         {showStatsSheet   && <StatsSheet   userId={session.user.id} archives={archives} onClose={()=>setShowStatsSheet(false)}/>}
+        {showFavorisSheet && <FavorisSheet userId={session?.user?.id} onClose={()=>setShowFavorisSheet(false)}/>}
         {showFaqSheet     && <FaqSheet     userId={session.user.id} pseudo={pseudo} onClose={()=>setShowFaqSheet(false)}/>}
         {showMesPrixSheet && <MesPrixSheet priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{ const {id:_id,...rest}=newArc; const {data,error}=await supabase.from('archives').insert({...rest,user_id:session?.user?.id}).select('id').single(); if(error){ showAppToast("⚠️ Archive non sauvegardée, vérifie ta connexion",false); } else { const {data:all}=await supabase.from('archives').select('*').order('date'); if(all) setArchives(all); setShowRating({id:data.id,store:newArc.store}); } }} userId={session?.user?.id} produitsRef={produitsRef} onClose={()=>setShowMesPrixSheet(false)}/>}
         {showScanChoix && (
@@ -10701,6 +10902,56 @@ export default function App() {
                   style={{ width:"100%", padding:"12px", border:"1.5px solid #eee", borderRadius:10, background:"#fff", fontFamily:F5, fontWeight:800, fontSize:13, color:"#333", cursor:"pointer" }}>
                   🔧 Article mal reconnu — voir l'Historique
                 </button>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Chantier 92 Lot 6 — proposition de favoris post-ticket : achats
+            confirmés récurrents non déjà favoris, sélection multiple, rien
+            n'est ajouté sans action explicite. Affichée après le récap et la
+            file « à vérifier » du chantier 91. */}
+        {!rapprochementCourses && verifCourses.length === 0 && !bilanCourses && propositionFavoris && (() => {
+          const p = propositionFavoris;
+          const nbChoisis = p.propositions.filter(x => p.selection?.[x.cle]).length;
+          const F6 = "'Nunito',sans-serif";
+          return (
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:9999, padding:24 }}>
+              <div style={{ background:"#fff", borderRadius:16, padding:"20px", maxWidth:340, width:"100%", maxHeight:"80vh", overflowY:"auto" }}>
+                <div style={{ fontFamily:F6, fontWeight:900, fontSize:15, color:"#1a1a1a", marginBottom:6 }}>❤️ Tes achats réguliers</div>
+                <div style={{ fontFamily:F6, fontSize:13, color:"#888", marginBottom:14 }}>
+                  Tu achètes ces produits souvent. Les ajouter à tes favoris ?
+                </div>
+                <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:14 }}>
+                  {p.propositions.map(prop => {
+                    const coche = !!p.selection?.[prop.cle];
+                    return (
+                      <button key={prop.cle}
+                        onClick={()=>setPropositionFavoris(prev => prev ? { ...prev, selection: { ...prev.selection, [prop.cle]: !prev.selection?.[prop.cle] } } : prev)}
+                        style={{ display:"flex", alignItems:"center", gap:10, width:"100%", textAlign:"left", padding:"10px 12px", borderRadius:10, border:`1.5px solid ${coche ? "#E5181B" : "#eee"}`, background: coche ? "#FFF0F0" : "#fff", cursor:"pointer" }}>
+                        <span style={{ width:22, height:22, borderRadius:6, border:`2px solid ${coche ? "#E5181B" : "#bbb"}`, background: coche ? "#E5181B" : "#fff", color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, flexShrink:0 }}>
+                          {coche ? "✓" : ""}
+                        </span>
+                        <span style={{ fontFamily:F6, fontWeight:800, fontSize:13, color:"#1a1a1a", flex:1, minWidth:0 }}>{prop.nom_affiche}</span>
+                        <span style={{ fontFamily:F6, fontSize:11, fontWeight:800, color:"#999", whiteSpace:"nowrap" }}>×{prop.nb_tickets} tickets</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <button onClick={validerPropositionFavoris} disabled={nbChoisis === 0}
+                  style={{ width:"100%", padding:"13px", border:"none", borderRadius:10, background: nbChoisis > 0 ? "#E5181B" : "#eee", fontFamily:F6, fontWeight:900, fontSize:14, color: nbChoisis > 0 ? "#fff" : "#999", cursor: nbChoisis > 0 ? "pointer" : "default", marginBottom:8 }}>
+                  ❤️ Ajouter les sélectionnés ({nbChoisis})
+                </button>
+                <div style={{ display:"flex", gap:8 }}>
+                  <button onClick={()=>setPropositionFavoris(null)}
+                    style={{ flex:1, padding:"12px", border:"1.5px solid #eee", borderRadius:10, background:"#fff", fontFamily:F6, fontWeight:800, fontSize:13, color:"#333", cursor:"pointer" }}>
+                    Non merci
+                  </button>
+                  <button onClick={()=>setPropositionFavoris(null)}
+                    style={{ flex:1, padding:"12px", border:"1.5px solid #eee", borderRadius:10, background:"#fff", fontFamily:F6, fontWeight:800, fontSize:13, color:"#333", cursor:"pointer" }}>
+                    Plus tard
+                  </button>
+                </div>
               </div>
             </div>
           );
