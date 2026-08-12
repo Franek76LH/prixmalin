@@ -4815,7 +4815,7 @@ function cleCoords(lat, lng) {
   return `${Number(lat).toFixed(4)},${Number(lng).toFixed(4)}`;
 }
 
-function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearchRadius, userPos, setUserPos, zoneLabel, setZoneLabel, zonePrete = true, userId, isAdmin, modeCoreActif, coreActifGlobal, categorieMagasin = 'grande_surface', setCategorieMagasin, estFrancois = false }) {
+function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearchRadius, userPos, setUserPos, zoneLabel, setZoneLabel, zonePrete = true, userId, isAdmin, modeCoreActif, coreActifGlobal, categorieMagasin = 'grande_surface', setCategorieMagasin }) {
   const F = "'Nunito',sans-serif";
 
   // Chantier géoloc comparateur — sélecteur de zone (point de référence).
@@ -5703,13 +5703,13 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
             {/* Bouton valider */}
             <div style={{ padding:"0 12px 16px" }}>
               <button onClick={()=>{
-                // Chantier « Courses » Lot 1 (shadow estFrancois) — en mode
-                // Core uniquement, transmet en 3e argument (additif) les
-                // lignes de prix RETENUES du magasin gagnant, pour figer la
-                // session de courses côté racine. Pour tout autre utilisateur
-                // (ou en mode legacy, sans magasin réel), extrasCourses est
-                // null et onValidate garde exactement son comportement actuel.
-                const extrasCourses = (estFrancois && utiliserCore && coreResultat)
+                // Chantier « Courses » — bascule générale 2026-08-12 : en mode
+                // Core, transmet en 3e argument (additif) les lignes de prix
+                // RETENUES du magasin gagnant, pour figer la session de
+                // courses côté racine. En mode legacy (pas de magasin réel),
+                // extrasCourses est null et onValidate garde le flux
+                // historique (archive + vidage + Historique).
+                const extrasCourses = (utiliserCore && coreResultat)
                   ? {
                       magasinId: bestAffiche.id,
                       nomEnseigne: coreResultat.regroupement[bestAffiche.id]?.[0]?.prix?.nom_enseigne ?? null,
@@ -8709,7 +8709,7 @@ export default function App() {
   // Lot 3 — session réellement exploitable : active ET appartenant à
   // l'utilisateur connecté (le localStorage est partagé par appareil — une
   // session d'un autre compte ne doit ni s'afficher ni être reprise).
-  const sessionCoursesActive = (estFrancois && sessionCourses?.statut === 'active'
+  const sessionCoursesActive = (sessionCourses?.statut === 'active'
     && sessionCourses?.utilisateur_id === session?.user?.id) ? sessionCourses : null;
   // Lot 4 — état du filet Supabase : null = rien à dire, 'echec' = la dernière
   // sauvegarde base a échoué (indicateur discret sur l'écran de courses —
@@ -8725,7 +8725,7 @@ export default function App() {
   // Lot 4 (sans id) reçoit son id ici, une seule fois, puis l'effet relancé
   // par le re-rendu fait l'upsert.
   useEffect(() => {
-    if (!estFrancois || !sessionCoursesActive) return;
+    if (!sessionCoursesActive) return;
     const t = setTimeout(async () => {
       if (!sessionCoursesActive.id) {
         // genererIdSession (jamais crypto.randomUUID nu) + try : l'attribution
@@ -8749,7 +8749,7 @@ export default function App() {
       }
     }, 2000);
     return () => clearTimeout(t);
-  }, [estFrancois, sessionCoursesActive]);
+  }, [sessionCoursesActive]);
 
   // Lot 4 — restauration à deux sources à la connexion : le localStorage est
   // déjà hydraté ; on lit la session active en base et le modifie_le le plus
@@ -8757,7 +8757,7 @@ export default function App() {
   // Safari). Échec réseau : silencieux ici car la copie locale reste affichée
   // et la sauvegarde débouncée resignalera tout vrai problème d'écriture.
   useEffect(() => {
-    if (!estFrancois || !session?.user?.id || restaurationCoursesFaite.current) return;
+    if (!session?.user?.id || restaurationCoursesFaite.current) return;
     restaurationCoursesFaite.current = true;
     let annule = false;
     (async () => {
@@ -8776,7 +8776,7 @@ export default function App() {
       }
     })();
     return () => { annule = true; };
-  }, [estFrancois, session?.user?.id, sessionCourses]);
+  }, [session?.user?.id, sessionCourses]);
   const [priceDB, setPriceDB]     = useState([]);
   // Chantier 81 — zone du comparateur (point + rayon + libellé) réhydratée
   // depuis localStorage à l'init : au retour, l'utilisateur retrouve sa zone
@@ -9551,11 +9551,11 @@ export default function App() {
   };
 
   const handleValidate = async (store, potentialSaving = 0, extrasCourses = null, forcerRemplacement = false) => {
-    // Lot 3 (shadow estFrancois) — une session est déjà active : on demande
-    // AVANT toute écriture (ni archive ni session créées à ce stade) si
-    // François reprend ses courses ou remplace par cette nouvelle liste.
-    // « Reprendre » ne crée donc rien — pas d'archive fantôme.
-    if (estFrancois && extrasCourses && sessionCoursesActive && !forcerRemplacement) {
+    // Lot 3 (bascule générale 2026-08-12) — une session est déjà active : on
+    // demande AVANT toute écriture (ni archive ni session créées à ce stade)
+    // si l'utilisateur reprend ses courses ou remplace par cette nouvelle
+    // liste. « Reprendre » ne crée donc rien — pas d'archive fantôme.
+    if (extrasCourses && sessionCoursesActive && !forcerRemplacement) {
       setConfirmCoursesExistantes({ store, potentialSaving, extrasCourses });
       return;
     }
@@ -9593,7 +9593,7 @@ export default function App() {
     // flux standard ci-dessous — jamais de perte silencieuse. Pour tout autre
     // utilisateur, extrasCourses est null : comportement strictement identique
     // à avant.
-    if (estFrancois && extrasCourses) {
+    if (extrasCourses) {
       try {
         await demarrerSessionCourses(store, extrasCourses);
       } catch (e) {
@@ -9854,10 +9854,10 @@ export default function App() {
           {/* Chantier « Courses » Lot 1 (shadow estFrancois) — écran de courses,
               accessible uniquement via la validation du comparatif (aucun
               onglet TabBar). Session absente -> rien n'est rendu. */}
-          {loaded && estFrancois && tab==="courses" && sessionCoursesActive && <CoursesTab session={sessionCoursesActive} onChangerEtat={changerEtatArticleSession} onAjouterNote={ajouterNoteCourses} onSupprimerNote={supprimerNoteCourses} onTerminer={demanderTerminerCourses} syncEchec={syncCoursesEchec}/>}
+          {loaded && tab==="courses" && sessionCoursesActive && <CoursesTab session={sessionCoursesActive} onChangerEtat={changerEtatArticleSession} onAjouterNote={ajouterNoteCourses} onSupprimerNote={supprimerNoteCourses} onTerminer={demanderTerminerCourses} syncEchec={syncCoursesEchec}/>}
           {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} onSetMarquePref={setMarquePrefItem}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab}/>}
-          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix} estFrancois={estFrancois}/>}
+          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
           {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} estFrancois={estFrancois} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;
