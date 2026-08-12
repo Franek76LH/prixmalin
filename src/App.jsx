@@ -4815,7 +4815,7 @@ function cleCoords(lat, lng) {
   return `${Number(lat).toFixed(4)},${Number(lng).toFixed(4)}`;
 }
 
-function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearchRadius, userPos, setUserPos, zoneLabel, setZoneLabel, zonePrete = true, userId, isAdmin, modeCoreActif, coreActifGlobal, categorieMagasin = 'grande_surface', setCategorieMagasin }) {
+function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearchRadius, userPos, setUserPos, zoneLabel, setZoneLabel, zonePrete = true, userId, isAdmin, modeCoreActif, coreActifGlobal, categorieMagasin = 'grande_surface', setCategorieMagasin, sessionCoursesAccessible = false }) {
   const F = "'Nunito',sans-serif";
 
   // Chantier géoloc comparateur — sélecteur de zone (point de référence).
@@ -5709,7 +5709,10 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
                 // courses côté racine. En mode legacy (pas de magasin réel),
                 // extrasCourses est null et onValidate garde le flux
                 // historique (archive + vidage + Historique).
-                const extrasCourses = (utiliserCore && coreResultat)
+                // Chantier 87 Lot 1 — sessionCoursesAccessible (flag global OU
+                // François) : sans accès, extrasCourses reste null et la
+                // validation suit le flux historique, comme avant la session.
+                const extrasCourses = (utiliserCore && coreResultat && sessionCoursesAccessible)
                   ? {
                       magasinId: bestAffiche.id,
                       nomEnseigne: coreResultat.regroupement[bestAffiche.id]?.[0]?.prix?.nom_enseigne ?? null,
@@ -8687,6 +8690,17 @@ export default function App() {
   // changement qu'à son retour au premier plan ou au rechargement.
   const [coreActifGlobal, setCoreActifGlobal] = useState(false);
 
+  // Chantier 87 Lot 1 — feature-flag « session_courses_ouverte »
+  // (parametres_globaux), même principe de lecture défensive que le kill
+  // switch core_actif ci-dessus : false par défaut, et sur toute erreur
+  // (clé absente, table indisponible, réseau) on retombe sur false — seul
+  // François garde alors l'accès à la session de courses.
+  const [sessionCoursesOuverte, setSessionCoursesOuverte] = useState(false);
+  // Chantier 87 Lot 1 — accès au parcours session de courses : flag global à
+  // true OU François (qui garde toujours accès, même flag à false). Ne touche
+  // à AUCUN autre gating estFrancois (Micro, admin…).
+  const sessionCoursesAccessible = sessionCoursesOuverte || estFrancois;
+
   // #65 — bandeau de mise à jour. needRefresh vient de registerSW (main.jsx,
   // hors arbre React) via le pont swUpdate.js ; jamais mis à jour tout seul.
   const [needRefresh, setNeedRefresh] = useState(false);
@@ -9015,6 +9029,31 @@ export default function App() {
     const onVisibilite = () => { if (document.visibilityState === 'visible') lireCoreActif(); };
     document.addEventListener('visibilitychange', onVisibilite);
     return () => { annule = true; document.removeEventListener('visibilitychange', onVisibilite); };
+  }, [session]);
+
+  // Chantier 87 Lot 1 — lecture du flag session_courses_ouverte, même
+  // mécanique que le kill switch ci-dessus (relu au changement de session et
+  // au retour au premier plan). Lecture directe de parametres_globaux (policy
+  // SELECT authenticated déjà en place — pas de RPC dédiée) ; clé absente,
+  // valeur ≠ 'true', erreur ou table indisponible ⇒ false, jamais de plantage.
+  useEffect(() => {
+    if (!session) { setSessionCoursesOuverte(false); return; }
+    let annule = false;
+    const lireFlagCourses = () => {
+      try {
+        supabase.from('parametres_globaux').select('valeur').eq('cle', 'session_courses_ouverte').maybeSingle()
+          .then(({ data, error }) => {
+            if (annule) return;
+            setSessionCoursesOuverte(!error && data?.valeur === 'true');
+          }, () => { if (!annule) setSessionCoursesOuverte(false); });
+      } catch {
+        if (!annule) setSessionCoursesOuverte(false);
+      }
+    };
+    lireFlagCourses();
+    const onVisibiliteCourses = () => { if (document.visibilityState === 'visible') lireFlagCourses(); };
+    document.addEventListener('visibilitychange', onVisibiliteCourses);
+    return () => { annule = true; document.removeEventListener('visibilitychange', onVisibiliteCourses); };
   }, [session]);
 
   const fetchStoreRatings = useCallback(async () => {
@@ -9846,7 +9885,7 @@ export default function App() {
             </div>
           )}
           <TabErrorBoundary key={tab}>
-          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} onResumeScan={handleResumeScan} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)} estFrancois={estFrancois} sessionCourses={sessionCoursesActive} onReprendreCourses={()=>setTab("courses")} onAbandonnerCourses={abandonnerSessionCourses}/>}
+          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} onResumeScan={handleResumeScan} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)} estFrancois={estFrancois} sessionCourses={sessionCoursesAccessible ? sessionCoursesActive : null} onReprendreCourses={()=>setTab("courses")} onAbandonnerCourses={abandonnerSessionCourses}/>}
           {/* Chantier « Micro » Lot 1 — même mécanique shadow que rejets (#56.3b) :
               jamais rendu pour un autre utilisateur, même si tab="micro" traîne en state.
               Lot 5 : onAdd = le addItem OFFICIEL du caddie (même chemin que le Catalogue). */}
@@ -9854,10 +9893,12 @@ export default function App() {
           {/* Chantier « Courses » Lot 1 (shadow estFrancois) — écran de courses,
               accessible uniquement via la validation du comparatif (aucun
               onglet TabBar). Session absente -> rien n'est rendu. */}
-          {loaded && tab==="courses" && sessionCoursesActive && <CoursesTab session={sessionCoursesActive} onChangerEtat={changerEtatArticleSession} onAjouterNote={ajouterNoteCourses} onSupprimerNote={supprimerNoteCourses} onTerminer={demanderTerminerCourses} syncEchec={syncCoursesEchec}/>}
+          {/* Chantier 87 Lot 1 — jamais rendu sans accès (flag OU François),
+              même si tab="courses" traîne en state. */}
+          {loaded && tab==="courses" && sessionCoursesAccessible && sessionCoursesActive && <CoursesTab session={sessionCoursesActive} onChangerEtat={changerEtatArticleSession} onAjouterNote={ajouterNoteCourses} onSupprimerNote={supprimerNoteCourses} onTerminer={demanderTerminerCourses} syncEchec={syncCoursesEchec}/>}
           {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} onSetMarquePref={setMarquePrefItem}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab}/>}
-          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix}/>}
+          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix} sessionCoursesAccessible={sessionCoursesAccessible}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
           {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} estFrancois={estFrancois} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;
