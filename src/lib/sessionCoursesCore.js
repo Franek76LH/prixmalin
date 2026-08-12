@@ -415,6 +415,16 @@ export function construireBilanCourses(articles, { nbReportes = 0, figeLeISO = n
   };
 }
 
+// Chantier 90 Lot 4 — faut-il rattacher le ticket scanné à la session ?
+// Contrat d'enregistrer_ticket_core : la ligne tickets est créée AVANT la
+// boucle des lignes, donc statut 'ok' ET 'rejet_partiel' = ticket créé ;
+// statut 'rejet' (parse impossible, magasin non résolu, exception) = aucun
+// ticket créé — rattacher le « dernier ticket » raccrocherait alors un
+// ancien ticket, jamais. null/undefined (échec technique) = non. Pure.
+export function doitRattacherTicketSession(resultatRpc) {
+  return !!resultatRpc && resultatRpc.statut !== 'rejet';
+}
+
 // Chantier 88 Lot 2 (« À acheter plus tard ») — parmi les articles que le
 // vidage choisi s'apprête à supprimer (même périmètre qu'idsCaddieASupprimer,
 // mêmes options), ceux qui étaient PRÉVUS MAIS NON ACHETÉS : type 'caddie'

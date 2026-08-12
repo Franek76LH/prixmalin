@@ -22,6 +22,7 @@ import {
   idsCaddieASupprimer,
   articlesNonAchetesASupprimer,
   construireBilanCourses,
+  doitRattacherTicketSession,
   chargerMarquesVariantes,
   calculerTotalPanier,
   genererIdSession,
@@ -539,6 +540,15 @@ describe('Lot 6 — clôture', () => {
   it('construireBilanCourses : articles vides ou absents, jamais de plantage', () => {
     const bilan = construireBilanCourses(null);
     expect(bilan).toEqual({ total_estime: 0, total_incomplet: false, nb_achetes: 0, nb_reporte: 0, nb_non_achetes: 0, total_reel: null, fige_le: null });
+  });
+
+  // Chantier 90 Lot 4 — rattachement ticket <-> session.
+  it('doitRattacherTicketSession : ticket créé (ok / rejet_partiel) oui, rejet total ou échec technique non', () => {
+    expect(doitRattacherTicketSession({ statut: 'ok', prix_ecrits: 3, rejets: [] })).toBe(true);
+    expect(doitRattacherTicketSession({ statut: 'rejet_partiel', prix_ecrits: 1, rejets: [{}] })).toBe(true);
+    expect(doitRattacherTicketSession({ statut: 'rejet', prix_ecrits: 0, rejets: [{}] })).toBe(false);
+    expect(doitRattacherTicketSession(null)).toBe(false);
+    expect(doitRattacherTicketSession(undefined)).toBe(false);
   });
 });
 

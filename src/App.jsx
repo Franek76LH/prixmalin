@@ -8,7 +8,7 @@ import { urlPhotoVariante, offLargeSource, offFullUrl, cloudinaryAgrandi } from 
 import { nomComposeVariante, formatEtiquetteVariante } from "./lib/nomProduit";
 import { transcrireAudioListe, normaliserNomElement, comptesParNom, fusionnerParNom } from "./lib/microVocal";
 // Chantier « Courses » Lot 1 — session de courses figée (shadow estFrancois).
-import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession, ajouterNoteSession, supprimerNoteSession, cloreSession, idsCaddieASupprimer, articlesNonAchetesASupprimer, construireBilanCourses, chargerMarquesVariantes, calculerTotalPanier } from "./lib/sessionCoursesCore";
+import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession, ajouterNoteSession, supprimerNoteSession, cloreSession, idsCaddieASupprimer, articlesNonAchetesASupprimer, construireBilanCourses, doitRattacherTicketSession, chargerMarquesVariantes, calculerTotalPanier } from "./lib/sessionCoursesCore";
 import { capturerEvenement } from "./lib/posthog";
 import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
 import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
@@ -1260,7 +1260,7 @@ function etapeLisibleScan(status) {
 }
 
 // ── IMPORT TICKET SHEET ───────────────────────────────────────────────────────
-function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera = false, autoOpenGallery = false, onManualEntry, initialResult = null, resumeDraft = null, estFrancois = false }) {
+function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera = false, autoOpenGallery = false, onManualEntry, initialResult = null, resumeDraft = null, estFrancois = false, magasinSession = null }) {
   const [jsonText, setJsonText] = useState("");
   const [status,   setStatus]   = useState(directCamera ? "camera" : "idle");
   const [error,    setError]    = useState("");
@@ -1312,9 +1312,15 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     // (scan frais). Les deux ne s'appliquent jamais ensemble.
     if (resumeDraft || !initialResult) return;
     const enseigne = storeIdFromName(initialResult.store);
+    const prods = initialResult.products.map((p, i) => ({ ...p, id: i, keep: true }));
     setResult(initialResult);
     setSelectedStore(enseigne);
-    setEditableProducts(initialResult.products.map((p, i) => ({ ...p, id: i, keep: true })));
+    setEditableProducts(prods);
+    if (magasinSession) {
+      // Chantier 90 — magasin de la session confirmé : étape magasin sautée.
+      arriverAvecMagasinSession(initialResult, prods);
+      return;
+    }
     setStoreNameEdit(initialResult.store || "");
     setStoreLocation(estFrancois ? "" : (initialResult.address || ""));
     fetchKnownStores(enseigne, initialResult.address || null);
@@ -1591,6 +1597,26 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     setStatus("share");
   };
 
+  // Chantier 90 Lot 4 — scan lancé depuis la session de courses avec magasin
+  // confirmé (« Ticket effectué chez X ? » -> Oui) : le magasin est déjà
+  // connu, on ne le redemande pas. Champs pré-remplis depuis la session,
+  // résolution de la fiche legacy par la mécanique EXISTANTE (fetchKnownStores,
+  // priorité au code postal), puis passage direct au choix des produits —
+  // l'étape « store » est sautée. Repli sur les valeurs du ticket scanné pour
+  // tout champ manquant ; une résolution ratée laisse resolvedStoreId null et
+  // le confirm() suit son chemin normal (magasin_texte). Jamais bloquant.
+  const arriverAvecMagasinSession = async (parsed, prods) => {
+    const nom = (magasinSession?.nom || parsed?.store || "").trim();
+    const enseigne = storeIdFromName(magasinSession?.enseigne || nom || parsed?.store);
+    const adresse = [magasinSession?.adresse, [magasinSession?.code_postal, magasinSession?.ville].filter(Boolean).join(" ")]
+      .filter(Boolean).join(", ") || (parsed?.address || "");
+    setSelectedStore(enseigne);
+    setStoreNameEdit(nom);
+    setStoreLocation(adresse);
+    await fetchKnownStores(enseigne, adresse || null);
+    goToShare(prods);
+  };
+
   const repondreAmbigu = (choix) => {
     const resolve = ambiguResolverRef.current;
     ambiguResolverRef.current = null;
@@ -1655,12 +1681,18 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   const base64 = await imageFileToJpegBase64(file);
                   const parsed = await scanTicketWithClaude(base64, refProducts);
                   const enseigne = storeIdFromName(parsed.store);
+                  const prods = parsed.products.map((p,i) => ({...p, id:i, keep:true}));
                   setResult(parsed); setSelectedStore(enseigne);
-                  setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true})));
-                  setStoreNameEdit(parsed.store||"");
-                  setStoreLocation(estFrancois ? "" : (parsed.address||""));
-                  await fetchKnownStores(enseigne, parsed.address || null);
-                  setStatus("store");
+                  setEditableProducts(prods);
+                  if (magasinSession) {
+                    // Chantier 90 — magasin de la session confirmé : étape magasin sautée.
+                    await arriverAvecMagasinSession(parsed, prods);
+                  } else {
+                    setStoreNameEdit(parsed.store||"");
+                    setStoreLocation(estFrancois ? "" : (parsed.address||""));
+                    await fetchKnownStores(enseigne, parsed.address || null);
+                    setStatus("store");
+                  }
                 } catch(e) { setError("Erreur scan : " + e.message); }
                 setScanning(false);
               }} style={{ display:"none" }} />
@@ -1674,12 +1706,18 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   const base64 = await imageFileToJpegBase64(file);
                   const parsed = await scanTicketWithClaude(base64, refProducts);
                   const enseigne = storeIdFromName(parsed.store);
+                  const prods = parsed.products.map((p,i) => ({...p, id:i, keep:true, share:true}));
                   setResult(parsed); setSelectedStore(enseigne);
-                  setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true, share:true})));
-                  setStoreNameEdit(parsed.store || "");
-                  setStoreLocation(estFrancois ? "" : (parsed.address || ""));
-                  await fetchKnownStores(enseigne, parsed.address || null);
-                  setStatus("store");
+                  setEditableProducts(prods);
+                  if (magasinSession) {
+                    // Chantier 90 — magasin de la session confirmé : étape magasin sautée.
+                    await arriverAvecMagasinSession(parsed, prods);
+                  } else {
+                    setStoreNameEdit(parsed.store || "");
+                    setStoreLocation(estFrancois ? "" : (parsed.address || ""));
+                    await fetchKnownStores(enseigne, parsed.address || null);
+                    setStatus("store");
+                  }
                 } catch(e) { setError("Erreur scan : " + e.message); }
                 setGalleryScanning(false);
                 e.target.value = "";
@@ -1706,12 +1744,18 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   const base64 = await imageFileToJpegBase64(file);
                   const parsed = await scanTicketWithClaude(base64, refProducts);
                   const enseigne = storeIdFromName(parsed.store);
+                  const prods = parsed.products.map((p,i) => ({...p, id:i, keep:true}));
                   setResult(parsed); setSelectedStore(enseigne);
-                  setEditableProducts(parsed.products.map((p,i) => ({...p, id:i, keep:true})));
-                  setStoreNameEdit(parsed.store||"");
-                  setStoreLocation(estFrancois ? "" : (parsed.address||""));
-                  await fetchKnownStores(enseigne, parsed.address || null);
-                  setStatus("store");
+                  setEditableProducts(prods);
+                  if (magasinSession) {
+                    // Chantier 90 — magasin de la session confirmé : étape magasin sautée.
+                    await arriverAvecMagasinSession(parsed, prods);
+                  } else {
+                    setStoreNameEdit(parsed.store||"");
+                    setStoreLocation(estFrancois ? "" : (parsed.address||""));
+                    await fetchKnownStores(enseigne, parsed.address || null);
+                    setStatus("store");
+                  }
                 } catch(e) { setError("Erreur scan : " + e.message); }
                 setScanning(false);
               }} style={{ display:"none" }} />
@@ -4430,7 +4474,7 @@ function EconomiesTab({ priceDB, archives, items, setTab }) {
 }
 
 // ── PRICES TAB ────────────────────────────────────────────────────────────────
-function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValidated, onCreateArchive, userId, produitsRef = [], autoOpenCamera = false, onAutoOpenConsumed, autoResumeScan = false, onAutoResumeConsumed, initialScanResult = null, onInitialScanConsumed, hideActions = false, coreActifGlobal = false, estFrancois = false }) {
+function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValidated, onCreateArchive, userId, produitsRef = [], autoOpenCamera = false, onAutoOpenConsumed, autoResumeScan = false, onAutoResumeConsumed, initialScanResult = null, onInitialScanConsumed, hideActions = false, coreActifGlobal = false, estFrancois = false, magasinSession = null, onImportSession, onScanSessionFerme }) {
   const [showImport,    setShowImport]    = useState(false);
   const [capturedResult] = useState(initialScanResult);
   // Chantier 79 — brouillon de scan reprenable. scanDraft : détecté au montage
@@ -4477,6 +4521,10 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
     showToast("✓ Prix enregistré");
   };
   const importPrices = async (entries, ecritureCorePromise) => {
+    // Chantier 90 Lot 4 — scan lancé depuis une session de courses : signale
+    // l'import à la racine avec la promesse d'écriture Core, pour rattacher
+    // le ticket créé à la session (best effort, jamais bloquant pour ce flux).
+    onImportSession?.(ecritureCorePromise);
     // Trouve la dernière archive sans ticket scanné
     const openArchive = [...archives].reverse().find(a => !a.ticket_scanned);
 
@@ -4822,7 +4870,7 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
         </div>
       )}
 
-      {showImport    && <ImportTicketSheet onClose={()=>{setShowImport(false);setResumeDraft(null);setScanDraft(lireScanDraft());onAutoOpenConsumed?.();onInitialScanConsumed?.();}} onImport={importPrices} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))} directCamera={autoOpenCamera} onManualEntry={()=>{ setShowImport(false); setShowEntry(true); }} initialResult={capturedResult} resumeDraft={resumeDraft} estFrancois={estFrancois}/>}
+      {showImport    && <ImportTicketSheet onClose={()=>{setShowImport(false);setResumeDraft(null);setScanDraft(lireScanDraft());onAutoOpenConsumed?.();onInitialScanConsumed?.();onScanSessionFerme?.();}} onImport={importPrices} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))} directCamera={autoOpenCamera} onManualEntry={()=>{ setShowImport(false); setShowEntry(true); }} initialResult={capturedResult} resumeDraft={resumeDraft} estFrancois={estFrancois} magasinSession={magasinSession}/>}
       {showEntry     && <PriceEntrySheet  onClose={()=>{setShowEntry(false);setEditPrice(null);}} onSave={savePrice} existingPrice={editPrice}/>}
       {toast && <Toast msg={toast.msg} ok={toast.ok}/>}
     </div>
@@ -7952,7 +8000,7 @@ function LigneArticleCourses({ article, variante, onCocher, onIntrouvable, onRes
   );
 }
 
-function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, onTerminer, syncEchec = false }) {
+function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, onTerminer, onPasserEnCaisse, syncEchec = false }) {
   const F = "'Nunito',sans-serif";
   // « Dans le caddie » repliée par défaut — hooks déclarés AVANT le early
   // return (règle des Hooks : ordre stable entre rendus).
@@ -8183,6 +8231,16 @@ function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, on
           <div style={{ fontSize:40, marginBottom:10 }}>🛒</div>
           <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:C.orange }}>Aucun article dans cette session</div>
         </div>
+      )}
+
+      {/* Chantier 90 Lot 4 — « Je passe en caisse » : lance le parcours de
+          scan de ticket EXISTANT depuis la session (confirmation du magasin
+          gérée par la racine). N'affecte en rien la clôture ci-dessous. */}
+      {prog.total > 0 && (
+        <button onClick={()=>onPasserEnCaisse?.()}
+          style={{ width:"100%", padding:"14px", marginTop:16, border:"2px solid #E5181B", borderRadius:14, background:"#fff", fontFamily:F, fontWeight:900, fontSize:15, color:"#E5181B", cursor:"pointer" }}>
+          🧾 Je passe en caisse — scanner le ticket
+        </button>
       )}
 
       {/* Lot 6 — clôture explicite, en fin de liste. Vert quand tout est pris,
@@ -8763,6 +8821,16 @@ export default function App() {
   // étape à la place de l'ancien toast, par-dessus l'accueil — la session est
   // déjà close quand il apparaît, le fermer ne détruit rien.
   const [bilanCourses, setBilanCourses] = useState(null);
+  // Chantier 90 Lot 4 — « Je passe en caisse » : caisseCourses affiche la
+  // confirmation du magasin ; scanCaisse mémorise le scan en attente de
+  // rattachement ({ sessionId, magasin }) — magasin null = « changer de
+  // magasin » (résolution existante dans le sheet). Doublé d'une ref pour que
+  // le rattachement asynchrone lise toujours la valeur du moment, jamais une
+  // fermeture périmée.
+  const [caisseCourses, setCaisseCourses] = useState(false);
+  const [scanCaisse, setScanCaisse] = useState(null);
+  const scanCaisseRef = useRef(null);
+  const definirScanCaisse = (v) => { scanCaisseRef.current = v; setScanCaisse(v); };
   // Chantier 88 Lot 2 — lignes liste_courses de statut 'reporte', tenues à
   // l'écart de `items` (liste active, comparateur, session) : elles ne
   // comptent jamais comme achetées et ne polluent pas la liste active.
@@ -9607,6 +9675,73 @@ export default function App() {
     setClotureCourses(prog.restants > 0 ? 'confirmation' : 'choixCaddie');
   };
 
+  // Chantier 90 Lot 4 — « Je passe en caisse » : confirmation du magasin de
+  // la session, puis lancement du parcours de scan EXISTANT (même chemin que
+  // le bouton Scanner de l'accueil : caméra directe sur l'onglet Mes prix).
+  // magasin non-nul = magasin de la session confirmé (étape magasin sautée
+  // dans le sheet) ; null = « changer de magasin » (résolution existante).
+  const lancerScanCaisse = (magasin) => {
+    const sessionId = sessionCoursesActive?.id ?? null;
+    setCaisseCourses(false);
+    if (!sessionId) return;
+    definirScanCaisse({ sessionId, magasin });
+    setAutoOpenCamera(true);
+    setTab("prices");
+  };
+
+  // Chantier 90 Lot 4 — rattachement du ticket scanné à la session, appelé
+  // par importPrices avec la promesse d'écriture Core. Best effort de bout en
+  // bout : si l'écriture Core échoue ou ne crée pas de ticket (statut
+  // 'rejet'), si le « dernier ticket » est introuvable ou si l'update
+  // Supabase rate, ticket_id reste simplement null — ni la session ni le
+  // scan ne sont jamais cassés. Le « dernier ticket de l'utilisateur » est
+  // le même mécanisme que calculerRealizedSavingTicket (#56.5.B).
+  const rattacherTicketScanSession = (ecritureCorePromise) => {
+    const cible = scanCaisseRef.current;
+    definirScanCaisse(null);
+    if (!cible?.sessionId) return;
+    (async () => {
+      try {
+        const resultat = await ecritureCorePromise;
+        if (!doitRattacherTicketSession(resultat)) return;
+        const { data: dernierTicket } = await supabase
+          .from('tickets').select('id')
+          .eq('utilisateur_id', session?.user?.id)
+          .order('cree_le', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const ticketId = dernierTicket?.id ?? null;
+        if (!ticketId) return;
+        // Colonne ticket_id + miroir dans donnees (lecture-modification de la
+        // seule ligne visée) — la ligne peut être encore active ou déjà close.
+        let donneesMaj;
+        try {
+          const { data: ligne } = await supabase.from('sessions_courses')
+            .select('donnees')
+            .eq('id', cible.sessionId)
+            .eq('utilisateur_id', session?.user?.id)
+            .maybeSingle();
+          donneesMaj = ligne?.donnees ? { ...ligne.donnees, ticket_id: ticketId } : undefined;
+        } catch { donneesMaj = undefined; }
+        const { error } = await supabase.from('sessions_courses')
+          .update({ ticket_id: ticketId, ...(donneesMaj ? { donnees: donneesMaj } : {}) })
+          .eq('id', cible.sessionId)
+          .eq('utilisateur_id', session?.user?.id);
+        if (error) throw error;
+        // Miroir local si c'est toujours la session affichée (l'upsert
+        // débouncé repropagera donnees avec ticket_id).
+        setSessionCourses(prev => {
+          if (!prev || prev.id !== cible.sessionId || prev.ticket_id === ticketId) return prev;
+          const suivante = { ...prev, ticket_id: ticketId };
+          try { ecrireSessionCourses(suivante); } catch { /* best effort */ }
+          return suivante;
+        });
+      } catch (e) {
+        console.error("Rattachement ticket → session de courses (best effort) :", e);
+      }
+    })();
+  };
+
   // Chantier 88 Lot 2 — aiguillage après le choix du sort du caddie : si le
   // vidage choisi s'apprête à supprimer des articles PRÉVUS MAIS NON ACHETÉS
   // (a_prendre ou introuvable), on propose D'ABORD, une seule fois, de les
@@ -10070,12 +10205,12 @@ export default function App() {
               onglet TabBar). Session absente -> rien n'est rendu. */}
           {/* Chantier 87 Lot 1 — jamais rendu sans accès (flag OU François),
               même si tab="courses" traîne en state. */}
-          {loaded && tab==="courses" && sessionCoursesAccessible && sessionCoursesActive && <CoursesTab session={sessionCoursesActive} onChangerEtat={changerEtatArticleSession} onAjouterNote={ajouterNoteCourses} onSupprimerNote={supprimerNoteCourses} onTerminer={demanderTerminerCourses} syncEchec={syncCoursesEchec}/>}
+          {loaded && tab==="courses" && sessionCoursesAccessible && sessionCoursesActive && <CoursesTab session={sessionCoursesActive} onChangerEtat={changerEtatArticleSession} onAjouterNote={ajouterNoteCourses} onSupprimerNote={supprimerNoteCourses} onTerminer={demanderTerminerCourses} onPasserEnCaisse={()=>setCaisseCourses(true)} syncEchec={syncCoursesEchec}/>}
           {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} onSetMarquePref={setMarquePrefItem} itemsReportes={itemsReportes} onReactiverReporte={reactiverReporte} onSupprimerReporte={supprimerReporte}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix} sessionCoursesAccessible={sessionCoursesAccessible}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
-          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} estFrancois={estFrancois} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
+          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} estFrancois={estFrancois} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} magasinSession={scanCaisse?.magasin ?? null} onImportSession={rattacherTicketScanSession} onScanSessionFerme={()=>definirScanCaisse(null)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;
             const {data,error}=await supabase.from('archives').insert({...rest,user_id:session?.user?.id}).select('id').single();
             if(error){ console.error("Erreur création archive ticket :",error); showAppToast("⚠️ Archive non sauvegardée, vérifie ta connexion",false); }
@@ -10355,6 +10490,35 @@ export default function App() {
             </div>
           );
         })()}
+
+        {/* Chantier 90 Lot 4 — confirmation du magasin avant le scan « Je
+            passe en caisse » : le magasin de la session est proposé par
+            défaut, « Changer de magasin » retombe sur la résolution existante
+            du sheet. Annuler ne quitte pas les courses. */}
+        {caisseCourses && sessionCoursesActive && (
+          <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:9999, padding:24 }} onClick={()=>setCaisseCourses(false)}>
+            <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:16, padding:"20px", maxWidth:340, width:"100%" }}>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:"#1a1a1a", marginBottom:6 }}>
+                🧾 Ticket effectué chez {sessionCoursesActive.magasin?.nom ?? "ce magasin"} ?
+              </div>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:"#888", marginBottom:16 }}>
+                Le ticket sera rattaché à tes courses en cours.
+              </div>
+              <button onClick={()=>lancerScanCaisse(sessionCoursesActive.magasin ?? null)}
+                style={{ width:"100%", padding:"13px", border:"none", borderRadius:10, background:C.green, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer", marginBottom:8 }}>
+                ✅ Oui, chez {sessionCoursesActive.magasin?.nom ?? "ce magasin"}
+              </button>
+              <button onClick={()=>lancerScanCaisse(null)}
+                style={{ width:"100%", padding:"13px", border:"1.5px solid #eee", borderRadius:10, background:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:"#333", cursor:"pointer", marginBottom:8 }}>
+                🔁 Changer de magasin
+              </button>
+              <button onClick={()=>setCaisseCourses(false)}
+                style={{ width:"100%", padding:"12px", border:"1.5px solid #eee", borderRadius:10, background:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:"#333", cursor:"pointer" }}>
+                Annuler
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Chantier 89 Lot 3 — écran-bilan de fin de courses, dernière étape
             de la clôture (remplace l'ancien toast). Affiché par-dessus
