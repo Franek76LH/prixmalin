@@ -14,6 +14,8 @@ import { rapprocherSessionTicket, appliquerRapprochementSession, deciderAchatArt
 // Chantier 92 Lot 6 — favoris Core (par format) & récurrents. Distinct des
 // « courses habituelles » (legacy favorites), qui ne bougent pas.
 import { chargerFavoris, ajouterFavori, retirerFavori, chercherFavori, chargerRecurrents, proposerFavorisApresTicket } from "./lib/favorisCore";
+// Chantier 93 Lot 7 — anti-doublon de ticket (empreinte déterministe).
+import { calculerEmpreinteTicket, chercherTicketParEmpreinte, poserEmpreinteApresImport } from "./lib/empreinteTicket";
 import { capturerEvenement } from "./lib/posthog";
 import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
 import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
@@ -1347,7 +1349,7 @@ function etapeLisibleScan(status) {
 }
 
 // ── IMPORT TICKET SHEET ───────────────────────────────────────────────────────
-function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera = false, autoOpenGallery = false, onManualEntry, initialResult = null, resumeDraft = null, estFrancois = false, magasinSession = null }) {
+function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera = false, autoOpenGallery = false, onManualEntry, initialResult = null, resumeDraft = null, estFrancois = false, magasinSession = null, onVoirTicketExistant = null, onDoublonTardif = null }) {
   const [jsonText, setJsonText] = useState("");
   const [status,   setStatus]   = useState(directCamera ? "camera" : "idle");
   const [error,    setError]    = useState("");
@@ -1382,6 +1384,9 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   // le choix fait.
   const [categorieMagasin,  setCategorieMagasin]  = useState(null);
   const [magasinAmbigu,     setMagasinAmbigu]     = useState(null);
+  // Chantier 93 Lot 7 — doublon de ticket détecté AVANT import : null ou
+  // { date_ticket } du ticket existant. Tant que non nul, rien n'a été écrit.
+  const [doublonTicket,     setDoublonTicket]     = useState(null);
   const ambiguResolverRef = useRef(null);
   const fileInputRef    = useRef(null);
   const galleryInputRef = useRef(null);
@@ -1659,6 +1664,26 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
       date:         result?.date?new Date(result.date).toISOString():new Date().toISOString(),
       share:        idsToShare.has(p.id),
     }));
+    // Chantier 93 Lot 7 — anti-doublon AVANT toute écriture : empreinte
+    // déterministe du ticket revu à l'écran (magasin, date, total, nb de
+    // lignes, libellés bruts normalisés triés). Si un ticket du compte porte
+    // déjà cette empreinte -> AUCUNE écriture (ni Core, ni legacy price_db,
+    // ni community_prices, ni archive, ni rattachement de session) et message
+    // bloquant. Vérification impossible (réseau) -> on laisse passer, jamais
+    // de blocage abusif : l'index unique reste le filet.
+    const empreinte = calculerEmpreinteTicket({
+      magasinId:  resolvedStoreId || null,
+      magasinNom: storeNameEdit.trim() || result?.store || null,
+      dateTicket: result?.date || null,
+      lignes: toImport.map(p => ({ libelle: p.libelle_ticket || p.product, prix: p.price, quantite: p.qty })),
+    });
+    const verifDoublon = await chercherTicketParEmpreinte(empreinte);
+    if (verifDoublon?.existe) {
+      setSaving(false);
+      setDoublonTicket({ date_ticket: verifDoublon.ticket?.date_ticket ?? null });
+      return;
+    }
+
     // #56.5.A — double écriture Core, un seul appel. #56.6 : la promesse est
     // transmise à onImport (au lieu d'être ignorée via void) pour permettre
     // un realized_saving Core scopé à ce ticket quand core_actif=true — mais
@@ -1668,6 +1693,10 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
       magasinTexte:  storeNameEdit.trim() || result?.store || null,
       dateTicket:    result?.date || null,
     });
+    // Chantier 93 — pose de l'empreinte sur le ticket créé (fire & forget,
+    // filets internes) ; une course entre deux scans simultanés (23505) est
+    // signalée comme doublon via onDoublonTardif, jamais un plantage.
+    poserEmpreinteApresImport(ecritureCorePromise, empreinte, { onDoublonTardif: onDoublonTardif ?? undefined });
     onImport(toImport, ecritureCorePromise);
     // Chantier 79 — écriture en base lancée : le brouillon n'a plus lieu
     // d'être. On l'efface AVANT onClose (jamais sur un simple ✕/onClose).
@@ -1715,6 +1744,30 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", zIndex:200, animation:"fadeIn 0.2s ease" }} onClick={(status==="idle"||status==="camera")?onClose:undefined}>
       {/* LOT 1 (shadow estFrancois) — zone grise anti-doublon : un magasin proche
           existe déjà, mais sans certitude. L'utilisateur tranche. */}
+      {/* Chantier 93 Lot 7 — doublon détecté AVANT import : rien n'a été
+          écrit (ni Core, ni legacy, ni archive, ni session). Fermer garde le
+          brouillon de scan intact (seul confirm() l'efface). */}
+      {doublonTicket && (
+        <div onClick={e=>e.stopPropagation()} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:400, padding:20 }}>
+          <div style={{ background:C.white, borderRadius:18, padding:"22px 20px", maxWidth:360, width:"100%", boxShadow:"0 20px 60px rgba(0,0,0,0.25)" }}>
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.text, marginBottom:8 }}>🧾 Ce ticket a déjà été scanné</div>
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight, marginBottom:16 }}>
+              Un ticket identique (même magasin, même total, mêmes produits{doublonTicket.date_ticket ? `, daté du ${new Date(doublonTicket.date_ticket).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}` : ""}) est déjà enregistré. Rien n'a été réimporté — aucun prix ni ticket en double.
+            </div>
+            {onVoirTicketExistant && (
+              <button onClick={()=>{ setDoublonTicket(null); onClose(); onVoirTicketExistant(); }}
+                style={{ width:"100%", padding:"13px", border:"none", borderRadius:10, background:"#4A90D9", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer", marginBottom:8 }}>
+                📂 Voir le ticket existant (Historique)
+              </button>
+            )}
+            <button onClick={()=>{ setDoublonTicket(null); onClose(); }}
+              style={{ width:"100%", padding:"12px", border:"1.5px solid #eee", borderRadius:10, background:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:"#333", cursor:"pointer" }}>
+              Fermer
+            </button>
+          </div>
+        </div>
+      )}
+
       {magasinAmbigu && (
         <div onClick={e=>e.stopPropagation()} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:400, padding:20 }}>
           <div style={{ background:C.white, borderRadius:18, padding:"22px 20px", maxWidth:360, width:"100%", boxShadow:"0 20px 60px rgba(0,0,0,0.25)" }}>
@@ -4620,7 +4673,7 @@ function EconomiesTab({ priceDB, archives, items, setTab }) {
 }
 
 // ── PRICES TAB ────────────────────────────────────────────────────────────────
-function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValidated, onCreateArchive, userId, produitsRef = [], autoOpenCamera = false, onAutoOpenConsumed, autoResumeScan = false, onAutoResumeConsumed, initialScanResult = null, onInitialScanConsumed, hideActions = false, coreActifGlobal = false, estFrancois = false, magasinSession = null, onImportSession, onScanSessionFerme }) {
+function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValidated, onCreateArchive, userId, produitsRef = [], autoOpenCamera = false, onAutoOpenConsumed, autoResumeScan = false, onAutoResumeConsumed, initialScanResult = null, onInitialScanConsumed, hideActions = false, coreActifGlobal = false, estFrancois = false, magasinSession = null, onImportSession, onScanSessionFerme, onVoirTicketExistant = null }) {
   const [showImport,    setShowImport]    = useState(false);
   const [capturedResult] = useState(initialScanResult);
   // Chantier 79 — brouillon de scan reprenable. scanDraft : détecté au montage
@@ -5016,7 +5069,7 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
         </div>
       )}
 
-      {showImport    && <ImportTicketSheet onClose={()=>{setShowImport(false);setResumeDraft(null);setScanDraft(lireScanDraft());onAutoOpenConsumed?.();onInitialScanConsumed?.();onScanSessionFerme?.();}} onImport={importPrices} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))} directCamera={autoOpenCamera} onManualEntry={()=>{ setShowImport(false); setShowEntry(true); }} initialResult={capturedResult} resumeDraft={resumeDraft} estFrancois={estFrancois} magasinSession={magasinSession}/>}
+      {showImport    && <ImportTicketSheet onClose={()=>{setShowImport(false);setResumeDraft(null);setScanDraft(lireScanDraft());onAutoOpenConsumed?.();onInitialScanConsumed?.();onScanSessionFerme?.();}} onImport={importPrices} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))} directCamera={autoOpenCamera} onManualEntry={()=>{ setShowImport(false); setShowEntry(true); }} initialResult={capturedResult} resumeDraft={resumeDraft} estFrancois={estFrancois} magasinSession={magasinSession} onVoirTicketExistant={onVoirTicketExistant} onDoublonTardif={()=>showToast("🧾 Ce ticket a déjà été scanné (doublon détecté)", false)}/>}
       {showEntry     && <PriceEntrySheet  onClose={()=>{setShowEntry(false);setEditPrice(null);}} onSave={savePrice} existingPrice={editPrice}/>}
       {toast && <Toast msg={toast.msg} ok={toast.ok}/>}
     </div>
@@ -10502,7 +10555,7 @@ export default function App() {
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix} sessionCoursesAccessible={sessionCoursesAccessible}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
-          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} estFrancois={estFrancois} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} magasinSession={scanCaisse?.magasin ?? null} onImportSession={rattacherTicketScanSession} onScanSessionFerme={()=>definirScanCaisse(null)} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
+          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} estFrancois={estFrancois} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} magasinSession={scanCaisse?.magasin ?? null} onImportSession={rattacherTicketScanSession} onScanSessionFerme={()=>definirScanCaisse(null)} onVoirTicketExistant={()=>setTab("archive")} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;
             const {data,error}=await supabase.from('archives').insert({...rest,user_id:session?.user?.id}).select('id').single();
             if(error){ console.error("Erreur création archive ticket :",error); showAppToast("⚠️ Archive non sauvegardée, vérifie ta connexion",false); }
