@@ -9,6 +9,8 @@ import { nomComposeVariante, formatEtiquetteVariante } from "./lib/nomProduit";
 import { transcrireAudioListe, normaliserNomElement, comptesParNom, fusionnerParNom } from "./lib/microVocal";
 // Chantier « Courses » Lot 1 — session de courses figée (shadow estFrancois).
 import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession, ajouterNoteSession, supprimerNoteSession, cloreSession, idsCaddieASupprimer, articlesNonAchetesASupprimer, construireBilanCourses, doitRattacherTicketSession, chargerMarquesVariantes, calculerTotalPanier } from "./lib/sessionCoursesCore";
+// Chantier 91 Lot 5 — rapprochement liste / cochés / ticket.
+import { rapprocherSessionTicket, appliquerRapprochementSession, deciderAchatArticle, construireNormaliseur, textesARapprocher } from "./lib/rapprochementCoursesCore";
 import { capturerEvenement } from "./lib/posthog";
 import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
 import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
@@ -8831,6 +8833,13 @@ export default function App() {
   const [scanCaisse, setScanCaisse] = useState(null);
   const scanCaisseRef = useRef(null);
   const definirScanCaisse = (v) => { scanCaisseRef.current = v; setScanCaisse(v); };
+  // Chantier 91 Lot 5 — résultat du rapprochement ticket <-> session :
+  // null (rien), { sansLignes: true } (ticket sans ligne exploitable — message
+  // seulement, RIEN n'est classé) ou { compteurs, totalReel } (récap).
+  // verifCourses : file des cles d'articles 'a_verifier' à trancher un par un
+  // dans le mini-dialogue, une fois le récap fermé.
+  const [rapprochementCourses, setRapprochementCourses] = useState(null);
+  const [verifCourses, setVerifCourses] = useState([]);
   // Chantier 88 Lot 2 — lignes liste_courses de statut 'reporte', tenues à
   // l'écart de `items` (liste active, comparateur, session) : elles ne
   // comptent jamais comme achetées et ne polluent pas la liste active.
@@ -9651,6 +9660,9 @@ export default function App() {
   // pour un comparatif validé sans scan de ticket (comportement historique).
   const abandonnerSessionCourses = () => {
     const utilisateurId = session?.user?.id;
+    // Chantier 91 — même purge des dialogues de rapprochement qu'à la clôture.
+    setRapprochementCourses(null);
+    setVerifCourses([]);
     effacerSessionCourses();
     setSessionCourses(null);
     // Lot 4 — bascule aussi la ligne base en 'abandonnee' (best effort). Si
@@ -9736,10 +9748,84 @@ export default function App() {
           try { ecrireSessionCourses(suivante); } catch { /* best effort */ }
           return suivante;
         });
+        // Chantier 91 Lot 5 — rapprochement automatique après rattachement.
+        // Best effort avec ses propres filets : un échec ne casse ni la
+        // session ni le flux de scan qui vient de se terminer.
+        await lancerRapprochementSession(cible.sessionId, ticketId);
       } catch (e) {
         console.error("Rattachement ticket → session de courses (best effort) :", e);
       }
     })();
+  };
+
+  // Chantier 91 Lot 5 — rapprochement liste / cochés / ticket, lancé après le
+  // rattachement (chantier 90). Lit la session depuis le localStorage (source
+  // de vérité écrite synchroniquement, jamais une fermeture React périmée) et
+  // ne travaille QUE sur la session active visée. Charge les lignes du ticket
+  // (RLS propriétaire) + montant_total ; échec de chargement => rapprochement
+  // SAUTÉ proprement, aucun classement. Ticket sans ligne exploitable =>
+  // message seulement (garde-fou : jamais « tout non acheté » sur un ticket
+  // illisible). Résultat écrit uniquement dans le document de session
+  // (localStorage + upsert débouncé de donnees) — AUCUNE écriture dans
+  // prix / lignes_ticket / produits / variantes.
+  const lancerRapprochementSession = async (sessionId, ticketId) => {
+    try {
+      const locale = lireSessionCourses();
+      if (!locale || locale.id !== sessionId || locale.statut !== 'active'
+        || locale.utilisateur_id !== session?.user?.id) return;
+
+      const [lignesRes, ticketRes] = await Promise.all([
+        supabase.from('lignes_ticket')
+          .select('produit_id, variante_produit_id, libelle_brut, libelle_ticket, quantite, prix_unitaire, statut_validation_produit')
+          .eq('ticket_id', ticketId),
+        supabase.from('tickets').select('montant_total').eq('id', ticketId).maybeSingle(),
+      ]);
+      if (lignesRes.error) throw lignesRes.error;
+      const lignes = lignesRes.data || [];
+      const brutTotal = ticketRes?.data?.montant_total;
+      const totalReel = brutTotal != null && Number.isFinite(Number(brutTotal)) ? Number(brutTotal) : null;
+
+      if (lignes.length === 0) {
+        setRapprochementCourses({ sansLignes: true });
+        return;
+      }
+
+      // Normalisation via la RPC normaliser_libelle (repli local intégré),
+      // puis cœur PUR ; application par cle sur l'état React courant pour ne
+      // jamais écraser un cochage intervenu entre-temps.
+      const normaliser = await construireNormaliseur(textesARapprocher(locale.articles, lignes));
+      const resultat = rapprocherSessionTicket(locale.articles, lignes, { normaliser });
+      const maintenant = new Date().toISOString();
+      setSessionCourses(prev => {
+        const base = (prev && prev.id === sessionId) ? prev : null;
+        if (!base) return prev;
+        const suivante = appliquerRapprochementSession(base, resultat, totalReel, maintenant);
+        try { ecrireSessionCourses(suivante); } catch { /* best effort */ }
+        return suivante;
+      });
+      setVerifCourses(resultat.articles.filter(a => a?.type === 'caddie' && a.achat === 'a_verifier').map(a => a.cle));
+      setRapprochementCourses({ compteurs: resultat.compteurs, totalReel });
+    } catch (e) {
+      console.error("Rapprochement ticket <-> session (sauté, best effort) :", e);
+    }
+  };
+
+  // Chantier 91 Lot 5 — décision utilisateur sur un article 'a_verifier' :
+  // 'confirme' / 'non_achete', ou null pour « article mal reconnu » (l'achat
+  // reste 'a_verifier' — honnête et réversible — et on renvoie vers l'outil
+  // de réconciliation existant, l'Historique). Retire toujours l'article de
+  // la file du mini-dialogue.
+  const trancherVerifCourses = (cle, achat, { versHistorique = false } = {}) => {
+    if (achat) {
+      setSessionCourses(prev => {
+        if (!prev) return prev;
+        const suivante = deciderAchatArticle(prev, cle, achat, new Date().toISOString());
+        if (suivante !== prev) { try { ecrireSessionCourses(suivante); } catch { /* best effort */ } }
+        return suivante;
+      });
+    }
+    setVerifCourses(prev => prev.filter(c => c !== cle));
+    if (versHistorique) setTab("archive");
   };
 
   // Chantier 88 Lot 2 — aiguillage après le choix du sort du caddie : si le
@@ -9787,11 +9873,17 @@ export default function App() {
     // Garde-fou : on ne reporte que des lignes que le vidage allait supprimer.
     const aReporter = reporteIds.filter(id => idsSupprimables.includes(id));
     const ids = idsSupprimables.filter(id => !aReporter.includes(id));
-    const bilan = construireBilanCourses(sessionAClore.articles, { nbReportes: aReporter.length, figeLeISO: maintenantISO });
+    // Chantier 91 Lot 5 — total réel du ticket rattaché (posé par le
+    // rapprochement sur la session), null si aucun ticket n'a été scanné.
+    const bilan = construireBilanCourses(sessionAClore.articles, { nbReportes: aReporter.length, figeLeISO: maintenantISO, totalReel: sessionAClore.ticket_total_reel ?? null });
     // Bilan figé DANS le doc terminé (jsonb donnees / localStorage) — champ
-    // additif, aucune migration ; total_reel reste null (lot ultérieur).
+    // additif, aucune migration.
     const terminee = { ...cloreSession(sessionAClore, maintenantISO), bilan };
     setClotureCourses(null);
+    // Chantier 91 — dialogues de rapprochement purgés : la session se ferme,
+    // les décisions restantes vivent déjà dans donnees (réversibles).
+    setRapprochementCourses(null);
+    setVerifCourses([]);
     effacerSessionCourses();
     setSessionCourses(null);
     setTab("home");
@@ -10519,6 +10611,100 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {/* Chantier 91 Lot 5 — garde-fou ticket illisible : message seulement,
+            RIEN n'est classé (jamais « tout non acheté » sur un OCR raté). */}
+        {rapprochementCourses?.sansLignes && (
+          <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:9999, padding:24 }} onClick={()=>setRapprochementCourses(null)}>
+            <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:16, padding:"20px", maxWidth:340, width:"100%" }}>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:"#1a1a1a", marginBottom:6 }}>🧾 Ticket rattaché, mais illisible</div>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:"#888", marginBottom:16 }}>
+                Aucune ligne exploitable n'a été trouvée sur ce ticket. Tes courses restent exactement comme tu les as cochées — rien n'a été classé automatiquement.
+              </div>
+              <button onClick={()=>setRapprochementCourses(null)}
+                style={{ width:"100%", padding:"13px", border:"none", borderRadius:10, background:"#4A90D9", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer" }}>
+                Compris, je garde mes cochages
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Chantier 91 Lot 5 — récap du rapprochement ticket <-> courses.
+            Informative et non bloquante ; la file « à vérifier » s'ouvre
+            après fermeture. Lignes non reconnues : compteur + accès aux
+            outils de réconciliation existants (Historique), aucun nouvel
+            écran. */}
+        {rapprochementCourses?.compteurs && (() => {
+          const c = rapprochementCourses.compteurs;
+          const F4 = "'Nunito',sans-serif";
+          const LigneRecap = ({ emoji, texte, fond, bord }) => (
+            <div style={{ fontFamily:F4, fontWeight:800, fontSize:14, color:"#333", background:fond, border:`1px solid ${bord}`, borderRadius:10, padding:"9px 12px" }}>
+              {emoji} {texte}
+            </div>
+          );
+          return (
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:9999, padding:24 }}>
+              <div style={{ background:"#fff", borderRadius:16, padding:"20px", maxWidth:340, width:"100%", maxHeight:"80vh", overflowY:"auto" }}>
+                <div style={{ fontFamily:F4, fontWeight:900, fontSize:16, color:"#1a1a1a", marginBottom:4 }}>🧾 Ticket comparé à tes courses</div>
+                {rapprochementCourses.totalReel != null && (
+                  <div style={{ fontFamily:F4, fontSize:13, color:"#555", marginBottom:12 }}>
+                    Total du ticket : <strong>{Number(rapprochementCourses.totalReel).toFixed(2)} €</strong>
+                  </div>
+                )}
+                <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:14, marginTop:rapprochementCourses.totalReel != null ? 0 : 12 }}>
+                  <LigneRecap emoji="✅" texte={`${c.confirmes} achat${c.confirmes > 1 ? "s" : ""} confirmé${c.confirmes > 1 ? "s" : ""}`} fond="#F3FAF5" bord="#C8E6C9" />
+                  {c.non_achetes > 0 && <LigneRecap emoji="🚫" texte={`${c.non_achetes} non acheté${c.non_achetes > 1 ? "s" : ""}`} fond="#F7F7F7" bord="#eee" />}
+                  {c.a_verifier > 0 && <LigneRecap emoji="❓" texte={`${c.a_verifier} à vérifier — on regarde ensemble juste après`} fond="#FFF8E6" bord="#F0DFA8" />}
+                  {c.hors_liste > 0 && <LigneRecap emoji="➕" texte={`${c.hors_liste} achat${c.hors_liste > 1 ? "s" : ""} imprévu${c.hors_liste > 1 ? "s" : ""} (hors liste)`} fond="#EFF5FC" bord="#CFE0F2" />}
+                  {c.non_reconnues > 0 && <LigneRecap emoji="❔" texte={`${c.non_reconnues} ligne${c.non_reconnues > 1 ? "s" : ""} du ticket non reconnue${c.non_reconnues > 1 ? "s" : ""}`} fond="#F7F7F7" bord="#eee" />}
+                </div>
+                {c.non_reconnues > 0 && (
+                  <button onClick={()=>{ setRapprochementCourses(null); setTab("archive"); }}
+                    style={{ width:"100%", padding:"12px", border:"1.5px solid #eee", borderRadius:10, background:"#fff", fontFamily:F4, fontWeight:800, fontSize:13, color:"#333", cursor:"pointer", marginBottom:8 }}>
+                    🔧 Réconcilier les lignes non reconnues (Historique)
+                  </button>
+                )}
+                <button onClick={()=>setRapprochementCourses(null)}
+                  style={{ width:"100%", padding:"13px", border:"none", borderRadius:10, background:C.green, fontFamily:F4, fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer" }}>
+                  {c.a_verifier > 0 ? "Continuer" : "Fermer"}
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Chantier 91 Lot 5 — mini-dialogue par article 'a_verifier', un par
+            un après le récap. Toutes les issues sont réversibles ; « mal
+            reconnu » laisse l'achat en 'a_verifier' et renvoie vers l'outil
+            de réconciliation existant (Historique). */}
+        {!rapprochementCourses && verifCourses.length > 0 && sessionCourses && (() => {
+          const cle = verifCourses[0];
+          const art = sessionCourses?.articles?.find(a => a.cle === cle);
+          const nom = art?.nom_affiche ?? art?.nom_reference ?? "cet article";
+          const F5 = "'Nunito',sans-serif";
+          return (
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:9999, padding:24 }}>
+              <div style={{ background:"#fff", borderRadius:16, padding:"20px", maxWidth:340, width:"100%" }}>
+                <div style={{ fontFamily:F5, fontWeight:900, fontSize:15, color:"#1a1a1a", marginBottom:6 }}>❓ {nom}</div>
+                <div style={{ fontFamily:F5, fontSize:13, color:"#888", marginBottom:16 }}>
+                  Le {nom} a été coché, mais PrixMalin ne le trouve pas sur le ticket.
+                </div>
+                <button onClick={()=>trancherVerifCourses(cle, 'confirme')}
+                  style={{ width:"100%", padding:"13px", border:"none", borderRadius:10, background:C.green, fontFamily:F5, fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer", marginBottom:8 }}>
+                  ✅ Je l'ai acheté
+                </button>
+                <button onClick={()=>trancherVerifCourses(cle, 'non_achete')}
+                  style={{ width:"100%", padding:"13px", border:"1.5px solid rgba(204,0,0,0.3)", borderRadius:10, background:"#fff", fontFamily:F5, fontWeight:800, fontSize:14, color:"#CC0000", cursor:"pointer", marginBottom:8 }}>
+                  🚫 Je ne l'ai pas acheté
+                </button>
+                <button onClick={()=>trancherVerifCourses(cle, null, { versHistorique: true })}
+                  style={{ width:"100%", padding:"12px", border:"1.5px solid #eee", borderRadius:10, background:"#fff", fontFamily:F5, fontWeight:800, fontSize:13, color:"#333", cursor:"pointer" }}>
+                  🔧 Article mal reconnu — voir l'Historique
+                </button>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Chantier 89 Lot 3 — écran-bilan de fin de courses, dernière étape
             de la clôture (remplace l'ancien toast). Affiché par-dessus

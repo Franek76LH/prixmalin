@@ -398,8 +398,10 @@ export function idsCaddieASupprimer(session, { garderIntrouvables = false } = {}
 // caisse ; total_incomplet signale des articles achetés sans prix.
 // nb_non_achetes = articles hors caddie non gardés pour plus tard (supprimés,
 // introuvables, ou laissés dans la liste selon le sort du caddie choisi).
-// total_reel : null pour l'instant (lot ultérieur, lien ticket). Fonction pure.
-export function construireBilanCourses(articles, { nbReportes = 0, figeLeISO = null } = {}) {
+// total_reel : montant_total du ticket rattaché quand le rapprochement
+// (chantier 91) l'a posé sur la session (ticket_total_reel), null sinon.
+// Fonction pure.
+export function construireBilanCourses(articles, { nbReportes = 0, figeLeISO = null, totalReel = null } = {}) {
   const liste = articles || [];
   const { total, incomplet } = calculerTotalPanier(liste);
   const nbAchetes = liste.filter(a => a.etat === 'au_caddie').length;
@@ -410,7 +412,7 @@ export function construireBilanCourses(articles, { nbReportes = 0, figeLeISO = n
     nb_achetes: nbAchetes,
     nb_reporte: nbReportes,
     nb_non_achetes: nbNonAchetes,
-    total_reel: null,
+    total_reel: totalReel != null && Number.isFinite(Number(totalReel)) ? Number(totalReel) : null,
     fige_le: figeLeISO,
   };
 }

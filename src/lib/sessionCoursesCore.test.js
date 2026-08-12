@@ -542,6 +542,14 @@ describe('Lot 6 — clôture', () => {
     expect(bilan).toEqual({ total_estime: 0, total_incomplet: false, nb_achetes: 0, nb_reporte: 0, nb_non_achetes: 0, total_reel: null, fige_le: null });
   });
 
+  // Chantier 91 Lot 5 — total réel du ticket rattaché dans le bilan.
+  it('construireBilanCourses : totalReel posé si fourni et numérique, null sinon', () => {
+    expect(construireBilanCourses([], { totalReel: 42.5 }).total_reel).toBe(42.5);
+    expect(construireBilanCourses([], { totalReel: '19.90' }).total_reel).toBe(19.9);
+    expect(construireBilanCourses([], { totalReel: 'abc' }).total_reel).toBeNull();
+    expect(construireBilanCourses([], {}).total_reel).toBeNull();
+  });
+
   // Chantier 90 Lot 4 — rattachement ticket <-> session.
   it('doitRattacherTicketSession : ticket créé (ok / rejet_partiel) oui, rejet total ou échec technique non', () => {
     expect(doitRattacherTicketSession({ statut: 'ok', prix_ecrits: 3, rejets: [] })).toBe(true);
