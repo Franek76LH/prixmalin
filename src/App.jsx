@@ -8,7 +8,7 @@ import { urlPhotoVariante, offLargeSource, offFullUrl, cloudinaryAgrandi } from 
 import { nomComposeVariante, formatEtiquetteVariante } from "./lib/nomProduit";
 import { transcrireAudioListe, normaliserNomElement, comptesParNom, fusionnerParNom } from "./lib/microVocal";
 // Chantier « Courses » Lot 1 — session de courses figée (shadow estFrancois).
-import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession, ajouterNoteSession, supprimerNoteSession, cloreSession, idsCaddieASupprimer, articlesNonAchetesASupprimer, chargerMarquesVariantes, calculerTotalPanier } from "./lib/sessionCoursesCore";
+import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession, ajouterNoteSession, supprimerNoteSession, cloreSession, idsCaddieASupprimer, articlesNonAchetesASupprimer, construireBilanCourses, chargerMarquesVariantes, calculerTotalPanier } from "./lib/sessionCoursesCore";
 import { capturerEvenement } from "./lib/posthog";
 import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
 import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
@@ -8758,6 +8758,11 @@ export default function App() {
   // que le vidage choisi s'apprête à supprimer. Posé APRÈS le choix du sort
   // du caddie, AVANT toute clôture effective (Annuler ramène au choix).
   const [plusTardCourses, setPlusTardCourses] = useState(null);
+  // Chantier 89 Lot 3 — bilan de fin de courses : null (rien) ou le snapshot
+  // figé à la clôture ({ total_estime, nb_achetes, … }). Affiché en dernière
+  // étape à la place de l'ancien toast, par-dessus l'accueil — la session est
+  // déjà close quand il apparaît, le fermer ne détruit rien.
+  const [bilanCourses, setBilanCourses] = useState(null);
   // Chantier 88 Lot 2 — lignes liste_courses de statut 'reporte', tenues à
   // l'écart de `items` (liste active, comparateur, session) : elles ne
   // comptent jamais comme achetées et ne polluent pas la liste active.
@@ -9639,12 +9644,26 @@ export default function App() {
     const sessionAClore = sessionCoursesActive;
     setPlusTardCourses(null);
     if (!sessionAClore) { setClotureCourses(null); return; }
-    const terminee = cloreSession(sessionAClore, new Date().toISOString());
+    // Chantier 89 Lot 3 — comptes du vidage calculés AVANT la clôture (purs),
+    // pour figer le bilan dans le document de session : mêmes règles que les
+    // écritures plus bas (garde-fou compris), aucune divergence possible.
+    const maintenantISO = new Date().toISOString();
+    const idsSupprimables = actionCaddie === 'garder' ? [] : idsCaddieASupprimer(sessionAClore, { garderIntrouvables: actionCaddie === 'garder_introuvables' });
+    // Garde-fou : on ne reporte que des lignes que le vidage allait supprimer.
+    const aReporter = reporteIds.filter(id => idsSupprimables.includes(id));
+    const ids = idsSupprimables.filter(id => !aReporter.includes(id));
+    const bilan = construireBilanCourses(sessionAClore.articles, { nbReportes: aReporter.length, figeLeISO: maintenantISO });
+    // Bilan figé DANS le doc terminé (jsonb donnees / localStorage) — champ
+    // additif, aucune migration ; total_reel reste null (lot ultérieur).
+    const terminee = { ...cloreSession(sessionAClore, maintenantISO), bilan };
     setClotureCourses(null);
     effacerSessionCourses();
     setSessionCourses(null);
     setTab("home");
-    showAppToast("🎉 Courses terminées !");
+    // Chantier 89 Lot 3 — l'écran-bilan remplace l'ancien toast « 🎉 Courses
+    // terminées ! » : affiché depuis l'état local, donc visible même si toutes
+    // les écritures Supabase ci-dessous échouent.
+    setBilanCourses(bilan);
 
     try {
       // Correctif (test 2026-08-12) — un doc d'avant le Lot 4 (sans id, vieux
@@ -9669,10 +9688,6 @@ export default function App() {
     }
 
     if (actionCaddie === 'garder') return;
-    const idsSupprimables = idsCaddieASupprimer(terminee, { garderIntrouvables: actionCaddie === 'garder_introuvables' });
-    // Garde-fou : on ne reporte que des lignes que le vidage allait supprimer.
-    const aReporter = reporteIds.filter(id => idsSupprimables.includes(id));
-    const ids = idsSupprimables.filter(id => !aReporter.includes(id));
     let listeATouchee = false;
     if (ids.length > 0) {
       try {
@@ -10335,6 +10350,57 @@ export default function App() {
                 <button onClick={()=>{ setPlusTardCourses(null); setClotureCourses('choixCaddie'); }}
                   style={{ width:"100%", padding:"12px", border:"1.5px solid #eee", borderRadius:10, background:"#fff", fontFamily:F2, fontWeight:800, fontSize:14, color:"#333", cursor:"pointer" }}>
                   Annuler
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Chantier 89 Lot 3 — écran-bilan de fin de courses, dernière étape
+            de la clôture (remplace l'ancien toast). Affiché par-dessus
+            l'accueil depuis l'état local : la session est déjà close, le
+            fermer ne détruit rien et « À acheter plus tard » est conservée.
+            Total = ESTIMATION (prix du comparateur), jamais présenté comme le
+            montant payé ; articles sans prix signalés, pas de faux précis. */}
+        {bilanCourses && (() => {
+          const b = bilanCourses;
+          const F3 = "'Nunito',sans-serif";
+          const totalAffiche = b.nb_achetes === 0
+            ? null
+            : (b.total_estime > 0
+              ? `~${Number(b.total_estime).toFixed(2)} €${b.total_incomplet ? " + articles sans prix" : ""}`
+              : (b.total_incomplet ? "articles sans prix" : "0.00 €"));
+          return (
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:9999, padding:24 }} onClick={()=>setBilanCourses(null)}>
+              <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:16, padding:"24px 20px", maxWidth:340, width:"100%", textAlign:"center" }}>
+                <div style={{ fontSize:44, marginBottom:8 }}>🎉</div>
+                <div style={{ fontFamily:F3, fontWeight:900, fontSize:18, color:"#1a1a1a", marginBottom:14 }}>Courses terminées</div>
+                <div style={{ textAlign:"left", display:"flex", flexDirection:"column", gap:8, marginBottom:6 }}>
+                  <div style={{ display:"flex", alignItems:"baseline", gap:8, background:"#F3FAF5", border:"1px solid #C8E6C9", borderRadius:10, padding:"10px 12px" }}>
+                    <span style={{ fontFamily:F3, fontWeight:800, fontSize:14, color:"#1a1a1a", flex:1 }}>
+                      🛒 {b.nb_achetes} article{b.nb_achetes > 1 ? "s" : ""} acheté{b.nb_achetes > 1 ? "s" : ""}
+                    </span>
+                    {totalAffiche && <span style={{ fontFamily:F3, fontWeight:900, fontSize:14, color:C.green, whiteSpace:"nowrap" }}>{totalAffiche}</span>}
+                  </div>
+                  {b.nb_reporte > 0 && (
+                    <div style={{ fontFamily:F3, fontWeight:800, fontSize:14, color:"#6B6152", background:"#FAF7F0", border:"1px dashed #D8CFBB", borderRadius:10, padding:"10px 12px" }}>
+                      ⏳ {b.nb_reporte} gardé{b.nb_reporte > 1 ? "s" : ""} pour plus tard — dans « Ma liste »
+                    </div>
+                  )}
+                  {b.nb_non_achetes > 0 && (
+                    <div style={{ fontFamily:F3, fontWeight:800, fontSize:14, color:"#888", background:"#F7F7F7", border:"1px solid #eee", borderRadius:10, padding:"10px 12px" }}>
+                      🚫 {b.nb_non_achetes} non pris
+                    </div>
+                  )}
+                </div>
+                {b.nb_achetes > 0 && (
+                  <div style={{ fontFamily:F3, fontSize:11, color:"#999", marginBottom:14 }}>
+                    Total estimé d'après les prix du comparateur — pas le ticket de caisse.
+                  </div>
+                )}
+                <button onClick={()=>setBilanCourses(null)}
+                  style={{ width:"100%", padding:"13px", border:"none", borderRadius:10, background:C.green, fontFamily:F3, fontWeight:900, fontSize:15, color:"#fff", cursor:"pointer", marginTop: b.nb_achetes > 0 ? 0 : 12 }}>
+                  Fermer
                 </button>
               </div>
             </div>

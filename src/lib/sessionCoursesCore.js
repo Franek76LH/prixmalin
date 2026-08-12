@@ -390,6 +390,31 @@ export function idsCaddieASupprimer(session, { garderIntrouvables = false } = {}
     .map(a => a.cle);
 }
 
+// Chantier 89 Lot 3 — bilan de fin de courses, figé au moment de clore et
+// rangé dans le document de session (jsonb `donnees` / localStorage, purement
+// additif — aucune migration). total_estime = somme des prix_prevu des
+// articles au caddie (calculerTotalPanier, jamais recalculé autrement) :
+// c'est une ESTIMATION d'après les prix du comparateur, pas le ticket de
+// caisse ; total_incomplet signale des articles achetés sans prix.
+// nb_non_achetes = articles hors caddie non gardés pour plus tard (supprimés,
+// introuvables, ou laissés dans la liste selon le sort du caddie choisi).
+// total_reel : null pour l'instant (lot ultérieur, lien ticket). Fonction pure.
+export function construireBilanCourses(articles, { nbReportes = 0, figeLeISO = null } = {}) {
+  const liste = articles || [];
+  const { total, incomplet } = calculerTotalPanier(liste);
+  const nbAchetes = liste.filter(a => a.etat === 'au_caddie').length;
+  const nbNonAchetes = Math.max(0, liste.filter(a => a.etat !== 'au_caddie').length - nbReportes);
+  return {
+    total_estime: Math.round(total * 100) / 100,
+    total_incomplet: incomplet,
+    nb_achetes: nbAchetes,
+    nb_reporte: nbReportes,
+    nb_non_achetes: nbNonAchetes,
+    total_reel: null,
+    fige_le: figeLeISO,
+  };
+}
+
 // Chantier 88 Lot 2 (« À acheter plus tard ») — parmi les articles que le
 // vidage choisi s'apprête à supprimer (même périmètre qu'idsCaddieASupprimer,
 // mêmes options), ceux qui étaient PRÉVUS MAIS NON ACHETÉS : type 'caddie'

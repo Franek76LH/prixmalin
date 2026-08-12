@@ -21,6 +21,7 @@ import {
   cloreSession,
   idsCaddieASupprimer,
   articlesNonAchetesASupprimer,
+  construireBilanCourses,
   chargerMarquesVariantes,
   calculerTotalPanier,
   genererIdSession,
@@ -515,6 +516,29 @@ describe('Lot 6 — clôture', () => {
   it('articlesNonAchetesASupprimer + garderIntrouvables : les introuvables épargnés du vidage ne sont plus concernés', () => {
     expect(articlesNonAchetesASupprimer(sessionCloture(), { garderIntrouvables: true }).map(a => a.cle)).toEqual(['lc-3']);
     expect(articlesNonAchetesASupprimer(null)).toEqual([]);
+  });
+
+  // Chantier 89 Lot 3 — bilan figé à la clôture.
+  it('construireBilanCourses : comptes et total estimé depuis calculerTotalPanier', () => {
+    const articles = [
+      { cle: 'lc-1', type: 'caddie', etat: 'au_caddie', prix_prevu: 2.5, quantite: 2 },
+      { cle: 'lc-2', type: 'caddie', etat: 'introuvable' },
+      { cle: 'lc-3', type: 'caddie', etat: 'a_prendre' },
+      { cle: 'note:n1', type: 'note', etat: 'au_caddie' },
+    ];
+    const bilan = construireBilanCourses(articles, { nbReportes: 1, figeLeISO: 'T9' });
+    expect(bilan.nb_achetes).toBe(2);           // lc-1 + la note cochée
+    expect(bilan.total_estime).toBe(5);         // 2,50 × 2 ; la note sans prix ne compte pas
+    expect(bilan.total_incomplet).toBe(true);   // note cochée sans prix => estimation incomplète
+    expect(bilan.nb_reporte).toBe(1);
+    expect(bilan.nb_non_achetes).toBe(1);       // 2 hors caddie - 1 reporté
+    expect(bilan.total_reel).toBeNull();
+    expect(bilan.fige_le).toBe('T9');
+  });
+
+  it('construireBilanCourses : articles vides ou absents, jamais de plantage', () => {
+    const bilan = construireBilanCourses(null);
+    expect(bilan).toEqual({ total_estime: 0, total_incomplet: false, nb_achetes: 0, nb_reporte: 0, nb_non_achetes: 0, total_reel: null, fige_le: null });
   });
 });
 
