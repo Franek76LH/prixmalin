@@ -7922,6 +7922,11 @@ function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, on
   // « Dans le caddie » repliée par défaut — hooks déclarés AVANT le early
   // return (règle des Hooks : ordre stable entre rendus).
   const [caddieOuvert, setCaddieOuvert] = useState(false);
+  // Lot 8 (ajustement) — rayons pliables de « À prendre » : map cléRayon ->
+  // replié. Vide par défaut = tous dépliés ; état d'affichage en mémoire
+  // seulement (perdu en quittant l'écran, non persisté — voulu). Chaque rayon
+  // est indépendant. Même mécanisme de repli que « Dans le caddie ».
+  const [rayonsReplies, setRayonsReplies] = useState({});
   // Lot 5 — saisie d'une note libre (null = champ fermé).
   const [texteNote, setTexteNote] = useState(null);
   // Lot 7 — annulation immédiate du dernier cochage ({cle, nom}, effacé après 4 s).
@@ -8011,22 +8016,34 @@ function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, on
           À prendre ({aPrendreRayons.length})
         </div>
       )}
-      {groupes.map(groupe => (
-        <div key={`${groupe.rayon.categorie_ordre}-${groupe.rayon.categorie_nom}`} style={{ marginBottom:16 }}>
-          {/* Lot 8 — label de rayon discret : petites majuscules grises */}
-          <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:2 }}>
-            <span style={{ fontSize:13 }}>{emojiRayon(groupe.rayon)}</span>
-            <span style={{ fontFamily:F, fontWeight:800, fontSize:11, color:"#8E8E93", letterSpacing:"0.07em", textTransform:"uppercase" }}>{groupe.rayon.categorie_nom} ({groupe.articles.length})</span>
+      {groupes.map(groupe => {
+        const cleRayon = `${groupe.rayon.categorie_ordre}-${groupe.rayon.categorie_nom}`;
+        const replie = !!rayonsReplies[cleRayon];
+        return (
+          <div key={cleRayon} style={{ marginBottom:16 }}>
+            {/* Lot 8 (ajustement) — en-tête de rayon cliquable, même flèche et
+                même mécanisme de repli que « Dans le caddie ». Le compteur
+                reste visible replié ; la progression et le montant du panier
+                ne dépendent pas de l'affichage (calculés sur les articles). */}
+            <button onClick={()=>setRayonsReplies(prev => ({ ...prev, [cleRayon]: !prev[cleRayon] }))}
+              aria-expanded={!replie}
+              style={{ width:"100%", display:"flex", alignItems:"center", gap:6, background:"none", border:"none", padding:"6px 2px", marginBottom:2, cursor:"pointer", textAlign:"left" }}>
+              <span style={{ fontSize:13 }}>{emojiRayon(groupe.rayon)}</span>
+              <span style={{ fontFamily:F, fontWeight:800, fontSize:11, color:"#8E8E93", letterSpacing:"0.07em", textTransform:"uppercase" }}>{groupe.rayon.categorie_nom} ({groupe.articles.length})</span>
+              <span style={{ marginLeft:"auto", fontFamily:F, fontWeight:900, fontSize:13, color:"#AEAEB2" }}>{replie ? "▸" : "▾"}</span>
+            </button>
+            {!replie && (
+              <div style={{ display:"flex", flexDirection:"column" }}>
+                {groupe.articles.map(article => (
+                  <LigneArticleCourses key={article.cle} article={article} variante="a_prendre"
+                    onCocher={()=>{ onChangerEtat?.(article.cle, 'au_caddie'); setDerniereCoche({ cle: article.cle, nom: article.nom_affiche }); }}
+                    onIntrouvable={()=>onChangerEtat?.(article.cle, 'introuvable')} />
+                ))}
+              </div>
+            )}
           </div>
-          <div style={{ display:"flex", flexDirection:"column" }}>
-            {groupe.articles.map(article => (
-              <LigneArticleCourses key={article.cle} article={article} variante="a_prendre"
-                onCocher={()=>{ onChangerEtat?.(article.cle, 'au_caddie'); setDerniereCoche({ cle: article.cle, nom: article.nom_affiche }); }}
-                onIntrouvable={()=>onChangerEtat?.(article.cle, 'introuvable')} />
-            ))}
-          </div>
-        </div>
-      ))}
+        );
+      })}
 
       {/* Tout est pris — état célébratoire, version épurée (Lot 8) */}
       {toutPris && (
