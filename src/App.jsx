@@ -16,6 +16,9 @@ import { rapprocherSessionTicket, appliquerRapprochementSession, deciderAchatArt
 import { chargerFavoris, ajouterFavori, retirerFavori, chercherFavori, chargerRecurrents, proposerFavorisApresTicket } from "./lib/favorisCore";
 // Chantier 93 Lot 7 — anti-doublon de ticket (empreinte déterministe).
 import { calculerEmpreinteTicket, chercherTicketParEmpreinte, poserEmpreinteApresImport } from "./lib/empreinteTicket";
+// Chantier 94 Lot 10 — Points Malin / niveaux / badges (affichage seul, le
+// serveur attribue tout — Lots 8-9).
+import { agregerPoints, calculerNiveau, progressionBadge, detecterNouveauxBadges, statistiquesContributions, chargerProfilGamification, chargerBadgesUtilisateur, sommerPointsDernierTicket } from "./lib/gamificationCore";
 import { capturerEvenement } from "./lib/posthog";
 import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
 import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
@@ -777,20 +780,18 @@ function StatsSheet({ userId, archives, onClose }) {
           <button onClick={onClose} style={{ background:"rgba(255,255,255,0.2)", borderRadius:99, width:36, height:36, border:"none", fontSize:16, color:"#fff", cursor:"pointer" }}>✕</button>
         </div>
         <div style={{ overflowY:"auto", flex:1, padding:"20px 20px 40px" }}>
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10 }}>
+          {/* Chantier 94 — le « Rang #1 » codé en dur est retiré : uniquement
+              des chiffres réels et traçables. */}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:10 }}>
             {[
               { label:"Prix partagés", value: sharedCount === null ? "…" : String(sharedCount) },
               { label:"Tickets",       value: String(archives.length) },
-              { label:"Rang",          value: "#1" },
             ].map(s => (
               <div key={s.label} style={{ background:C.bg, borderRadius:14, padding:"14px 8px", textAlign:"center" }}>
                 <div style={{ fontFamily:F, fontWeight:900, fontSize:22, color:C.text }}>{s.value}</div>
                 <div style={{ fontFamily:F, fontSize:11, color:C.textLight, fontWeight:600, marginTop:3 }}>{s.label}</div>
               </div>
             ))}
-          </div>
-          <div style={{ fontFamily:F, fontSize:12, color:C.textLight, textAlign:"center", marginTop:16, lineHeight:1.6, padding:"0 8px" }}>
-            Le rang reflète ta contribution dans ton cercle. Plus tu partages de prix, plus tu grimpes !
           </div>
         </div>
       </div>
@@ -873,6 +874,166 @@ function FavorisSheet({ userId, onClose }) {
                 </div>
               ))}
             </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Chantier 94 Lot 10 — « Mon profil » : Points Malin, niveau, badges et
+// statistiques RÉELLES. Affichage pur : le serveur attribue points et badges
+// (Lots 8-9), le client ne fait que des SELECT. Chaque lecture a son filet :
+// section dégradée (« bientôt disponible » / 0), jamais d'erreur bloquante.
+// Stats privées — aucun classement public, aucun autre utilisateur exposé.
+function ProfilSheet({ userId, pseudo, onClose, onBadgesVus }) {
+  const F = "'Nunito',sans-serif";
+  const [donnees, setDonnees] = useState(null); // null = chargement
+
+  useEffect(() => {
+    let annule = false;
+    (async () => {
+      const d = await chargerProfilGamification(userId);
+      if (annule) return;
+      setDonnees(d);
+      // Tous les badges affichés sont considérés « vus » (plus de célébration
+      // pour eux au prochain chargement).
+      if (d.badges) { try { onBadgesVus?.(d.badges.map(b => b.code_badge)); } catch { /* jamais bloquant */ } }
+    })();
+    return () => { annule = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
+
+  const mouvements = donnees?.mouvements ?? null;
+  const points = agregerPoints(mouvements || []);
+  const niveau = calculerNiveau(points.total_valide);
+  const stats = statistiquesContributions(mouvements || []);
+  const badgesObtenus = donnees?.badges ?? null;
+  const catalogue = donnees?.catalogue ?? null;
+  const codesObtenus = new Set((badgesObtenus || []).map(b => b.code_badge));
+  const catalogueParCode = new Map((catalogue || []).map(c => [c.code, c]));
+  const aObtenir = (catalogue || []).filter(c => !codesObtenus.has(c.code));
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", zIndex:300, animation:"fadeIn 0.2s ease" }} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{ background:C.white, borderRadius:"24px 24px 0 0", width:"100%", maxWidth:430, margin:"0 auto", maxHeight:"90vh", display:"flex", flexDirection:"column", animation:"slideUp 0.3s ease" }}>
+        <div style={{ background:C.red, padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0, borderRadius:"24px 24px 0 0" }}>
+          <div>
+            <div style={{ fontFamily:F, fontSize:11, fontWeight:700, color:"rgba(255,255,255,0.6)" }}>PrixMalin</div>
+            <div style={{ fontFamily:F, fontSize:20, fontWeight:900, color:"#fff" }}>Mon profil</div>
+          </div>
+          <button onClick={onClose} style={{ background:"rgba(255,255,255,0.2)", borderRadius:99, width:36, height:36, border:"none", fontSize:16, color:"#fff", cursor:"pointer" }}>✕</button>
+        </div>
+        <div style={{ overflowY:"auto", flex:1, padding:"16px 16px 40px" }}>
+          {donnees === null && (
+            <div style={{ fontFamily:F, fontSize:13, color:C.textLight, textAlign:"center", padding:"24px 0" }}>⏳ Chargement…</div>
+          )}
+          {donnees !== null && (
+            <>
+              {/* En-tête : pseudo, niveau, points validés / en attente, progression */}
+              <div style={{ background:"linear-gradient(135deg,#CC0000,#FF1A1A)", borderRadius:16, padding:"16px", marginBottom:14, color:"#fff" }}>
+                <div style={{ fontFamily:F, fontWeight:900, fontSize:17 }}>{pseudo || "Moi"}</div>
+                <div style={{ fontFamily:F, fontWeight:800, fontSize:13, opacity:0.9, marginBottom:10 }}>🏅 {niveau.niveau_actuel}</div>
+                {mouvements === null ? (
+                  <div style={{ fontFamily:F, fontSize:13, opacity:0.85 }}>Points Malin bientôt disponibles — réessaie plus tard.</div>
+                ) : (
+                  <>
+                    <div style={{ display:"flex", alignItems:"baseline", gap:8 }}>
+                      <span style={{ fontFamily:F, fontWeight:900, fontSize:30 }}>{points.total_valide}</span>
+                      <span style={{ fontFamily:F, fontWeight:800, fontSize:13, opacity:0.85 }}>Points Malin</span>
+                      {points.total_en_attente > 0 && (
+                        <span style={{ fontFamily:F, fontWeight:800, fontSize:12, background:"rgba(255,255,255,0.2)", borderRadius:99, padding:"3px 9px", marginLeft:"auto" }}>
+                          + {points.total_en_attente} en attente
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ marginTop:10, height:8, borderRadius:99, background:"rgba(255,255,255,0.25)", overflow:"hidden" }}>
+                      <div style={{ width:`${niveau.progression_pct}%`, height:"100%", borderRadius:99, background:"#FFD700" }} />
+                    </div>
+                    <div style={{ fontFamily:F, fontSize:12, fontWeight:700, marginTop:6, opacity:0.9 }}>
+                      {niveau.niveau_suivant
+                        ? `Plus que ${niveau.points_restants} point${niveau.points_restants > 1 ? "s" : ""} pour devenir ${niveau.niveau_suivant}`
+                        : "Niveau maximum atteint — chapeau !"}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Badges obtenus */}
+              <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:C.gray, letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:8 }}>Badges obtenus</div>
+              {badgesObtenus === null && (
+                <div style={{ fontFamily:F, fontSize:13, color:C.textLight, marginBottom:14 }}>Bientôt disponibles.</div>
+              )}
+              {badgesObtenus !== null && badgesObtenus.length === 0 && (
+                <div style={{ fontFamily:F, fontSize:13, color:C.textLight, marginBottom:14 }}>Aucun badge pour l'instant — tes contributions validées les débloqueront.</div>
+              )}
+              {badgesObtenus !== null && badgesObtenus.length > 0 && (
+                <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:14 }}>
+                  {badgesObtenus.map(b => {
+                    const fiche = catalogueParCode.get(b.code_badge);
+                    return (
+                      <div key={b.code_badge} style={{ display:"flex", alignItems:"center", gap:12, background:"#FFF8E6", border:"1.5px solid #F0DFA8", borderRadius:12, padding:"10px 12px" }}>
+                        <span style={{ fontSize:26, flexShrink:0 }}>{fiche?.icone || "🏅"}</span>
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <div style={{ fontFamily:F, fontWeight:900, fontSize:14, color:C.text }}>{fiche?.nom || b.code_badge}</div>
+                          {fiche?.description && <div style={{ fontFamily:F, fontSize:12, color:C.textLight }}>{fiche.description}</div>}
+                          {b.obtenu_le && (
+                            <div style={{ fontFamily:F, fontSize:11, color:C.gray, marginTop:2 }}>
+                              Obtenu le {new Date(b.obtenu_le).toLocaleDateString("fr-FR", { day:"numeric", month:"long", year:"numeric" })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Badges à débloquer (grisés, avec progression réelle) */}
+              {aObtenir.length > 0 && (
+                <>
+                  <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:C.gray, letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:8 }}>À débloquer</div>
+                  <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:14 }}>
+                    {aObtenir.map(c => {
+                      const prog = progressionBadge(c.condition_type, c.seuil, mouvements || []);
+                      return (
+                        <div key={c.code} style={{ display:"flex", alignItems:"center", gap:12, background:"#F7F7F7", border:"1px solid #eee", borderRadius:12, padding:"10px 12px", opacity:0.75 }}>
+                          <span style={{ fontSize:26, flexShrink:0, filter:"grayscale(1)" }}>{c.icone || "🏅"}</span>
+                          <div style={{ flex:1, minWidth:0 }}>
+                            <div style={{ fontFamily:F, fontWeight:900, fontSize:14, color:"#666" }}>{c.nom}</div>
+                            {c.description && <div style={{ fontFamily:F, fontSize:12, color:C.gray }}>{c.description}</div>}
+                          </div>
+                          {mouvements !== null && prog.courant != null && (
+                            <span style={{ fontFamily:F, fontWeight:900, fontSize:12, color:C.gray, whiteSpace:"nowrap" }}>
+                              {Math.min(prog.courant, prog.seuil)}/{prog.seuil}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
+              {/* Statistiques réelles uniquement (privées) */}
+              <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:C.gray, letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:8 }}>Mes contributions</div>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:10 }}>
+                {[
+                  mouvements !== null && { label:"Prix ajoutés",       value: String(stats.prix_ajoutes) },
+                  mouvements !== null && { label:"Prix actualisés",    value: String(stats.prix_actualises) },
+                  donnees.nbTickets !== null && { label:"Tickets analysés", value: String(donnees.nbTickets) },
+                  mouvements !== null && { label:"Magasins contribués", value: String(stats.magasins_contribues) },
+                ].filter(Boolean).map(s => (
+                  <div key={s.label} style={{ background:C.bg, borderRadius:14, padding:"14px 8px", textAlign:"center" }}>
+                    <div style={{ fontFamily:F, fontWeight:900, fontSize:22, color:C.text }}>{s.value}</div>
+                    <div style={{ fontFamily:F, fontSize:11, color:C.textLight, fontWeight:600, marginTop:3 }}>{s.label}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontFamily:F, fontSize:11, color:C.gray, textAlign:"center", marginTop:14 }}>
+                Tes statistiques sont privées — personne d'autre ne les voit.
+              </div>
+            </>
           )}
         </div>
       </div>
@@ -1349,7 +1510,7 @@ function etapeLisibleScan(status) {
 }
 
 // ── IMPORT TICKET SHEET ───────────────────────────────────────────────────────
-function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera = false, autoOpenGallery = false, onManualEntry, initialResult = null, resumeDraft = null, estFrancois = false, magasinSession = null, onVoirTicketExistant = null, onDoublonTardif = null }) {
+function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera = false, autoOpenGallery = false, onManualEntry, initialResult = null, resumeDraft = null, estFrancois = false, magasinSession = null, onVoirTicketExistant = null, onDoublonTardif = null, onPointsCredites = null }) {
   const [jsonText, setJsonText] = useState("");
   const [status,   setStatus]   = useState(directCamera ? "camera" : "idle");
   const [error,    setError]    = useState("");
@@ -1697,6 +1858,17 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     // filets internes) ; une course entre deux scans simultanés (23505) est
     // signalée comme doublon via onDoublonTardif, jamais un plantage.
     poserEmpreinteApresImport(ecritureCorePromise, empreinte, { onDoublonTardif: onDoublonTardif ?? undefined });
+    // Chantier 94 Lot 10 — notification légère de Points Malin après import
+    // (uniquement quand la gamification est visible : onPointsCredites câblé).
+    // Fire & forget avec filets : jamais bloquant pour le flux d'import.
+    if (onPointsCredites) {
+      sommerPointsDernierTicket(ecritureCorePromise).then(r => {
+        if (!r?.credite || r.total === 0) return; // pas de ticket ou rien à annoncer
+        onPointsCredites(r.total != null
+          ? `✨ +${r.total} Points Malin (en attente de validation)`
+          : "✨ Contributions enregistrées — points en attente de validation");
+      }).catch(() => { /* jamais bloquant */ });
+    }
     onImport(toImport, ecritureCorePromise);
     // Chantier 79 — écriture en base lancée : le brouillon n'a plus lieu
     // d'être. On l'efface AVANT onClose (jamais sur un simple ✕/onClose).
@@ -4673,7 +4845,7 @@ function EconomiesTab({ priceDB, archives, items, setTab }) {
 }
 
 // ── PRICES TAB ────────────────────────────────────────────────────────────────
-function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValidated, onCreateArchive, userId, produitsRef = [], autoOpenCamera = false, onAutoOpenConsumed, autoResumeScan = false, onAutoResumeConsumed, initialScanResult = null, onInitialScanConsumed, hideActions = false, coreActifGlobal = false, estFrancois = false, magasinSession = null, onImportSession, onScanSessionFerme, onVoirTicketExistant = null }) {
+function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValidated, onCreateArchive, userId, produitsRef = [], autoOpenCamera = false, onAutoOpenConsumed, autoResumeScan = false, onAutoResumeConsumed, initialScanResult = null, onInitialScanConsumed, hideActions = false, coreActifGlobal = false, estFrancois = false, magasinSession = null, onImportSession, onScanSessionFerme, onVoirTicketExistant = null, notifierPoints = false }) {
   const [showImport,    setShowImport]    = useState(false);
   const [capturedResult] = useState(initialScanResult);
   // Chantier 79 — brouillon de scan reprenable. scanDraft : détecté au montage
@@ -5069,7 +5241,7 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
         </div>
       )}
 
-      {showImport    && <ImportTicketSheet onClose={()=>{setShowImport(false);setResumeDraft(null);setScanDraft(lireScanDraft());onAutoOpenConsumed?.();onInitialScanConsumed?.();onScanSessionFerme?.();}} onImport={importPrices} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))} directCamera={autoOpenCamera} onManualEntry={()=>{ setShowImport(false); setShowEntry(true); }} initialResult={capturedResult} resumeDraft={resumeDraft} estFrancois={estFrancois} magasinSession={magasinSession} onVoirTicketExistant={onVoirTicketExistant} onDoublonTardif={()=>showToast("🧾 Ce ticket a déjà été scanné (doublon détecté)", false)}/>}
+      {showImport    && <ImportTicketSheet onClose={()=>{setShowImport(false);setResumeDraft(null);setScanDraft(lireScanDraft());onAutoOpenConsumed?.();onInitialScanConsumed?.();onScanSessionFerme?.();}} onImport={importPrices} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))} directCamera={autoOpenCamera} onManualEntry={()=>{ setShowImport(false); setShowEntry(true); }} initialResult={capturedResult} resumeDraft={resumeDraft} estFrancois={estFrancois} magasinSession={magasinSession} onVoirTicketExistant={onVoirTicketExistant} onDoublonTardif={()=>showToast("🧾 Ce ticket a déjà été scanné (doublon détecté)", false)} onPointsCredites={notifierPoints ? (msg)=>showToast(msg) : null}/>}
       {showEntry     && <PriceEntrySheet  onClose={()=>{setShowEntry(false);setEditPrice(null);}} onSave={savePrice} existingPrice={editPrice}/>}
       {toast && <Toast msg={toast.msg} ok={toast.ok}/>}
     </div>
@@ -8470,7 +8642,7 @@ function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, on
   );
 }
 
-function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash, onResumeScan, archives = [], pseudo, onStats, onMesPrix, onFavoris, onFaq, onSignOut, pendingCagnotte, onConsumeCagnotteCelebration, pendingPotential, onConsumePotentialCelebration, estFrancois = false, sessionCourses = null, onReprendreCourses, onAbandonnerCourses }) {
+function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash, onResumeScan, archives = [], pseudo, onStats, onMesPrix, onFavoris, onProfil = null, onFaq, onSignOut, pendingCagnotte, onConsumeCagnotteCelebration, pendingPotential, onConsumePotentialCelebration, estFrancois = false, sessionCourses = null, onReprendreCourses, onAbandonnerCourses }) {
   const F = "'Nunito',sans-serif";
   // Chantier 79 (ajustement) — scan en cours visible dès l'accueil. HomeTab
   // n'étant monté que sur l'onglet home, la lecture au montage reflète l'état
@@ -8633,6 +8805,9 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash
           {showMenuProfil && (
             <div style={{ position:"absolute", top:60, left:0, width:220, background:"#fff", borderRadius:14, boxShadow:"0 6px 24px rgba(0,0,0,0.16)", zIndex:20, overflow:"hidden" }}>
               {[
+                // Chantier 94 — profil Points Malin, seulement quand le flag
+                // gamification_visible l'autorise (onProfil absent sinon).
+                ...(onProfil ? [{ emoji:"🏅", label:"Mon profil", action: () => { setShowMenuProfil(false); onProfil(); } }] : []),
                 { img:"/menu-cercle.png",     label:"Mon Cercle",          action: () => { setShowMenuProfil(false); onCircle(); } },
                 { img:"/menu-stats.png",       label:"Mes Statistiques",    action: () => { setShowMenuProfil(false); onStats?.(); } },
                 { img:"/menu-prix.png",        label:"Mes Prix",            action: () => { setShowMenuProfil(false); onMesPrix?.(); } },
@@ -8994,6 +9169,11 @@ export default function App() {
   // true OU François (qui garde toujours accès, même flag à false). Ne touche
   // à AUCUN autre gating estFrancois (Micro, admin…).
   const sessionCoursesAccessible = sessionCoursesOuverte || estFrancois;
+  // Chantier 94 Lot 10 — flag gamification_visible (même principe) : le
+  // profil Points Malin n'est visible que si le flag est à true OU pour
+  // François. Absent/illisible => masqué (sauf François), jamais de plantage.
+  const [gamificationVisible, setGamificationVisible] = useState(false);
+  const profilVisible = gamificationVisible || estFrancois;
 
   // #65 — bandeau de mise à jour. needRefresh vient de registerSW (main.jsx,
   // hors arbre React) via le pont swUpdate.js ; jamais mis à jour tout seul.
@@ -9289,6 +9469,50 @@ export default function App() {
   const [showMesPrixSheet, setShowMesPrixSheet] = useState(false);
   // Chantier 92 Lot 6 — sheet « Mes Favoris » (même mécanique que Stats/Prix).
   const [showFavorisSheet, setShowFavorisSheet] = useState(false);
+  // Chantier 94 Lot 10 — sheet « Mon profil » + célébration de badge (null ou
+  // { icone, nom }). La détection compare les badges actuels aux codes déjà
+  // vus (localStorage) ; au tout premier passage on mémorise sans célébrer
+  // (pas de fête rétroactive au lancement de la feature).
+  const [showProfilSheet, setShowProfilSheet] = useState(false);
+  const [nouveauBadge, setNouveauBadge] = useState(null);
+
+  const cleBadgesVus = () => `prixmalin_badgesVus_v1_${session?.user?.id ?? ''}`;
+  const lireBadgesVus = () => {
+    try { const s = localStorage.getItem(cleBadgesVus()); return s ? JSON.parse(s) : null; } catch { return null; }
+  };
+  const memoriserBadgesVus = (codes) => {
+    try {
+      const existants = new Set(lireBadgesVus() || []);
+      (codes || []).forEach(c => existants.add(c));
+      localStorage.setItem(cleBadgesVus(), JSON.stringify([...existants]));
+    } catch { /* quota / mode privé : on ignore */ }
+  };
+
+  // Chantier 94 — détection de nouveaux badges au chargement (les badges sont
+  // attribués côté serveur à la validation des prix, donc typiquement entre
+  // deux sessions). Best effort ; jamais rien si le profil n'est pas visible.
+  useEffect(() => {
+    if (!session?.user?.id || !profilVisible) return;
+    let annule = false;
+    (async () => {
+      const badges = await chargerBadgesUtilisateur(session.user.id);
+      if (annule || badges === null) return;
+      const vus = lireBadgesVus();
+      if (vus === null) { memoriserBadgesVus(badges.map(b => b.code_badge)); return; }
+      const nouveaux = detecterNouveauxBadges(vus, badges);
+      if (nouveaux.length === 0) return;
+      memoriserBadgesVus(nouveaux);
+      try {
+        const { data } = await supabase.from('badges_catalogue')
+          .select('code, nom, icone').eq('code', nouveaux[0]).maybeSingle();
+        if (!annule) setNouveauBadge({ icone: data?.icone || '🏅', nom: data?.nom || nouveaux[0], reste: nouveaux.length - 1 });
+      } catch {
+        if (!annule) setNouveauBadge({ icone: '🏅', nom: nouveaux[0], reste: nouveaux.length - 1 });
+      }
+    })();
+    return () => { annule = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.user?.id, profilVisible]);
   // Chantier 92 Lot 6 — proposition post-rapprochement : null ou
   // { propositions: [...], selection: { [cle]: bool } }. Rien n'est jamais
   // ajouté aux favoris sans action explicite.
@@ -9386,6 +9610,28 @@ export default function App() {
     const onVisibiliteCourses = () => { if (document.visibilityState === 'visible') lireFlagCourses(); };
     document.addEventListener('visibilitychange', onVisibiliteCourses);
     return () => { annule = true; document.removeEventListener('visibilitychange', onVisibiliteCourses); };
+  }, [session]);
+
+  // Chantier 94 Lot 10 — lecture du flag gamification_visible, strictement la
+  // même mécanique défensive que session_courses_ouverte ci-dessus.
+  useEffect(() => {
+    if (!session) { setGamificationVisible(false); return; }
+    let annule = false;
+    const lireFlagGamification = () => {
+      try {
+        supabase.from('parametres_globaux').select('valeur').eq('cle', 'gamification_visible').maybeSingle()
+          .then(({ data, error }) => {
+            if (annule) return;
+            setGamificationVisible(!error && data?.valeur === 'true');
+          }, () => { if (!annule) setGamificationVisible(false); });
+      } catch {
+        if (!annule) setGamificationVisible(false);
+      }
+    };
+    lireFlagGamification();
+    const onVisibiliteGamif = () => { if (document.visibilityState === 'visible') lireFlagGamification(); };
+    document.addEventListener('visibilitychange', onVisibiliteGamif);
+    return () => { annule = true; document.removeEventListener('visibilitychange', onVisibiliteGamif); };
   }, [session]);
 
   const fetchStoreRatings = useCallback(async () => {
@@ -10540,7 +10786,7 @@ export default function App() {
             </div>
           )}
           <TabErrorBoundary key={tab}>
-          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} onResumeScan={handleResumeScan} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFavoris={()=>setShowFavorisSheet(true)} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)} estFrancois={estFrancois} sessionCourses={sessionCoursesAccessible ? sessionCoursesActive : null} onReprendreCourses={()=>setTab("courses")} onAbandonnerCourses={abandonnerSessionCourses}/>}
+          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} onResumeScan={handleResumeScan} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFavoris={()=>setShowFavorisSheet(true)} onProfil={profilVisible ? ()=>setShowProfilSheet(true) : null} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)} estFrancois={estFrancois} sessionCourses={sessionCoursesAccessible ? sessionCoursesActive : null} onReprendreCourses={()=>setTab("courses")} onAbandonnerCourses={abandonnerSessionCourses}/>}
           {/* Chantier « Micro » Lot 1 — même mécanique shadow que rejets (#56.3b) :
               jamais rendu pour un autre utilisateur, même si tab="micro" traîne en state.
               Lot 5 : onAdd = le addItem OFFICIEL du caddie (même chemin que le Catalogue). */}
@@ -10555,7 +10801,7 @@ export default function App() {
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix} sessionCoursesAccessible={sessionCoursesAccessible}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
-          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} estFrancois={estFrancois} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} magasinSession={scanCaisse?.magasin ?? null} onImportSession={rattacherTicketScanSession} onScanSessionFerme={()=>definirScanCaisse(null)} onVoirTicketExistant={()=>setTab("archive")} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
+          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} estFrancois={estFrancois} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} magasinSession={scanCaisse?.magasin ?? null} onImportSession={rattacherTicketScanSession} onScanSessionFerme={()=>definirScanCaisse(null)} onVoirTicketExistant={()=>setTab("archive")} notifierPoints={profilVisible} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;
             const {data,error}=await supabase.from('archives').insert({...rest,user_id:session?.user?.id}).select('id').single();
             if(error){ console.error("Erreur création archive ticket :",error); showAppToast("⚠️ Archive non sauvegardée, vérifie ta connexion",false); }
@@ -10624,6 +10870,28 @@ export default function App() {
         {showCircleSheet  && <CircleSheet  circles={circles} userId={session.user.id} userEmail={session.user.email} profileMap={profileMap} pseudo={pseudo} archives={archives} onClose={()=>setShowCircleSheet(false)} onInvite={inviteByPseudo} onUpdateStatus={updateCircleStatus}/>}
         {showStatsSheet   && <StatsSheet   userId={session.user.id} archives={archives} onClose={()=>setShowStatsSheet(false)}/>}
         {showFavorisSheet && <FavorisSheet userId={session?.user?.id} onClose={()=>setShowFavorisSheet(false)}/>}
+        {showProfilSheet && profilVisible && <ProfilSheet userId={session?.user?.id} pseudo={pseudo} onBadgesVus={memoriserBadgesVus} onClose={()=>setShowProfilSheet(false)}/>}
+        {/* Chantier 94 — célébration COURTE d'un nouveau badge (popIn existant,
+            aucune animation longue), fermable d'un tap, jamais bloquante. */}
+        {nouveauBadge && profilVisible && (
+          <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:9998, padding:24 }} onClick={()=>setNouveauBadge(null)}>
+            <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:18, padding:"26px 20px", maxWidth:320, width:"100%", textAlign:"center", animation:"popIn 0.35s ease", boxShadow:"0 20px 60px rgba(0,0,0,0.25)" }}>
+              <div style={{ fontSize:52, marginBottom:8 }}>{nouveauBadge.icone}</div>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:"#1a1a1a", marginBottom:4 }}>Nouveau badge !</div>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:"#CC0000", marginBottom:12 }}>
+                {nouveauBadge.nom}{nouveauBadge.reste > 0 ? ` (+${nouveauBadge.reste} autre${nouveauBadge.reste > 1 ? "s" : ""})` : ""}
+              </div>
+              <button onClick={()=>{ setNouveauBadge(null); setShowProfilSheet(true); }}
+                style={{ width:"100%", padding:"13px", border:"none", borderRadius:10, background:"#CC0000", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer", marginBottom:8 }}>
+                Voir mon profil
+              </button>
+              <button onClick={()=>setNouveauBadge(null)}
+                style={{ width:"100%", padding:"11px", border:"1.5px solid #eee", borderRadius:10, background:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:"#333", cursor:"pointer" }}>
+                Fermer
+              </button>
+            </div>
+          </div>
+        )}
         {showFaqSheet     && <FaqSheet     userId={session.user.id} pseudo={pseudo} onClose={()=>setShowFaqSheet(false)}/>}
         {showMesPrixSheet && <MesPrixSheet priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{ const {id:_id,...rest}=newArc; const {data,error}=await supabase.from('archives').insert({...rest,user_id:session?.user?.id}).select('id').single(); if(error){ showAppToast("⚠️ Archive non sauvegardée, vérifie ta connexion",false); } else { const {data:all}=await supabase.from('archives').select('*').order('date'); if(all) setArchives(all); setShowRating({id:data.id,store:newArc.store}); } }} userId={session?.user?.id} produitsRef={produitsRef} onClose={()=>setShowMesPrixSheet(false)}/>}
         {showScanChoix && (
