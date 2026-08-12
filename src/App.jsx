@@ -8,7 +8,7 @@ import { urlPhotoVariante, offLargeSource, offFullUrl, cloudinaryAgrandi } from 
 import { nomComposeVariante, formatEtiquetteVariante } from "./lib/nomProduit";
 import { transcrireAudioListe, normaliserNomElement, comptesParNom, fusionnerParNom } from "./lib/microVocal";
 // Chantier « Courses » Lot 1 — session de courses figée (shadow estFrancois).
-import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession, ajouterNoteSession, supprimerNoteSession, cloreSession, idsCaddieASupprimer, chargerMarquesVariantes } from "./lib/sessionCoursesCore";
+import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession, ajouterNoteSession, supprimerNoteSession, cloreSession, idsCaddieASupprimer, chargerMarquesVariantes, calculerTotalPanier } from "./lib/sessionCoursesCore";
 import { capturerEvenement } from "./lib/posthog";
 import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
 import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
@@ -7856,60 +7856,68 @@ function LigneArticleCourses({ article, variante, onCocher, onIntrouvable, onRes
   // Lot 5 — une note libre n'a ni prix ni marquage « introuvable » ; elle est
   // supprimable (✕) depuis sa section tant qu'elle n'est pas cochée.
   const estNote = article.type === 'note';
+  // Lot 8 — refonte visuelle « note épurée » (direction A) : rangée blanche
+  // séparée par un filet, rond à cocher fin façon Rappels, prix discret,
+  // introuvable marqué par un simple liseré ambré. AUCUN changement de
+  // logique : mêmes props, mêmes handlers, mêmes aria-labels, mêmes
+  // fallbacks (icône de rayon, « prix inconnu ») qu'au Lot 7.
   return (
-    <div style={{ display:"flex", alignItems:"center", gap:8, background: prise ? "#F3FAF5" : introuvable ? "#FFF8E6" : C.white, borderRadius:12, padding:"8px 10px 8px 2px", border:`1px solid ${prise ? "#C8E6C9" : introuvable ? C.yellow : C.grayLight}`, boxShadow: prise ? "inset 3px 0 0 #4CAF50" : "0 1px 4px rgba(0,0,0,0.06)" }}>
-      {/* Zone tactile 44×44, case visuelle 28 px */}
+    <div style={{ display:"flex", alignItems:"center", gap:8, background:"transparent", padding:"7px 0 7px 2px", borderBottom:"1px solid #F2F2F2", borderLeft: introuvable ? `3px solid ${C.yellow}` : "3px solid transparent" }}>
+      {/* Zone tactile 44×44, rond visuel 26 px */}
       <button onClick={onCocher}
         aria-label={prise ? `Retirer « ${article.nom_affiche} » du caddie` : `Mettre « ${article.nom_affiche} » dans le caddie`}
         style={{ width:44, height:44, flexShrink:0, background:"none", border:"none", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", padding:0 }}>
-        <span aria-hidden="true" style={{ width:28, height:28, borderRadius:8, border:`2px solid ${prise ? C.green : C.blue}`, background: prise ? C.green : C.white, color:C.white, display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, fontWeight:900 }}>
+        <span aria-hidden="true" style={{ width:26, height:26, borderRadius:99, border:`1.5px solid ${prise ? C.green : "#C7C7CC"}`, background: prise ? C.green : "#fff", color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:900, boxSizing:"border-box" }}>
           {prise ? "✓" : ""}
         </span>
       </button>
-      <div style={{ width:44, height:44, flexShrink:0, opacity: attenue ? 0.65 : 1 }}>
+      <div style={{ width:40, height:40, flexShrink:0, opacity: attenue ? 0.55 : 1 }}>
         <PhotoProduit varianteId={article.variante_produit_id} taille="thumb" radius={8}
-          fallback={<div style={{ width:"100%", height:"100%", borderRadius:8, background:C.grayLight, display:"flex", alignItems:"center", justifyContent:"center", fontSize:20 }}>{emojiRayon(article.rayon)}</div>} />
+          fallback={<div style={{ width:"100%", height:"100%", borderRadius:8, background:"#F5F5F7", display:"flex", alignItems:"center", justifyContent:"center", fontSize:19 }}>{emojiRayon(article.rayon)}</div>} />
       </div>
-      <div style={{ flex:1, minWidth:0, opacity: attenue ? 0.75 : 1 }}>
-        <div style={{ fontFamily:F, fontWeight:800, fontSize:14, color:C.text, textDecoration: prise ? "line-through" : "none" }}>
+      <div style={{ flex:1, minWidth:0 }}>
+        <div style={{ fontFamily:F, fontWeight:700, fontSize:15, color: prise ? "#AEAEB2" : "#1a1a1a", textDecoration: prise ? "line-through" : "none", textDecorationColor:"#C7C7CC" }}>
           {article.nom_affiche}
           {article.est_mdd && (
-            <span style={{ marginLeft:6, background:C.grayLight, color:C.gray, borderRadius:5, padding:"1px 5px", fontSize:9, fontWeight:900, verticalAlign:"middle", whiteSpace:"nowrap" }}>Marque Distributeur</span>
+            <span style={{ marginLeft:6, background:"#F2F2F2", color:"#8E8E93", borderRadius:5, padding:"1px 5px", fontSize:9, fontWeight:900, verticalAlign:"middle", whiteSpace:"nowrap" }}>Marque Distributeur</span>
           )}
         </div>
         {article.rayon?.sous_categorie_nom && (
-          <div style={{ fontFamily:F, fontSize:11, color:C.gray, marginTop:1 }}>{article.rayon.sous_categorie_nom}</div>
+          <div style={{ fontFamily:F, fontSize:11, color:"#8E8E93", marginTop:1 }}>{article.rayon.sous_categorie_nom}</div>
         )}
       </div>
       {!estNote && (
-        <div style={{ textAlign:"right", flexShrink:0, opacity: attenue ? 0.75 : 1 }}>
-          {article.quantite > 1 && (
-            <div style={{ fontFamily:F, fontWeight:900, fontSize:12, color:C.white, background:C.blue, borderRadius:8, padding:"2px 8px", display:"inline-block", marginBottom:3 }}>×{article.quantite}</div>
-          )}
+        <div style={{ textAlign:"right", flexShrink:0, opacity: attenue ? 0.55 : 1 }}>
           {article.prix_prevu != null ? (
-            <div style={{ fontFamily:F, fontWeight:900, fontSize:14, color:C.text }}>{(article.prix_prevu * article.quantite).toFixed(2)} €</div>
+            <div style={{ fontFamily:F, fontWeight:700, fontSize:13, color:"#6D6D72" }}>
+              {article.quantite > 1 && <span style={{ fontSize:11, color:"#AEAEB2", marginRight:4 }}>×{article.quantite}</span>}
+              {(article.prix_prevu * article.quantite).toFixed(2)} €
+            </div>
           ) : (
-            <div style={{ fontFamily:F, fontWeight:800, fontSize:11, color:C.orange }}>prix inconnu</div>
+            <div style={{ fontFamily:F, fontWeight:700, fontSize:11, fontStyle:"italic", color:"#B08A3E" }}>
+              {article.quantite > 1 && <span style={{ marginRight:4 }}>×{article.quantite}</span>}
+              prix inconnu
+            </div>
           )}
         </div>
       )}
       {variante === 'a_prendre' && !estNote && (
         <button onClick={onIntrouvable} aria-label={`Marquer « ${article.nom_affiche} » introuvable`}
-          style={{ width:38, height:44, flexShrink:0, background:"none", border:"none", cursor:"pointer", fontSize:16, padding:0, opacity:0.55 }}>🚫</button>
+          style={{ width:36, height:44, flexShrink:0, background:"none", border:"none", cursor:"pointer", fontSize:14, padding:0, opacity:0.35 }}>🚫</button>
       )}
       {estNote && onSupprimer && (
         <button onClick={onSupprimer} aria-label={`Supprimer la note « ${article.nom_affiche} »`}
-          style={{ width:38, height:44, flexShrink:0, background:"none", border:"none", cursor:"pointer", fontSize:16, color:C.gray, padding:0 }}>✕</button>
+          style={{ width:36, height:44, flexShrink:0, background:"none", border:"none", cursor:"pointer", fontSize:15, color:"#AEAEB2", padding:0 }}>✕</button>
       )}
       {introuvable && (
         <button onClick={onRestaurer} aria-label={`Remettre « ${article.nom_affiche} » à prendre`}
-          style={{ width:38, height:44, flexShrink:0, background:"none", border:"none", cursor:"pointer", fontSize:19, color:C.blue, fontWeight:900, padding:0 }}>↩︎</button>
+          style={{ width:36, height:44, flexShrink:0, background:"none", border:"none", cursor:"pointer", fontSize:18, color:C.blue, fontWeight:900, padding:0 }}>↩︎</button>
       )}
     </div>
   );
 }
 
-function CoursesTab({ session, setTab, onChangerEtat, onAjouterNote, onSupprimerNote, onTerminer, syncEchec = false }) {
+function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, onTerminer, syncEchec = false }) {
   const F = "'Nunito',sans-serif";
   // « Dans le caddie » repliée par défaut — hooks déclarés AVANT le early
   // return (règle des Hooks : ordre stable entre rendus).
@@ -7958,31 +7966,32 @@ function CoursesTab({ session, setTab, onChangerEtat, onAjouterNote, onSupprimer
   };
   const toutPris = prog.total > 0 && prog.restants === 0;
   const ratio = prog.total > 0 ? prog.pris / prog.total : 0;
-  const magasin = session.magasin || {};
-  const villeLigne = [magasin.adresse, magasin.code_postal && magasin.ville ? `${magasin.code_postal} ${magasin.ville}` : magasin.ville]
-    .filter(Boolean).join(', ');
+  // Lot 8 (ajustement) — montant dynamique du panier (articles cochés).
+  const panier = calculerTotalPanier(articles);
+  // Lot 8 — le magasin n'est plus AFFICHÉ (il reste dans session.magasin,
+  // nécessaire à la clôture et à la carte d'accueil) : plus de bandeau rouge.
 
   return (
-    <div style={{ padding:"16px 16px 110px" }}>
-      <button onClick={()=>setTab?.("home")} aria-label="Retour à l'accueil"
-        style={{ display:"inline-flex", alignItems:"center", gap:6, marginBottom:14, padding:"9px 16px 9px 12px", background:C.orange, border:"none", borderRadius:12, fontFamily:F, fontWeight:900, fontSize:15, color:"#111111", cursor:"pointer", boxShadow:"0 3px 10px rgba(0,0,0,0.15)" }}>
-        <span style={{ fontSize:24, lineHeight:1, marginTop:-2 }}>‹</span> Accueil
-      </button>
+    <div style={{ padding:"20px 20px 110px", background:"#fff", minHeight:"calc(100vh - 68px)", boxSizing:"border-box" }}>
+      {/* Lot 8 (ajustement) — plus de lien « ‹ Accueil » ici : le retour passe
+          par le bouton Accueil de la barre d'onglets du bas, toujours rendue. */}
 
-      {/* En-tête de session — magasin + total prévu + progression */}
-      <div style={{ background:"linear-gradient(145deg,#CC0000,#E00000)", borderRadius:16, padding:"16px 18px", marginBottom:16, boxShadow:"0 8px 24px rgba(204,0,0,0.35)" }}>
-        <div style={{ fontFamily:F, fontWeight:900, fontSize:18, color:C.white }}>🛒 Courses en cours chez {magasin.nom}</div>
-        {villeLigne && <div style={{ fontFamily:F, fontSize:12, color:"rgba(255,255,255,0.7)", marginTop:2 }}>{villeLigne}</div>}
-        <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", marginTop:12 }}>
-          <div aria-live="polite" style={{ fontFamily:F, fontWeight:800, fontSize:13, color:"rgba(255,255,255,0.85)" }}>
-            {prog.pris} article{prog.pris > 1 ? "s" : ""} sur {prog.total} dans le caddie
+      {/* Lot 8 — en-tête léger sur fond blanc : titre, compteur du caddie,
+          barre de progression, et à droite le TOTAL DYNAMIQUE DU PANIER
+          (somme des articles cochés, recalculée à chaque coche — « + ? »
+          quand un article coché n'a pas de prix connu). */}
+      <div style={{ marginBottom:18 }}>
+        <div style={{ fontFamily:F, fontWeight:900, fontSize:24, color:"#1a1a1a" }}>Mes courses</div>
+        <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", marginTop:6 }}>
+          <div aria-live="polite" style={{ fontFamily:F, fontWeight:800, fontSize:13, color:"#6D6D72" }}>
+            {prog.pris} / {prog.total} au caddie
           </div>
-          {session.total_prevu != null && (
-            <div style={{ fontFamily:F, fontWeight:900, fontSize:18, color:"#FFD700" }}>{session.total_prevu.toFixed(2)} €</div>
-          )}
+          <div style={{ fontFamily:F, fontWeight:700, fontSize:12, color:"#8E8E93" }}>
+            {panier.total.toFixed(2)} €{panier.incomplet ? " + ?" : ""} au panier
+          </div>
         </div>
-        <div style={{ marginTop:8, height:8, borderRadius:99, background:"rgba(255,255,255,0.25)", overflow:"hidden" }}>
-          <div style={{ width:`${Math.round(ratio*100)}%`, height:"100%", borderRadius:99, background:"#FFD700", transition:"width 0.3s ease" }} />
+        <div style={{ marginTop:8, height:5, borderRadius:99, background:"#F0F0F0", overflow:"hidden" }}>
+          <div style={{ width:`${Math.round(ratio*100)}%`, height:"100%", borderRadius:99, background:"#E5181B", transition:"width 0.3s ease" }} />
         </div>
       </div>
 
@@ -8003,13 +8012,13 @@ function CoursesTab({ session, setTab, onChangerEtat, onAjouterNote, onSupprimer
         </div>
       )}
       {groupes.map(groupe => (
-        <div key={`${groupe.rayon.categorie_ordre}-${groupe.rayon.categorie_nom}`} style={{ marginBottom:14 }}>
-          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
-            <span style={{ fontSize:18 }}>{emojiRayon(groupe.rayon)}</span>
-            <span style={{ fontFamily:F, fontWeight:900, fontSize:14, color:C.text }}>{groupe.rayon.categorie_nom}</span>
-            <span style={{ fontFamily:F, fontWeight:800, fontSize:12, color:C.gray }}>({groupe.articles.length})</span>
+        <div key={`${groupe.rayon.categorie_ordre}-${groupe.rayon.categorie_nom}`} style={{ marginBottom:16 }}>
+          {/* Lot 8 — label de rayon discret : petites majuscules grises */}
+          <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:2 }}>
+            <span style={{ fontSize:13 }}>{emojiRayon(groupe.rayon)}</span>
+            <span style={{ fontFamily:F, fontWeight:800, fontSize:11, color:"#8E8E93", letterSpacing:"0.07em", textTransform:"uppercase" }}>{groupe.rayon.categorie_nom} ({groupe.articles.length})</span>
           </div>
-          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+          <div style={{ display:"flex", flexDirection:"column" }}>
             {groupe.articles.map(article => (
               <LigneArticleCourses key={article.cle} article={article} variante="a_prendre"
                 onCocher={()=>{ onChangerEtat?.(article.cle, 'au_caddie'); setDerniereCoche({ cle: article.cle, nom: article.nom_affiche }); }}
@@ -8019,17 +8028,17 @@ function CoursesTab({ session, setTab, onChangerEtat, onAjouterNote, onSupprimer
         </div>
       ))}
 
-      {/* Tout est pris — état célébratoire (remplace la liste vide de rayons) */}
+      {/* Tout est pris — état célébratoire, version épurée (Lot 8) */}
       {toutPris && (
-        <div style={{ background:"#F3FAF5", borderRadius:14, padding:"20px", textAlign:"center", border:"2px solid #C8E6C9", marginBottom:14 }}>
-          <div style={{ fontSize:36, marginBottom:6 }}>🎉</div>
+        <div style={{ padding:"22px 0", textAlign:"center", marginBottom:10 }}>
+          <div style={{ fontSize:32, marginBottom:4 }}>🎉</div>
           <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:C.green }}>
             Tout est dans le caddie !
           </div>
         </div>
       )}
       {!toutPris && groupes.length === 0 && introuvables.length > 0 && (
-        <div style={{ background:"#FFF8E6", borderRadius:14, padding:"14px 16px", textAlign:"center", border:`1px solid ${C.yellow}`, marginBottom:14, fontFamily:F, fontWeight:800, fontSize:13, color:"#7A6000" }}>
+        <div style={{ padding:"12px 0", textAlign:"center", marginBottom:10, fontFamily:F, fontWeight:700, fontSize:13, color:"#B08A3E" }}>
           Il ne reste que des articles introuvables 👇
         </div>
       )}
@@ -8037,11 +8046,11 @@ function CoursesTab({ session, setTab, onChangerEtat, onAjouterNote, onSupprimer
       {/* INTROUVABLES — visible seulement s'il y en a ; toujours dépliée
           (peu d'articles, et il faut les garder à l'œil). */}
       {introuvables.length > 0 && (
-        <div style={{ marginBottom:14 }}>
-          <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:"#7A6000", letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:8 }}>
+        <div style={{ marginBottom:16 }}>
+          <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:"#B08A3E", letterSpacing:"0.07em", textTransform:"uppercase", marginBottom:2 }}>
             🚫 Introuvables ({introuvables.length})
           </div>
-          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+          <div style={{ display:"flex", flexDirection:"column" }}>
             {introuvables.map(article => (
               <LigneArticleCourses key={article.cle} article={article} variante="introuvable"
                 onCocher={()=>{ onChangerEtat?.(article.cle, 'au_caddie'); setDerniereCoche({ cle: article.cle, nom: article.nom_affiche }); }}
@@ -8051,17 +8060,18 @@ function CoursesTab({ session, setTab, onChangerEtat, onAjouterNote, onSupprimer
         </div>
       )}
 
-      {/* DANS LE CADDIE — repliée par défaut, en-tête cliquable */}
+      {/* DANS LE CADDIE — repliée par défaut, en-tête cliquable (Lot 8 :
+          simple rangée de texte discrète, plus de pastille verte) */}
       {auCaddie.length > 0 && (
-        <div style={{ marginBottom:14 }}>
+        <div style={{ marginBottom:16 }}>
           <button onClick={()=>setCaddieOuvert(o=>!o)}
             aria-expanded={caddieOuvert}
-            style={{ width:"100%", display:"flex", alignItems:"center", gap:8, background:"#F3FAF5", border:"1px solid #C8E6C9", borderRadius:12, padding:"12px 14px", cursor:"pointer", marginBottom: caddieOuvert ? 8 : 0 }}>
-            <span style={{ fontFamily:F, fontWeight:900, fontSize:13, color:C.green }}>✓ Dans le caddie ({auCaddie.length})</span>
-            <span style={{ marginLeft:"auto", fontFamily:F, fontWeight:900, fontSize:14, color:C.green }}>{caddieOuvert ? "▾" : "▸"}</span>
+            style={{ width:"100%", display:"flex", alignItems:"center", gap:6, background:"none", border:"none", borderTop:"1px solid #F2F2F2", padding:"12px 2px", cursor:"pointer" }}>
+            <span style={{ fontFamily:F, fontWeight:800, fontSize:11, color:C.green, letterSpacing:"0.07em", textTransform:"uppercase" }}>✓ Dans le caddie ({auCaddie.length})</span>
+            <span style={{ marginLeft:"auto", fontFamily:F, fontWeight:900, fontSize:13, color:"#AEAEB2" }}>{caddieOuvert ? "▾" : "▸"}</span>
           </button>
           {caddieOuvert && (
-            <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+            <div style={{ display:"flex", flexDirection:"column" }}>
               {auCaddie.map(article => (
                 <LigneArticleCourses key={article.cle} article={article} variante="au_caddie"
                   onCocher={()=>{ onChangerEtat?.(article.cle, 'a_prendre'); setDerniereCoche(null); }} />
@@ -8077,10 +8087,10 @@ function CoursesTab({ session, setTab, onChangerEtat, onAjouterNote, onSupprimer
       <div style={{ marginBottom:14 }}>
         {notesAPrendre.length > 0 && (
           <>
-            <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:C.gray, letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:8 }}>
+            <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:"#8E8E93", letterSpacing:"0.07em", textTransform:"uppercase", marginBottom:2 }}>
               📝 Ajoutés en route ({notesAPrendre.length})
             </div>
-            <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:8 }}>
+            <div style={{ display:"flex", flexDirection:"column", marginBottom:6 }}>
               {notesAPrendre.map(article => (
                 <LigneArticleCourses key={article.cle} article={article} variante="a_prendre"
                   onCocher={()=>{ onChangerEtat?.(article.cle, 'au_caddie'); setDerniereCoche({ cle: article.cle, nom: article.nom_affiche }); }}
@@ -8091,8 +8101,8 @@ function CoursesTab({ session, setTab, onChangerEtat, onAjouterNote, onSupprimer
         )}
         {texteNote === null ? (
           <button onClick={()=>setTexteNote("")}
-            style={{ width:"100%", padding:"13px", border:`2px dashed ${C.grayLight}`, borderRadius:12, background:"transparent", fontFamily:F, fontWeight:800, fontSize:14, color:C.gray, cursor:"pointer" }}>
-            ＋ Ajouter un article oublié
+            style={{ display:"flex", alignItems:"center", gap:8, width:"100%", padding:"12px 2px", border:"none", background:"transparent", fontFamily:F, fontWeight:700, fontSize:14, color:"#8E8E93", cursor:"pointer", textAlign:"left" }}>
+            <span style={{ fontSize:18, lineHeight:1, color:"#E5181B" }}>＋</span> Ajouter un article oublié
           </button>
         ) : (
           <div style={{ display:"flex", gap:8 }}>
@@ -8102,7 +8112,7 @@ function CoursesTab({ session, setTab, onChangerEtat, onAjouterNote, onSupprimer
               onChange={e=>setTexteNote(e.target.value)}
               onKeyDown={e=>{ if (e.key === 'Enter') validerNote(); if (e.key === 'Escape') setTexteNote(null); }}
               placeholder="Ex. : Sopalin"
-              style={{ flex:1, minWidth:0, padding:"12px 14px", borderRadius:12, border:`2px solid ${C.blue}`, fontFamily:F, fontSize:15, boxSizing:"border-box" }}
+              style={{ flex:1, minWidth:0, padding:"11px 14px", borderRadius:10, border:"1.5px solid #D1D1D6", fontFamily:F, fontSize:15, boxSizing:"border-box" }}
             />
             <button onClick={validerNote} aria-label="Ajouter la note"
               style={{ padding:"0 16px", border:"none", borderRadius:12, background:C.blue, fontFamily:F, fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer" }}>
@@ -8128,7 +8138,7 @@ function CoursesTab({ session, setTab, onChangerEtat, onAjouterNote, onSupprimer
           la racine — jamais de clôture silencieuse). */}
       {prog.total > 0 && (
         <button onClick={()=>onTerminer?.()}
-          style={{ width:"100%", padding:"15px", marginTop:6, border:"none", borderRadius:14, background: toutPris ? C.green : "linear-gradient(135deg,#CC0000,#FF1A1A)", fontFamily:F, fontWeight:900, fontSize:15, color:"#fff", cursor:"pointer", boxShadow: toutPris ? "0 6px 20px rgba(0,140,60,0.35)" : "0 6px 20px rgba(180,0,0,0.45)" }}>
+          style={{ width:"100%", padding:"15px", marginTop:10, border:"none", borderRadius:14, background: toutPris ? C.green : "#E5181B", fontFamily:F, fontWeight:900, fontSize:15, color:"#fff", cursor:"pointer", boxShadow: toutPris ? "0 4px 14px rgba(0,140,60,0.25)" : "0 4px 14px rgba(229,24,27,0.25)" }}>
           🏁 Terminer mes courses
         </button>
       )}
@@ -9827,7 +9837,7 @@ export default function App() {
           {/* Chantier « Courses » Lot 1 (shadow estFrancois) — écran de courses,
               accessible uniquement via la validation du comparatif (aucun
               onglet TabBar). Session absente -> rien n'est rendu. */}
-          {loaded && estFrancois && tab==="courses" && sessionCoursesActive && <CoursesTab session={sessionCoursesActive} setTab={setTab} onChangerEtat={changerEtatArticleSession} onAjouterNote={ajouterNoteCourses} onSupprimerNote={supprimerNoteCourses} onTerminer={demanderTerminerCourses} syncEchec={syncCoursesEchec}/>}
+          {loaded && estFrancois && tab==="courses" && sessionCoursesActive && <CoursesTab session={sessionCoursesActive} onChangerEtat={changerEtatArticleSession} onAjouterNote={ajouterNoteCourses} onSupprimerNote={supprimerNoteCourses} onTerminer={demanderTerminerCourses} syncEchec={syncCoursesEchec}/>}
           {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} onSetMarquePref={setMarquePrefItem}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix} estFrancois={estFrancois}/>}

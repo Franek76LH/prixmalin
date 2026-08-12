@@ -21,6 +21,7 @@ import {
   cloreSession,
   idsCaddieASupprimer,
   chargerMarquesVariantes,
+  calculerTotalPanier,
   genererIdSession,
   ligneSupabaseDepuisSession,
   sauvegarderSessionSupabase,
@@ -434,6 +435,44 @@ describe('Lot 7 — finitions (formats naturels, marque des articles sans prix)'
     expect(inMock).toHaveBeenCalledWith('id', ['v1', 'v2']);
     expect(marques.get('v1')).toEqual({ nom: "Lay's", est_mdd: false });
     expect(marques.has('v2')).toBe(false);
+  });
+});
+
+describe('Lot 8 — total dynamique du panier', () => {
+  it('somme uniquement les articles cochés, pondérés par la quantité', () => {
+    const { total, incomplet } = calculerTotalPanier([
+      { etat: 'au_caddie', prix_prevu: 1.95, quantite: 2 },
+      { etat: 'au_caddie', prix_prevu: 0.5, quantite: 1 },
+      { etat: 'a_prendre', prix_prevu: 9.99, quantite: 1 },   // pas coché : ignoré
+      { etat: 'introuvable', prix_prevu: 3, quantite: 1 },    // introuvable : ignoré
+    ]);
+    expect(total).toBeCloseTo(4.4);
+    expect(incomplet).toBe(false);
+  });
+
+  it('article coché sans prix (prix inconnu ou note) : n’ajoute rien, marque le total incomplet', () => {
+    const { total, incomplet } = calculerTotalPanier([
+      { etat: 'au_caddie', prix_prevu: 2, quantite: 1 },
+      { etat: 'au_caddie', prix_prevu: null, quantite: 1 },          // prix inconnu
+      { etat: 'au_caddie', prix_prevu: null, quantite: 1, type: 'note' }, // note libre
+    ]);
+    expect(total).toBe(2);
+    expect(incomplet).toBe(true);
+  });
+
+  it('rien de coché (ou liste vide/absente) : 0,00 € et complet', () => {
+    expect(calculerTotalPanier([{ etat: 'a_prendre', prix_prevu: null }])).toEqual({ total: 0, incomplet: false });
+    expect(calculerTotalPanier([])).toEqual({ total: 0, incomplet: false });
+    expect(calculerTotalPanier(undefined)).toEqual({ total: 0, incomplet: false });
+  });
+
+  it('quantité invalide -> 1 ; prix non numérique -> traité comme inconnu', () => {
+    const { total, incomplet } = calculerTotalPanier([
+      { etat: 'au_caddie', prix_prevu: 1.5, quantite: undefined },
+      { etat: 'au_caddie', prix_prevu: 'abc', quantite: 1 },
+    ]);
+    expect(total).toBe(1.5);
+    expect(incomplet).toBe(true);
   });
 });
 

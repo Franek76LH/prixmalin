@@ -390,6 +390,27 @@ export function idsCaddieASupprimer(session, { garderIntrouvables = false } = {}
     .map(a => a.cle);
 }
 
+// Lot 8 (ajustement) — total DYNAMIQUE du panier : somme des prix prévus des
+// articles déjà cochés (« au_caddie »), recalculée à chaque coche/décoche par
+// simple re-rendu. Aucune requête : uniquement les prix déjà figés dans la
+// session. Un article coché sans prix (« prix inconnu », note libre) n'ajoute
+// rien mais rend le total « incomplet » — l'affichage le signale (« + ? »)
+// plutôt que de laisser croire à un total exact. Fonction pure.
+export function calculerTotalPanier(articles) {
+  let total = 0;
+  let incomplet = false;
+  for (const article of articles || []) {
+    if (article.etat !== 'au_caddie') continue;
+    const prix = article.prix_prevu != null ? Number(article.prix_prevu) : null;
+    if (prix != null && Number.isFinite(prix)) {
+      total += prix * (Number(article.quantite) || 1);
+    } else {
+      incomplet = true;
+    }
+  }
+  return { total, incomplet };
+}
+
 // Progression globale de la session. Les introuvables ne comptent ni comme
 // pris ni comme restants dans le ratio principal (ils ont leur section).
 export function calculerProgression(articles) {
