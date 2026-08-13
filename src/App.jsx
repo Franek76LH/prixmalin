@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback, Component } from "react";
-import { scanTicketWithClaude, imageFileToJpegBase64, scanMultipleTicketsWithClaude } from "./scanTicket";
+import { scanTicketWithClaude, imageFileToJpegBase64, scanMultipleTicketsWithClaude, filtrerProduitsExploitables } from "./scanTicket";
 import { STORES, STALE_DAYS, JOURS_MOYENNE } from "./constants";
 import { supabase } from "./lib/supabase";
 import { mapperLigneListeCourses, chargerVariantes, getCategoryPresentation, formatFormatStructure, calculerPrixUnitaire } from "./lib/catalogueCore";
@@ -1566,6 +1566,12 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     // Chantier 79 — la reprise d'un brouillon prime sur un initialResult
     // (scan frais). Les deux ne s'appliquent jamais ensemble.
     if (resumeDraft || !initialResult) return;
+    // Chantier 96 — même garde-fou que les scans directs : un résultat sans
+    // produit exploitable n'enchaîne jamais vers l'import.
+    if (filtrerProduitsExploitables(initialResult?.products).length === 0) {
+      setError("Aucun produit n'a pu être lu sur ce ticket — reprends la photo, bien à plat, entière et nette.");
+      return;
+    }
     const enseigne = storeIdFromName(initialResult.store);
     const prods = initialResult.products.map((p, i) => ({ ...p, id: i, keep: true }));
     setResult(initialResult);
@@ -1827,6 +1833,18 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
       date:         result?.date?new Date(result.date).toISOString():new Date().toISOString(),
       share:        idsToShare.has(p.id),
     }));
+    // Chantier 96 — ceinture ET bretelles : si, malgré le garde-fou d'arrivée,
+    // il n'y a AUCUN produit exploitable au moment de confirmer (liste vidée
+    // par édition, état inattendu…), on n'importe RIEN : ni écriture Core, ni
+    // legacy, ni archive marquée — c'est ce trou qui produisait un « ticket
+    // scanné » fantôme. Retour à la prise de photo avec un message clair ;
+    // le brouillon de scan reste intact.
+    if (toImport.length === 0) {
+      setSaving(false);
+      setError("Aucun produit exploitable sur ce ticket — rien n'a été importé. Reprends la photo.");
+      setStatus(directCamera ? "camera" : "idle");
+      return;
+    }
     // Chantier 93 Lot 7 — anti-doublon AVANT toute écriture : empreinte
     // déterministe du ticket revu à l'écran (magasin, date, total, nb de
     // lignes, libellés bruts normalisés triés). Si un ticket du compte porte
@@ -1994,6 +2012,14 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                 try {
                   const base64 = await imageFileToJpegBase64(file);
                   const parsed = await scanTicketWithClaude(base64, refProducts);
+                  // Chantier 96 — garde-fou : un scan sans produit exploitable
+                  // ne doit JAMAIS enchaîner vers l'import (l'import fantôme
+                  // marquait l'archive « ticket scanné » sans rien écrire).
+                  if (filtrerProduitsExploitables(parsed?.products).length === 0) {
+                    setError("Aucun produit n'a pu être lu sur ce ticket — reprends la photo, bien à plat, entière et nette.");
+                    setScanning(false);
+                    return;
+                  }
                   const enseigne = storeIdFromName(parsed.store);
                   const prods = parsed.products.map((p,i) => ({...p, id:i, keep:true}));
                   setResult(parsed); setSelectedStore(enseigne);
@@ -2019,6 +2045,14 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                 try {
                   const base64 = await imageFileToJpegBase64(file);
                   const parsed = await scanTicketWithClaude(base64, refProducts);
+                  // Chantier 96 — même garde-fou que la caméra : zéro produit
+                  // exploitable => erreur claire, aucun enchaînement.
+                  if (filtrerProduitsExploitables(parsed?.products).length === 0) {
+                    setError("Aucun produit n'a pu être lu sur ce ticket — reprends la photo, bien à plat, entière et nette.");
+                    setGalleryScanning(false);
+                    e.target.value = "";
+                    return;
+                  }
                   const enseigne = storeIdFromName(parsed.store);
                   const prods = parsed.products.map((p,i) => ({...p, id:i, keep:true, share:true}));
                   setResult(parsed); setSelectedStore(enseigne);
@@ -2057,6 +2091,13 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                 try {
                   const base64 = await imageFileToJpegBase64(file);
                   const parsed = await scanTicketWithClaude(base64, refProducts);
+                  // Chantier 96 — même garde-fou que ci-dessus : zéro produit
+                  // exploitable => erreur claire, aucun enchaînement.
+                  if (filtrerProduitsExploitables(parsed?.products).length === 0) {
+                    setError("Aucun produit n'a pu être lu sur ce ticket — reprends la photo, bien à plat, entière et nette.");
+                    setScanning(false);
+                    return;
+                  }
                   const enseigne = storeIdFromName(parsed.store);
                   const prods = parsed.products.map((p,i) => ({...p, id:i, keep:true}));
                   setResult(parsed); setSelectedStore(enseigne);
@@ -4924,9 +4965,20 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
         // ticket via #56.5.B (calculerRealizedSavingTicket), jamais tout
         // l'historique. Produits non résolus ignorés proprement (total à 0
         // si rien n'est calculable, jamais de faux positif).
-        await ecritureCorePromise;
-        const resultatCore = await calculerRealizedSavingTicket({ utilisateurId: userId });
-        realizedSaving = resultatCore.total;
+        // Chantier 96 — le drapeau ticket_scanned ne ment plus JAMAIS : si
+        // l'écriture Core n'a PAS créé de ticket (résultat null ou statut
+        // 'rejet' — ex. magasin non résolu), l'archive n'est PAS marquée et
+        // aucun realized_saving n'est calculé (il l'aurait été sur un VIEUX
+        // ticket, le « dernier » de l'utilisateur). Message explicite, flux
+        // legacy (priceDB/partage) inchangé plus bas.
+        const resultatCoreEcriture = await ecritureCorePromise;
+        if (!doitRattacherTicketSession(resultatCoreEcriture)) {
+          showToast("⚠️ Ticket non enregistré (lecture ou magasin non résolus) — l'archive reste à scanner.", false);
+          realizedSaving = null; // sentinelle : pas de marquage plus bas
+        } else {
+          const resultatCore = await calculerRealizedSavingTicket({ utilisateurId: userId });
+          realizedSaving = resultatCore.total;
+        }
       } else {
         realizedSaving = 0;
         entries.forEach(e => {
@@ -4950,8 +5002,13 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
         });
         realizedSaving = Math.round(realizedSaving * 100) / 100;
       }
-      updateArchive(openArchive.id, { ticket_scanned: true, realized_saving: realizedSaving });
-      onTicketValidated?.(openArchive.id, openArchive.store);
+      // Chantier 96 — marquage UNIQUEMENT si un ticket a réellement été
+      // ingéré (branche Core) ou en mode legacy historique (realizedSaving
+      // est alors toujours un nombre). null = échec Core, archive intacte.
+      if (realizedSaving !== null) {
+        updateArchive(openArchive.id, { ticket_scanned: true, realized_saving: realizedSaving });
+        onTicketValidated?.(openArchive.id, openArchive.store);
+      }
     } else {
       const storeId = entries[0]?.storeId || "autre";
       const storeObj = STORES.find(s => s.id === storeId);
@@ -10741,9 +10798,17 @@ export default function App() {
         // #56.6 — même principe que importPrices (PricesTab) : un seul appel
         // Core déjà lancé par confirm(), attendu ici, puis realized_saving
         // scopé à ce ticket via #56.5.B, jamais tout l'historique.
-        await ecritureCorePromise;
-        const resultatCore = await calculerRealizedSavingTicket({ utilisateurId: session?.user?.id });
-        realizedSaving = resultatCore.total;
+        // Chantier 96 — même honnêteté que PricesTab : pas de ticket Core
+        // réellement créé => pas de marquage, pas de realized_saving sur un
+        // vieux ticket.
+        const resultatCoreEcriture = await ecritureCorePromise;
+        if (!doitRattacherTicketSession(resultatCoreEcriture)) {
+          showAppToast("⚠️ Ticket non enregistré (lecture ou magasin non résolus) — l'archive reste à scanner.", false);
+          realizedSaving = null; // sentinelle : pas de marquage plus bas
+        } else {
+          const resultatCore = await calculerRealizedSavingTicket({ utilisateurId: session?.user?.id });
+          realizedSaving = resultatCore.total;
+        }
       } else {
         realizedSaving = 0;
         entries.forEach(e => {
@@ -10766,8 +10831,12 @@ export default function App() {
         });
         realizedSaving = Math.round(realizedSaving * 100) / 100;
       }
-      updateArchive(openArchive.id, { ticket_scanned: true, realized_saving: realizedSaving });
-      setShowRating({ id: openArchive.id, store: openArchive.store });
+      // Chantier 96 — marquage uniquement si l'ingestion a réellement abouti
+      // (voir importPrices, même règle).
+      if (realizedSaving !== null) {
+        updateArchive(openArchive.id, { ticket_scanned: true, realized_saving: realizedSaving });
+        setShowRating({ id: openArchive.id, store: openArchive.store });
+      }
     } else {
       const storeId = entries[0]?.storeId || "autre";
       const storeInfo = STORES.find(s => s.id === storeId) || { id:"autre", name: entries[0]?.store_name || "Autre", logo:"🏪" };

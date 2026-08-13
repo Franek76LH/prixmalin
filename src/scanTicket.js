@@ -24,6 +24,16 @@ export function imageFileToJpegBase64(file) {
   });
 }
 
+// Chantier 96 — produits EXPLOITABLES d'un résultat de scan : un nom et un
+// prix strictement positif (mêmes critères que le filtre d'import
+// p.keep && p.name && p.price > 0). Sert de garde-fou : un scan qui n'en
+// produit AUCUN ne doit jamais enchaîner vers l'import — c'est ce trou qui
+// laissait passer un « ticket scanné » fantôme (archive marquée, zéro
+// écriture Core, realized_saving calculé sur un vieux ticket). Pure.
+export function filtrerProduitsExploitables(products) {
+  return (products || []).filter(p => p && p.name && Number(p.price) > 0);
+}
+
 export async function scanTicketWithClaude(imageBase64, refProducts = []) {
   const { data, error } = await supabase.functions.invoke("scan-ticket", {
     body: { imageBase64, refProducts },
