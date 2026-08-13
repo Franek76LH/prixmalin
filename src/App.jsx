@@ -19,6 +19,8 @@ import { calculerEmpreinteTicket, chercherTicketParEmpreinte, poserEmpreinteApre
 // Chantier 94 Lot 10 — Points Malin / niveaux / badges (affichage seul, le
 // serveur attribue tout — Lots 8-9).
 import { agregerPoints, calculerNiveau, progressionBadge, detecterNouveauxBadges, statistiquesContributions, chargerProfilGamification, chargerBadgesUtilisateur, sommerPointsDernierTicket } from "./lib/gamificationCore";
+// Chantier 95 Lot 11 — sollicitation « relève le prix » pendant les courses.
+import { diagnostiquerPrix, doitSolliciter, doitProposerSollicitation, marquerSollicitationPrix, fileACompleter, chargerPrixPourDiagnostic } from "./lib/sollicitationPrixCore";
 import { capturerEvenement } from "./lib/posthog";
 import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
 import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
@@ -2553,9 +2555,14 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
 }
 
 // ── PRICE ENTRY SHEET (saisie manuelle) ───────────────────────────────────────
-function PriceEntrySheet({ onClose, onSave, existingPrice }) {
-  const [brand,   setBrand]   = useState(existingPrice?.brand||"");
-  const [product, setProduct] = useState(existingPrice?.product||"");
+// Chantier 95 Lot 11 (additif) — prefill : pré-remplit les champs produit
+// SANS passer en mode « modification » (existingPrice), pour que la double
+// écriture Core (création) reste active. magasinVerrouille { nom, enseigne,
+// storeLegacyId, adresse } : le magasin est CONNU (session de courses) — il
+// n'est jamais redemandé, le sélecteur est remplacé par un simple rappel.
+function PriceEntrySheet({ onClose, onSave, existingPrice, prefill = null, magasinVerrouille = null }) {
+  const [brand,   setBrand]   = useState(existingPrice?.brand || prefill?.brand || "");
+  const [product, setProduct] = useState(existingPrice?.product || prefill?.product || "");
   const [format,  setFormat]  = useState(existingPrice?.format||"");
   const [quantite,       setQuantite]       = useState(existingPrice?.quantite || "");
   const [unite,          setUnite]          = useState(existingPrice?.unite || "");
@@ -2563,11 +2570,11 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
   const [price,   setPrice]   = useState(existingPrice?.price?.toString()||"");
 
   // Sélecteur de magasin (même logique que le flux post-scan #35)
-  const [selectedStore,      setSelectedStore]      = useState(existingPrice?.storeId||"");
-  const [storeNameEdit,      setStoreNameEdit]      = useState(existingPrice?.store_name||"");
+  const [selectedStore,      setSelectedStore]      = useState(existingPrice?.storeId || (magasinVerrouille ? (storeIdFromName(magasinVerrouille.enseigne || magasinVerrouille.nom) || 'autre') : ""));
+  const [storeNameEdit,      setStoreNameEdit]      = useState(existingPrice?.store_name || magasinVerrouille?.nom || "");
   const [knownStores,        setKnownStores]        = useState([]);
   const [knownStoresLoading, setKnownStoresLoading] = useState(false);
-  const [resolvedStoreId,    setResolvedStoreId]    = useState(existingPrice?.store_id||null);
+  const [resolvedStoreId,    setResolvedStoreId]    = useState(existingPrice?.store_id || magasinVerrouille?.storeLegacyId || null);
   const [enseigneQuery,      setEnseigneQuery]      = useState('');
   const [showEnseigneDrop,   setShowEnseigneDrop]   = useState(false);
   const [showEnseigneSearch, setShowEnseigneSearch] = useState(false);
@@ -2599,7 +2606,7 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
     });
   }, []);
 
-  const canSubmit = product.trim() && (!quantite || !!unite) && price && !isNaN(parseFloat(price)) && (resolvedStoreId || selectedStore);
+  const canSubmit = product.trim() && (!quantite || !!unite) && price && !isNaN(parseFloat(price)) && (resolvedStoreId || selectedStore || magasinVerrouille);
 
   const ENSEIGNES_LIST = [
     { id:"lidl",        name:"Lidl"          },
@@ -2658,7 +2665,7 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
       conditionnement: Number(conditionnement) || 1,
       storeId:       selectedStore || 'autre',
       store_name:    storeNameEdit.trim(),
-      store_address: storeRecord?.address || '',
+      store_address: storeRecord?.address || magasinVerrouille?.adresse || '',
       store_id:      resolvedStoreId,
       price:         parseFloat(price),
       date:          new Date().toISOString(),
@@ -2760,7 +2767,17 @@ function PriceEntrySheet({ onClose, onSave, existingPrice }) {
           {/* ─── Sélecteur de magasin (même logique que le flux post-scan #35) ─── */}
           <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:10 }}>Magasin *</div>
 
-          {resolvedStoreId ? (
+          {/* Chantier 95 — magasin de la session : connu, jamais redemandé. */}
+          {magasinVerrouille ? (
+            <div style={{ background:"#F0FFF5", borderRadius:14, padding:"14px 16px", marginBottom:16, border:`1.5px solid ${C.green}` }}>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.green, marginBottom:2 }}>
+                🏪 {storeNameEdit || magasinVerrouille.nom || "Magasin de tes courses"}
+              </div>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>
+                {magasinVerrouille.adresse || "Le magasin de ta session de courses"}
+              </div>
+            </div>
+          ) : resolvedStoreId ? (
             /* Magasin résolu */
             <div style={{ background:"#F0FFF5", borderRadius:14, padding:"14px 16px", marginBottom:16, border:`1.5px solid ${C.green}` }}>
               <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.green, marginBottom:4 }}>
@@ -9222,6 +9239,14 @@ export default function App() {
   // dans le mini-dialogue, une fois le récap fermé.
   const [rapprochementCourses, setRapprochementCourses] = useState(null);
   const [verifCourses, setVerifCourses] = useState([]);
+  // Chantier 95 Lot 11 — sollicitation « relève le prix » : carte discrète
+  // après un cochage (null ou { cle, nom }), saisie de prix ouverte (null ou
+  // { cle, article, origine: 'carte' | 'file' }), et visibilité de la file
+  // « À compléter ». Tout est non bloquant ; l'anti-répétition et la file
+  // vivent dans le doc de session (sollicitations_prix, additif).
+  const [sollicitationPrix, setSollicitationPrix] = useState(null);
+  const [sollicitationSaisie, setSollicitationSaisie] = useState(null);
+  const [fileACompleterVisible, setFileACompleterVisible] = useState(false);
   // Chantier 88 Lot 2 — lignes liste_courses de statut 'reporte', tenues à
   // l'écart de `items` (liste active, comparateur, session) : elles ne
   // comptent jamais comme achetées et ne polluent pas la liste active.
@@ -10096,6 +10121,82 @@ export default function App() {
     // (Android ; l'API n'existe pas sur Safari iOS → no-op silencieux, le
     // retour visuel — case verte, bascule de section — fait l'équivalent).
     if (nouvelEtat === 'au_caddie') { try { navigator.vibrate?.(15); } catch { /* ignore */ } }
+    // Chantier 95 Lot 11 — au cochage : diagnostic de prix asynchrone, jamais
+    // bloquant pour le cochage lui-même. Au décochage : la carte de cet
+    // article disparaît (rien d'autre ne change).
+    if (nouvelEtat === 'au_caddie') proposerSollicitationPrix(cle);
+    else if (sollicitationPrix?.cle === cle) setSollicitationPrix(null);
+  };
+
+  // Chantier 95 Lot 11 — propose (peut-être) de relever le prix de l'article
+  // qu'on vient de cocher : uniquement si le prix du produit/format à CE
+  // magasin est absent ou trop ancien, une seule fois par produit et par
+  // session. Tout échec (réseau, doc absent) => silence, jamais de carte.
+  const proposerSollicitationPrix = async (cle) => {
+    try {
+      const doc = lireSessionCourses(); // écrit synchroniquement par le cochage
+      if (!doc || doc.statut !== 'active' || doc.utilisateur_id !== session?.user?.id) return;
+      const article = doc.articles?.find(a => a.cle === cle);
+      const magasinId = doc.magasin?.magasin_id;
+      if (!article || article.type !== 'caddie' || article.etat !== 'au_caddie'
+        || !article.produit_id || !magasinId) return;
+      if (!doitProposerSollicitation(doc, cle)) return; // anti-répétition
+      const lignes = await chargerPrixPourDiagnostic(article.produit_id, magasinId);
+      if (lignes === null) return; // diagnostic impossible -> pas de sollicitation
+      const diagnostic = diagnostiquerPrix(article, lignes, { maintenantMs: Date.now() });
+      if (!doitSolliciter(diagnostic)) return;
+      // Marque 'proposee' tout de suite (une seule sollicitation par session).
+      setSessionCourses(prev => {
+        if (!prev || prev.id !== doc.id) return prev;
+        const suivante = marquerSollicitationPrix(prev, cle, 'proposee', new Date().toISOString());
+        if (suivante !== prev) { try { ecrireSessionCourses(suivante); } catch { /* best effort */ } }
+        return suivante;
+      });
+      setSollicitationPrix({ cle, nom: article.nom_affiche ?? article.nom_reference ?? 'ce produit' });
+    } catch (e) {
+      console.error('Sollicitation prix (sautée, best effort) :', e);
+    }
+  };
+
+  // Chantier 95 — décision sur la carte ('plus_tard' -> file, 'ignoree' ->
+  // plus de sollicitation pour ce produit cette session). Réversible de fait :
+  // tout vit dans le doc de session.
+  const deciderSollicitationPrix = (cle, etat) => {
+    setSessionCourses(prev => {
+      if (!prev) return prev;
+      const suivante = marquerSollicitationPrix(prev, cle, etat, new Date().toISOString());
+      if (suivante !== prev) { try { ecrireSessionCourses(suivante); } catch { /* best effort */ } }
+      return suivante;
+    });
+    setSollicitationPrix(null);
+  };
+
+  // Chantier 95 — « Relever » : ouvre la saisie de prix EXISTANTE, préremplie
+  // produit/marque, magasin de la session verrouillé (jamais redemandé).
+  const ouvrirSaisieSollicitation = (cle, origine) => {
+    const article = sessionCoursesActive?.articles?.find(a => a.cle === cle);
+    setSollicitationPrix(null);
+    if (origine === 'file') setFileACompleterVisible(false);
+    if (!article) return;
+    setSollicitationSaisie({ cle, article, origine });
+  };
+
+  // Chantier 95 — prix enregistré depuis la sollicitation : sauvegarde legacy
+  // via le mécanisme existant (handleSavePrice ; l'écriture Core est déjà
+  // faite DANS PriceEntrySheet), puis l'article sort de la file ('relevee').
+  const enregistrerPrixSollicitation = (entry) => {
+    const saisie = sollicitationSaisie;
+    setSollicitationSaisie(null);
+    try { handleSavePrice(entry); } catch (e) { console.error('Sauvegarde prix sollicitation :', e); }
+    if (saisie?.cle) {
+      setSessionCourses(prev => {
+        if (!prev) return prev;
+        const suivante = marquerSollicitationPrix(prev, saisie.cle, 'relevee', new Date().toISOString());
+        if (suivante !== prev) { try { ecrireSessionCourses(suivante); } catch { /* best effort */ } }
+        return suivante;
+      });
+    }
+    if (saisie?.origine === 'file') setFileACompleterVisible(true);
   };
 
   // Lot 5 — notes libres « Ajoutés en route » : données de session uniquement
@@ -10117,6 +10218,10 @@ export default function App() {
     // Chantier 91 — même purge des dialogues de rapprochement qu'à la clôture.
     setRapprochementCourses(null);
     setVerifCourses([]);
+    // Chantier 95 — même purge des sollicitations de prix.
+    setSollicitationPrix(null);
+    setSollicitationSaisie(null);
+    setFileACompleterVisible(false);
     effacerSessionCourses();
     setSessionCourses(null);
     // Lot 4 — bascule aussi la ligne base en 'abandonnee' (best effort). Si
@@ -10383,6 +10488,10 @@ export default function App() {
     // les décisions restantes vivent déjà dans donnees (réversibles).
     setRapprochementCourses(null);
     setVerifCourses([]);
+    // Chantier 95 — sollicitations de prix purgées avec la session.
+    setSollicitationPrix(null);
+    setSollicitationSaisie(null);
+    setFileACompleterVisible(false);
     effacerSessionCourses();
     setSessionCourses(null);
     setTab("home");
@@ -11105,6 +11214,98 @@ export default function App() {
           );
         })()}
 
+        {/* Chantier 95 Lot 11 — carte discrète de sollicitation après un
+            cochage : jamais bloquante (le cochage est déjà fait), une seule
+            par produit et par session. Au-dessus du snackbar Lot 7. */}
+        {tab === "courses" && sollicitationPrix && sessionCoursesActive && (
+          <div style={{ position:"fixed", bottom:150, left:"50%", transform:"translateX(-50%)", width:"calc(100% - 32px)", maxWidth:398, background:"#fff", border:"1.5px solid #F0DFA8", borderRadius:14, padding:"12px 14px", zIndex:60, boxShadow:"0 6px 20px rgba(0,0,0,0.18)", animation:"slideIn 0.25s ease" }}>
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:"#7A6000", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:3 }}>💡 Aide PrixMalin</div>
+            <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:"#1a1a1a", marginBottom:10 }}>
+              Relève le prix de {sollicitationPrix.nom} ici ?
+            </div>
+            <div style={{ display:"flex", gap:8 }}>
+              <button onClick={()=>ouvrirSaisieSollicitation(sollicitationPrix.cle, 'carte')}
+                style={{ flex:1, padding:"10px", border:"none", borderRadius:10, background:C.orange, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, color:"#111", cursor:"pointer" }}>
+                Relever
+              </button>
+              <button onClick={()=>deciderSollicitationPrix(sollicitationPrix.cle, 'plus_tard')}
+                style={{ flex:1, padding:"10px", border:"1.5px solid #eee", borderRadius:10, background:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:"#333", cursor:"pointer" }}>
+                Plus tard
+              </button>
+              <button onClick={()=>deciderSollicitationPrix(sollicitationPrix.cle, 'ignoree')}
+                style={{ padding:"10px 12px", border:"1.5px solid #eee", borderRadius:10, background:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:"#999", cursor:"pointer" }}>
+                Ignorer
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Chantier 95 Lot 11 — file « À compléter » : rappel avant la caisse,
+            accès aux prix restants (relever / ignorer / continuer). Ne bloque
+            JAMAIS le passage en caisse. */}
+        {fileACompleterVisible && sessionCoursesActive && (() => {
+          const file = fileACompleter(sessionCoursesActive);
+          const F7 = "'Nunito',sans-serif";
+          return (
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:150, padding:24 }} onClick={()=>setFileACompleterVisible(false)}>
+              <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:16, padding:"20px", maxWidth:340, width:"100%", maxHeight:"80vh", overflowY:"auto" }}>
+                <div style={{ fontFamily:F7, fontWeight:900, fontSize:15, color:"#1a1a1a", marginBottom:6 }}>📋 Prix à relever</div>
+                {file.length === 0 ? (
+                  <div style={{ fontFamily:F7, fontSize:13, color:"#888", marginBottom:14 }}>Tout est réglé — plus rien à relever. 🎉</div>
+                ) : (
+                  <>
+                    <div style={{ fontFamily:F7, fontSize:13, color:"#888", marginBottom:14 }}>
+                      {file.length} prix peu{file.length > 1 ? "vent" : "t"} encore être relevé{file.length > 1 ? "s" : ""} avant de passer en caisse — rien d'obligatoire.
+                    </div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:14 }}>
+                      {file.map(a => (
+                        <div key={a.cle} style={{ display:"flex", alignItems:"center", gap:8, border:"1.5px solid #eee", borderRadius:10, padding:"9px 10px" }}>
+                          <span style={{ fontFamily:F7, fontWeight:800, fontSize:13, color:"#1a1a1a", flex:1, minWidth:0 }}>
+                            {a.nom_affiche ?? a.nom_reference ?? "Article"}
+                          </span>
+                          <button onClick={()=>ouvrirSaisieSollicitation(a.cle, 'file')}
+                            style={{ padding:"8px 12px", border:"none", borderRadius:8, background:C.orange, fontFamily:F7, fontWeight:900, fontSize:12, color:"#111", cursor:"pointer" }}>
+                            Relever
+                          </button>
+                          <button onClick={()=>deciderSollicitationPrix(a.cle, 'ignoree')}
+                            style={{ padding:"8px 10px", border:"1.5px solid #eee", borderRadius:8, background:"#fff", fontFamily:F7, fontWeight:800, fontSize:12, color:"#999", cursor:"pointer" }}>
+                            Ignorer
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+                <button onClick={()=>setFileACompleterVisible(false)}
+                  style={{ width:"100%", padding:"12px", border:"1.5px solid #eee", borderRadius:10, background:"#fff", fontFamily:F7, fontWeight:800, fontSize:14, color:"#333", cursor:"pointer" }}>
+                  Continuer
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Chantier 95 Lot 11 — saisie de prix EXISTANTE, préremplie, magasin
+            de la session verrouillé (jamais redemandé). L'écriture Core est
+            faite dans le sheet ; un échec réseau n'altère ni la session ni le
+            cochage (best effort de bout en bout). */}
+        {sollicitationSaisie && sessionCoursesActive && (
+          <PriceEntrySheet
+            onClose={()=>{ const orig = sollicitationSaisie?.origine; setSollicitationSaisie(null); if (orig === 'file') setFileACompleterVisible(true); }}
+            onSave={enregistrerPrixSollicitation}
+            prefill={{
+              product: sollicitationSaisie.article.nom_reference || sollicitationSaisie.article.nom_affiche || "",
+              brand: sollicitationSaisie.article.nom_marque || "",
+            }}
+            magasinVerrouille={{
+              nom: sessionCoursesActive.magasin?.nom ?? "Magasin",
+              enseigne: sessionCoursesActive.magasin?.enseigne ?? null,
+              storeLegacyId: null,
+              adresse: [sessionCoursesActive.magasin?.adresse, [sessionCoursesActive.magasin?.code_postal, sessionCoursesActive.magasin?.ville].filter(Boolean).join(" ")].filter(Boolean).join(", ") || null,
+            }}
+          />
+        )}
+
         {/* Chantier 90 Lot 4 — confirmation du magasin avant le scan « Je
             passe en caisse » : le magasin de la session est proposé par
             défaut, « Changer de magasin » retombe sur la résolution existante
@@ -11118,6 +11319,14 @@ export default function App() {
               <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:"#888", marginBottom:16 }}>
                 Le ticket sera rattaché à tes courses en cours.
               </div>
+              {/* Chantier 95 Lot 11 — rappel NON bloquant : des prix restent à
+                  relever. Le passage en caisse reste possible tel quel. */}
+              {(() => { const file = fileACompleter(sessionCoursesActive); return file.length > 0 && (
+                <button onClick={()=>{ setCaisseCourses(false); setFileACompleterVisible(true); }}
+                  style={{ width:"100%", padding:"12px", border:"1.5px solid #F0DFA8", borderRadius:10, background:"#FFF8E6", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:"#7A6000", cursor:"pointer", marginBottom:8 }}>
+                  📋 {file.length} prix peu{file.length > 1 ? "vent" : "t"} encore être relevé{file.length > 1 ? "s" : ""} — voir la liste
+                </button>
+              ); })()}
               <button onClick={()=>lancerScanCaisse(sessionCoursesActive.magasin ?? null)}
                 style={{ width:"100%", padding:"13px", border:"none", borderRadius:10, background:C.green, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer", marginBottom:8 }}>
                 ✅ Oui, chez {sessionCoursesActive.magasin?.nom ?? "ce magasin"}
