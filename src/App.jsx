@@ -1883,6 +1883,12 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
 
   const loadExample = () => { setJsonText(EXAMPLE); parseAndPreview(EXAMPLE); };
   const toggleProduct = id => setEditableProducts(prev=>prev.map(p=>p.id===id?{...p,keep:!p.keep}:p));
+  // Chantier 99 — libellé affichable d'un produit lu : "name" OU, à défaut,
+  // "libelle_ticket" brut. Le prompt anti-faux-rattachement laisse
+  // volontairement name vide (confiance "faible") quand rien ne matche le
+  // catalogue : ces produits restent exploitables/affichables/éditables, on
+  // ne force JAMAIS un name.
+  const libelleProduit = (p) => (p?.name?.trim() || p?.libelle_ticket?.trim() || "");
   const updatePrice = (id,val) => setEditableProducts(prev=>prev.map(p=>p.id===id?{...p,price:parseFloat(val)||0}:p));
 
   const confirm = async (idsToShare) => {
@@ -1901,10 +1907,11 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     if (resolvedStoreId && selectedStore && selectedStore !== 'autre') {
       localStorage.setItem(`prixmalin_lastStore_${selectedStore}`, resolvedStoreId);
     }
-    const toImport=editableProducts.filter(p=>p.keep&&p.name&&p.price>0).map(p=>({
+    // Chantier 99 — exploitable = libellé (name OU libelle_ticket) + prix > 0.
+    const toImport=editableProducts.filter(p=>p.keep&&(p.name||p.libelle_ticket)&&p.price>0).map(p=>({
       id:           Date.now()+p.id,
       brand:        p.brand||"",
-      product:      p.name,
+      product:      p.name || p.libelle_ticket || "",
       libelle_ticket: p.libelle_ticket||null,
       format:       p.format||"",
       // A.1 — transportés depuis le scan (voyagent mais NON écrits en base : ce
@@ -2006,7 +2013,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
       return;
     }
     const list = products || editableProducts;
-    const ids = new Set(list.filter(p => p.keep && p.name && p.price > 0).map(p => p.id));
+    const ids = new Set(list.filter(p => p.keep && (p.name || p.libelle_ticket) && p.price > 0).map(p => p.id));
     setShareChecked(ids);
     setStatus("share");
   };
@@ -2648,7 +2655,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                     <div style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 14px" }}>
                       <button onClick={()=>toggleProduct(p.id)} style={{ width:24, height:24, borderRadius:6, flexShrink:0, cursor:"pointer", border:`2px solid ${p.keep?C.blue:C.gray}`, background:p.keep?C.blue:C.white, color:C.white, fontSize:13, display:"flex", alignItems:"center", justifyContent:"center" }}>{p.keep?"✓":""}</button>
                       <div style={{ flex:1 }}>
-                        <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{p.brand?`${p.brand} · `:""}{p.name}</div>
+                        <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{p.brand?`${p.brand} · `:""}{libelleProduit(p)}</div>
                         <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap", marginTop:2 }}>
                           {(formatStructureLu(p) || p.format) && (
                             <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>{formatStructureLu(p) || p.format}</span>
@@ -2687,7 +2694,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
               </div>
 
               <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:24 }}>
-                {editableProducts.filter(p=>p.keep&&p.name&&p.price>0).map(p => {
+                {editableProducts.filter(p=>p.keep&&(p.name||p.libelle_ticket)&&p.price>0).map(p => {
                   const checked = shareChecked.has(p.id);
                   const toggle = () => setShareChecked(prev => {
                     const next = new Set(prev);
@@ -2698,7 +2705,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   const openEdit = () => {
                     if (isEditing) { setEditingId(null); return; }
                     setEditingId(p.id);
-                    setEditDraft({ name: p.name, price: p.price, category: p.category || guessCategory(p.name) });
+                    setEditDraft({ name: libelleProduit(p), price: p.price, category: p.category || guessCategory(libelleProduit(p)) });
                   };
                   const saveEdit = () => {
                     setEditableProducts(prev => prev.map(ep => ep.id === p.id
@@ -2714,7 +2721,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                         </div>
                         <div style={{ flex:1, minWidth:0 }}>
                           <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                            {p.brand ? `${p.brand} · ` : ""}{p.name}
+                            {p.brand ? `${p.brand} · ` : ""}{libelleProduit(p)}
                           </div>
                           <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap", marginTop:2 }}>
                             {(formatStructureLu(p) || p.format) && (

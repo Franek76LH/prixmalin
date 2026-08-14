@@ -28,6 +28,26 @@ describe('filtrerProduitsExploitables', () => {
     expect(filtrerProduitsExploitables(null)).toEqual([]);
     expect(filtrerProduitsExploitables(undefined)).toEqual([]);
   });
+
+  // Chantier 99 — name vide mais libelle_ticket présent = produit lu, exploitable.
+  it('un produit sans name mais avec libelle_ticket et prix > 0 est exploitable', () => {
+    const produits = [
+      { name: '', libelle_ticket: 'COPPA', price: 2.5, confiance: 'faible' },
+      { libelle_ticket: '*AUCHAN MOZZARELLA', price: 1.05 },
+    ];
+    expect(filtrerProduitsExploitables(produits)).toHaveLength(2);
+  });
+
+  it('sans name NI libelle_ticket, ou sans prix > 0 : toujours exclu (garde-fou ch. 96 intact)', () => {
+    const produits = [
+      { name: '', libelle_ticket: '', price: 3 },
+      { price: 2 },
+      { name: '', libelle_ticket: 'COPPA', price: 0 },
+      { libelle_ticket: 'COPPA', price: null },
+      { libelle_ticket: 'COPPA', price: -1 },
+    ];
+    expect(filtrerProduitsExploitables(produits)).toEqual([]);
+  });
 });
 
 describe('scanTicketRobuste — réessai automatique et statuts honnêtes (Chantier 98)', () => {

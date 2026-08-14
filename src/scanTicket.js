@@ -24,14 +24,17 @@ export function imageFileToJpegBase64(file) {
   });
 }
 
-// Chantier 96 — produits EXPLOITABLES d'un résultat de scan : un nom et un
-// prix strictement positif (mêmes critères que le filtre d'import
-// p.keep && p.name && p.price > 0). Sert de garde-fou : un scan qui n'en
-// produit AUCUN ne doit jamais enchaîner vers l'import — c'est ce trou qui
-// laissait passer un « ticket scanné » fantôme (archive marquée, zéro
-// écriture Core, realized_saving calculé sur un vieux ticket). Pure.
+// Chantier 96 — produits EXPLOITABLES d'un résultat de scan : un libellé et
+// un prix strictement positif (mêmes critères que le filtre d'import). Sert
+// de garde-fou : un scan qui n'en produit AUCUN ne doit jamais enchaîner vers
+// l'import — c'est ce trou qui laissait passer un « ticket scanné » fantôme
+// (archive marquée, zéro écriture Core, realized_saving sur un vieux ticket).
+// Chantier 99 — le libellé est "name" OU, à défaut, "libelle_ticket" : le
+// prompt anti-faux-rattachement laisse VOLONTAIREMENT name vide quand le
+// produit ne matche pas le catalogue (confiance "faible") ; exiger name
+// jetait ces produits pourtant bien lus (faux « ticket illisible »). Pure.
 export function filtrerProduitsExploitables(products) {
-  return (products || []).filter(p => p && p.name && Number(p.price) > 0);
+  return (products || []).filter(p => p && (p.name || p.libelle_ticket) && Number(p.price) > 0);
 }
 
 export async function scanTicketWithClaude(imageBase64, refProducts = []) {
