@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback, Component } from "react";
-import { scanTicketWithClaude, imageFileToJpegBase64, scanMultipleTicketsWithClaude, filtrerProduitsExploitables } from "./scanTicket";
+import { imageFileToJpegBase64, scanMultipleTicketsWithClaude, filtrerProduitsExploitables, scanTicketRobuste, MESSAGES_SCAN } from "./scanTicket";
 import { STORES, STALE_DAYS, JOURS_MOYENNE } from "./constants";
 import { supabase } from "./lib/supabase";
 import { mapperLigneListeCourses, chargerVariantes, getCategoryPresentation, formatFormatStructure, calculerPrixUnitaire } from "./lib/catalogueCore";
@@ -1583,9 +1583,11 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     // (scan frais). Les deux ne s'appliquent jamais ensemble.
     if (resumeDraft || !initialResult) return;
     // Chantier 96 — même garde-fou que les scans directs : un résultat sans
-    // produit exploitable n'enchaîne jamais vers l'import.
+    // produit exploitable n'enchaîne jamais vers l'import. Chantier 98 —
+    // message honnête (l'OCR a déjà tourné en amont, ce n'est pas forcément
+    // la photo).
     if (filtrerProduitsExploitables(initialResult?.products).length === 0) {
-      setError("Aucun produit n'a pu être lu sur ce ticket — reprends la photo, bien à plat, entière et nette.");
+      setError(MESSAGES_SCAN.lecture_vide);
       return;
     }
     const enseigne = storeIdFromName(initialResult.store);
@@ -2130,15 +2132,16 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                 setScanning(true); setError("");
                 try {
                   const base64 = await imageFileToJpegBase64(file);
-                  const parsed = await scanTicketWithClaude(base64, refProducts);
-                  // Chantier 96 — garde-fou : un scan sans produit exploitable
-                  // ne doit JAMAIS enchaîner vers l'import (l'import fantôme
-                  // marquait l'archive « ticket scanné » sans rien écrire).
-                  if (filtrerProduitsExploitables(parsed?.products).length === 0) {
-                    setError("Aucun produit n'a pu être lu sur ce ticket — reprends la photo, bien à plat, entière et nette.");
+                  // Chantier 96 (garde-fou 0 produit) + Chantier 98 : lecture
+                  // fiabilisée (1 réessai auto) et message HONNÊTE — un échec
+                  // du service de lecture n'accuse plus la photo.
+                  const scan = await scanTicketRobuste(base64, refProducts);
+                  if (scan.statut !== 'ok') {
+                    setError(MESSAGES_SCAN[scan.statut] || MESSAGES_SCAN.service_indisponible);
                     setScanning(false);
                     return;
                   }
+                  const parsed = scan.resultat;
                   const enseigne = storeIdFromName(parsed.store);
                   const prods = parsed.products.map((p,i) => ({...p, id:i, keep:true}));
                   setResult(parsed); setSelectedStore(enseigne);
@@ -2162,15 +2165,16 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                 setGalleryScanning(true); setError("");
                 try {
                   const base64 = await imageFileToJpegBase64(file);
-                  const parsed = await scanTicketWithClaude(base64, refProducts);
-                  // Chantier 96 — même garde-fou que la caméra : zéro produit
-                  // exploitable => erreur claire, aucun enchaînement.
-                  if (filtrerProduitsExploitables(parsed?.products).length === 0) {
-                    setError("Aucun produit n'a pu être lu sur ce ticket — reprends la photo, bien à plat, entière et nette.");
+                  // Chantier 96 + 98 — même garde-fou et même lecture fiabilisée
+                  // que la caméra : réessai auto, message honnête.
+                  const scan = await scanTicketRobuste(base64, refProducts);
+                  if (scan.statut !== 'ok') {
+                    setError(MESSAGES_SCAN[scan.statut] || MESSAGES_SCAN.service_indisponible);
                     setGalleryScanning(false);
                     e.target.value = "";
                     return;
                   }
+                  const parsed = scan.resultat;
                   const enseigne = storeIdFromName(parsed.store);
                   const prods = parsed.products.map((p,i) => ({...p, id:i, keep:true, share:true}));
                   setResult(parsed); setSelectedStore(enseigne);
@@ -2207,14 +2211,15 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                 setScanning(true); setError("");
                 try {
                   const base64 = await imageFileToJpegBase64(file);
-                  const parsed = await scanTicketWithClaude(base64, refProducts);
-                  // Chantier 96 — même garde-fou que ci-dessus : zéro produit
-                  // exploitable => erreur claire, aucun enchaînement.
-                  if (filtrerProduitsExploitables(parsed?.products).length === 0) {
-                    setError("Aucun produit n'a pu être lu sur ce ticket — reprends la photo, bien à plat, entière et nette.");
+                  // Chantier 96 + 98 — même garde-fou et même lecture fiabilisée
+                  // que ci-dessus : réessai auto, message honnête.
+                  const scan = await scanTicketRobuste(base64, refProducts);
+                  if (scan.statut !== 'ok') {
+                    setError(MESSAGES_SCAN[scan.statut] || MESSAGES_SCAN.service_indisponible);
                     setScanning(false);
                     return;
                   }
+                  const parsed = scan.resultat;
                   const enseigne = storeIdFromName(parsed.store);
                   const prods = parsed.products.map((p,i) => ({...p, id:i, keep:true}));
                   setResult(parsed); setSelectedStore(enseigne);
@@ -2235,6 +2240,14 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                 <span style={{ fontSize:48 }}>📷</span>
                 {scanning ? "⏳ Analyse en cours..." : "Ouvrir la caméra"}
               </button>
+              {/* Chantier 98 — repli quand la lecture échoue : ne jamais bloquer,
+                  la saisie manuelle reste toujours possible. */}
+              {error && onManualEntry && (
+                <button onClick={()=>{ onClose(); onManualEntry(); }} disabled={scanning}
+                  style={{ width:"100%", padding:"14px", marginTop:12, border:"none", borderRadius:12, background:C.orange, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.white, cursor:"pointer" }}>
+                  ✏️ Saisie manuelle
+                </button>
+              )}
               <button onClick={()=>setStatus("idle")} style={{ width:"100%", padding:"14px", marginTop:12, border:"none", borderRadius:12, background:"#4A90D9", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.white, cursor:"pointer" }}>
                 Autres options
               </button>

@@ -55,6 +55,12 @@ serve(async (req) => {
       body: JSON.stringify({
         model: "anthropic/claude-sonnet-4-5",
         max_tokens: 16000,
+        // Chantier 98 — extraction déterministe : sans temperature explicite,
+        // OpenRouter applique la valeur par défaut (1.0), ce qui rend la
+        // lecture instable d'un jour à l'autre sur la MÊME photo (constaté :
+        // 2 produits la veille, 0 le lendemain). Pour de l'OCR/extraction,
+        // temperature 0.
+        temperature: 0,
         messages: [{
           role: "user",
           content: [
@@ -138,6 +144,14 @@ RÈGLE ABSOLUE : extraire CHAQUE article du ticket sans exception.
     } catch (_e) {
       throw new Error("Réponse du modèle incomplète (ticket trop long ?), réessaie");
     }
+
+    // Chantier 98 — observabilité des succès : jusqu'ici seuls les échecs
+    // étaient tracés, un 200 avec 0 produit était invisible dans les logs.
+    console.log("[scan-ticket] ok", JSON.stringify({
+      produits: Array.isArray(parsed?.products) ? parsed.products.length : null,
+      images: images.length,
+      finish_reason: data.choices?.[0]?.finish_reason ?? null,
+    }));
 
     return new Response(JSON.stringify(parsed), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

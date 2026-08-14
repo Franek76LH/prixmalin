@@ -1,6 +1,11 @@
 // Chantier 96 — garde-fou « scan sans produit exploitable ».
-import { describe, it, expect } from 'vitest';
-import { filtrerProduitsExploitables } from './scanTicket';
+// Chantier 98 — lecture OCR fiabilisée (réessai + statuts honnêtes).
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+vi.mock('./lib/supabase', () => ({ supabase: { functions: { invoke: vi.fn() } } }));
+
+import { supabase } from './lib/supabase';
+import { filtrerProduitsExploitables, scanTicketRobuste, MESSAGES_SCAN } from './scanTicket';
 
 describe('filtrerProduitsExploitables', () => {
   it('garde uniquement les produits avec nom et prix > 0', () => {
@@ -22,5 +27,65 @@ describe('filtrerProduitsExploitables', () => {
     expect(filtrerProduitsExploitables([])).toEqual([]);
     expect(filtrerProduitsExploitables(null)).toEqual([]);
     expect(filtrerProduitsExploitables(undefined)).toEqual([]);
+  });
+});
+
+describe('scanTicketRobuste — réessai automatique et statuts honnêtes (Chantier 98)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const OK = { store: 'Auchan', products: [{ name: 'Coppa', price: 2.5 }] };
+  const VIDE = { store: 'Auchan', products: [] };
+
+  it('1 seul appel quand la première lecture rend des produits', async () => {
+    supabase.functions.invoke.mockResolvedValue({ data: OK, error: null });
+    const r = await scanTicketRobuste('b64', []);
+    expect(r).toEqual({ statut: 'ok', resultat: OK });
+    expect(supabase.functions.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('réessaie une fois quand la lecture rend 0 produit, et rend le 2e résultat s\'il est bon', async () => {
+    supabase.functions.invoke
+      .mockResolvedValueOnce({ data: VIDE, error: null })
+      .mockResolvedValueOnce({ data: OK, error: null });
+    const r = await scanTicketRobuste('b64', []);
+    expect(r).toEqual({ statut: 'ok', resultat: OK });
+    expect(supabase.functions.invoke).toHaveBeenCalledTimes(2);
+  });
+
+  it('2 lectures vides -> statut lecture_vide (le résultat est quand même renvoyé)', async () => {
+    supabase.functions.invoke.mockResolvedValue({ data: VIDE, error: null });
+    const r = await scanTicketRobuste('b64', []);
+    expect(r.statut).toBe('lecture_vide');
+    expect(r.resultat).toEqual(VIDE);
+    expect(supabase.functions.invoke).toHaveBeenCalledTimes(2);
+  });
+
+  it('réessaie après un échec technique, et réussit au 2e essai', async () => {
+    supabase.functions.invoke
+      .mockResolvedValueOnce({ data: null, error: { message: 'timeout' } })
+      .mockResolvedValueOnce({ data: OK, error: null });
+    const r = await scanTicketRobuste('b64', []);
+    expect(r).toEqual({ statut: 'ok', resultat: OK });
+  });
+
+  it('2 échecs techniques -> service_indisponible avec le message, ne throw jamais', async () => {
+    supabase.functions.invoke.mockResolvedValue({ data: null, error: { message: 'quota dépassé' } });
+    const r = await scanTicketRobuste('b64', []);
+    expect(r.statut).toBe('service_indisponible');
+    expect(r.message).toBe('quota dépassé');
+    expect(supabase.functions.invoke).toHaveBeenCalledTimes(2);
+  });
+
+  it('échec puis lecture vide -> lecture_vide (une réponse valide prime sur l\'erreur)', async () => {
+    supabase.functions.invoke
+      .mockResolvedValueOnce({ data: null, error: { message: 'réseau' } })
+      .mockResolvedValueOnce({ data: VIDE, error: null });
+    const r = await scanTicketRobuste('b64', []);
+    expect(r.statut).toBe('lecture_vide');
+  });
+
+  it('les messages honnêtes existent pour chaque statut d\'échec et ne commencent pas par accuser la photo', () => {
+    expect(MESSAGES_SCAN.lecture_vide).toMatch(/service de lecture/);
+    expect(MESSAGES_SCAN.service_indisponible).toMatch(/photo n'y est pour rien/);
   });
 });
