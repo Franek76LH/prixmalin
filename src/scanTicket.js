@@ -37,6 +37,18 @@ export function filtrerProduitsExploitables(products) {
   return (products || []).filter(p => p && (p.name || p.libelle_ticket) && Number(p.price) > 0);
 }
 
+// Chantier 100 — badge d'une ligne de l'écran de validation :
+//   'reconnu'    -> la BASE reconnaîtra ce produit à l'import (RPC de
+//                   prévisualisation, même cascade mémoire/alias que
+//                   enregistrer_ticket_core) — prime sur la confiance IA ;
+//   'a_verifier' -> pas reconnu ET confiance IA "faible" ;
+//   null         -> rien à afficher. Pure, jamais d'exception.
+export function badgeProduit(p, reconnaissanceParId = {}) {
+  if (reconnaissanceParId?.[p?.id] === true) return 'reconnu';
+  if (p?.confiance === 'faible') return 'a_verifier';
+  return null;
+}
+
 export async function scanTicketWithClaude(imageBase64, refProducts = []) {
   const { data, error } = await supabase.functions.invoke("scan-ticket", {
     body: { imageBase64, refProducts },

@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('./lib/supabase', () => ({ supabase: { functions: { invoke: vi.fn() } } }));
 
 import { supabase } from './lib/supabase';
-import { filtrerProduitsExploitables, scanTicketRobuste, MESSAGES_SCAN } from './scanTicket';
+import { filtrerProduitsExploitables, scanTicketRobuste, MESSAGES_SCAN, badgeProduit } from './scanTicket';
 
 describe('filtrerProduitsExploitables', () => {
   it('garde uniquement les produits avec nom et prix > 0', () => {
@@ -47,6 +47,32 @@ describe('filtrerProduitsExploitables', () => {
       { libelle_ticket: 'COPPA', price: -1 },
     ];
     expect(filtrerProduitsExploitables(produits)).toEqual([]);
+  });
+});
+
+// Chantier 100 — badge « ✓ reconnu » (base) vs « ⚠ à vérifier » (confiance IA).
+describe('badgeProduit', () => {
+  it('reconnu par la base -> "reconnu", même avec confiance IA "faible"', () => {
+    expect(badgeProduit({ id: 3, confiance: 'faible' }, { 3: true })).toBe('reconnu');
+  });
+
+  it('absent de la map + confiance "faible" -> "a_verifier"', () => {
+    expect(badgeProduit({ id: 4, confiance: 'faible' }, { 3: true })).toBe('a_verifier');
+  });
+
+  it('non reconnu (false dans la map) + confiance "faible" -> "a_verifier"', () => {
+    expect(badgeProduit({ id: 5, confiance: 'faible' }, { 5: false })).toBe('a_verifier');
+  });
+
+  it('ni reconnu ni confiance faible -> null (aucun badge)', () => {
+    expect(badgeProduit({ id: 6, confiance: 'haute' }, {})).toBeNull();
+    expect(badgeProduit({ id: 7 }, {})).toBeNull();
+  });
+
+  it('robuste : map absente/nulle ou produit nul -> jamais d\'exception, fallback comportement actuel', () => {
+    expect(badgeProduit({ id: 8, confiance: 'faible' })).toBe('a_verifier');
+    expect(badgeProduit({ id: 8, confiance: 'faible' }, null)).toBe('a_verifier');
+    expect(badgeProduit(null, { 1: true })).toBeNull();
   });
 });
 

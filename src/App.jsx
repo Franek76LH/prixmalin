@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback, Component } from "react";
-import { imageFileToJpegBase64, scanMultipleTicketsWithClaude, filtrerProduitsExploitables, scanTicketRobuste, MESSAGES_SCAN } from "./scanTicket";
+import { imageFileToJpegBase64, scanMultipleTicketsWithClaude, filtrerProduitsExploitables, scanTicketRobuste, MESSAGES_SCAN, badgeProduit } from "./scanTicket";
 import { STORES, STALE_DAYS, JOURS_MOYENNE } from "./constants";
 import { supabase } from "./lib/supabase";
 import { mapperLigneListeCourses, chargerVariantes, getCategoryPresentation, formatFormatStructure, calculerPrixUnitaire } from "./lib/catalogueCore";
@@ -1889,6 +1889,50 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   // catalogue : ces produits restent exploitables/affichables/éditables, on
   // ne force JAMAIS un name.
   const libelleProduit = (p) => (p?.name?.trim() || p?.libelle_ticket?.trim() || "");
+
+  // ── Chantier 100 — badge « ✓ reconnu » vs « ⚠ à vérifier » ──────────────
+  // La RPC lecture seule previsualiser_reconnaissance_ticket rejoue la MÊME
+  // cascade que l'import (mémoire d'enseigne puis alias, anti-collision) :
+  // un produit qu'elle reconnaît sera réellement reconnu à l'import, même si
+  // l'IA a mis confiance "faible" (name vide volontaire). Purement
+  // informatif : fire-and-forget, jamais bloquant, échec = comportement
+  // d'avant (aucun badge vert).
+  const [reconnaissanceParId, setReconnaissanceParId] = useState({});
+  const signatureReconnaissanceRef = useRef(null);
+
+  const chargerReconnaissance = async (magasinCoreId, produits) => {
+    try {
+      // MIROIR EXACT des valeurs envoyées à enregistrer_ticket_core par
+      // envoyerTicketCore (libelle_brut = product = name || libelle_ticket),
+      // pour que le badge colle à la réalité de l'import.
+      const p_lignes = produits.map(p => ({
+        i: p.id,
+        libelle_brut: (p.name || p.libelle_ticket || ""),
+        libelle_ticket: (p.libelle_ticket || ""),
+      }));
+      const { data, error } = await supabase.rpc('previsualiser_reconnaissance_ticket', {
+        p_magasin_id: magasinCoreId,
+        p_lignes,
+      });
+      if (error || !Array.isArray(data)) return; // fallback silencieux = comportement actuel
+      const map = {};
+      for (const r of data) { if (r && r.i != null) map[r.i] = r.reconnu === true; }
+      setReconnaissanceParId(map);
+    } catch { /* jamais bloquant */ }
+  };
+
+  // Déclenchement : dès que magasin CORE validé + produits présents, une seule
+  // fois par couple (magasin, ids) — couvre la sélection manuelle du magasin
+  // ET le magasin de session (les deux passent par l'état magasinCore).
+  useEffect(() => {
+    const magasinId = magasinCore?.id;
+    if (!magasinId || editableProducts.length === 0) return;
+    const signature = `${magasinId}|${editableProducts.map(p => p.id).join(',')}`;
+    if (signatureReconnaissanceRef.current === signature) return;
+    signatureReconnaissanceRef.current = signature;
+    chargerReconnaissance(magasinId, editableProducts);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [magasinCore, editableProducts]);
   const updatePrice = (id,val) => setEditableProducts(prev=>prev.map(p=>p.id===id?{...p,price:parseFloat(val)||0}:p));
 
   const confirm = async (idsToShare) => {
@@ -2660,9 +2704,12 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                           {(formatStructureLu(p) || p.format) && (
                             <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>{formatStructureLu(p) || p.format}</span>
                           )}
-                          {p.confiance === "faible" && (
+                          {/* Chantier 100 — reconnu par la base (mémoire/alias) prime sur la confiance IA */}
+                          {badgeProduit(p, reconnaissanceParId) === 'reconnu' ? (
+                            <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:900, color:C.green, background:"#DFF7E8", borderRadius:99, padding:"2px 8px" }}>✓ reconnu</span>
+                          ) : badgeProduit(p, reconnaissanceParId) === 'a_verifier' ? (
                             <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:900, color:"#B25900", background:"#FFE7C2", borderRadius:99, padding:"2px 8px" }}>⚠ à vérifier</span>
-                          )}
+                          ) : null}
                         </div>
                       </div>
                       <input type="number" step="0.01" min="0" value={p.price} onChange={e=>updatePrice(p.id,e.target.value)}
@@ -2727,9 +2774,12 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                             {(formatStructureLu(p) || p.format) && (
                               <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>{formatStructureLu(p) || p.format}</span>
                             )}
-                            {p.confiance === "faible" && (
+                            {/* Chantier 100 — reconnu par la base (mémoire/alias) prime sur la confiance IA */}
+                            {badgeProduit(p, reconnaissanceParId) === 'reconnu' ? (
+                              <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:900, color:C.green, background:"#DFF7E8", borderRadius:99, padding:"2px 8px" }}>✓ reconnu</span>
+                            ) : badgeProduit(p, reconnaissanceParId) === 'a_verifier' ? (
                               <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:900, color:"#B25900", background:"#FFE7C2", borderRadius:99, padding:"2px 8px" }}>⚠ à vérifier</span>
-                            )}
+                            ) : null}
                           </div>
                         </div>
                         <div style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0 }}>
