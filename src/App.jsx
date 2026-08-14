@@ -39,6 +39,8 @@ import ValidationScanSheet from "./components/admin/ValidationScanSheet";
 import { onNeedRefresh, applyUpdate } from "./lib/swUpdate";
 // #56.5.A — double écriture Core, fire-and-forget, invisible pour l'utilisateur
 import { envoyerTicketCore, envoyerPrixManuelCore } from "./lib/doubleEcritureCore";
+// Chantier 97 — sélecteur de magasin CORE obligatoire avant l'import du ticket.
+import { chargerMagasinsCoreActifs, chargerFrequencesMagasins, classerMagasins as classerMagasinsSelecteur, filtrerMagasins, obtenirPositionAppareil, trouverStoreLegacyPourMagasin, formaterAdresseMagasin, formaterDistance } from "./lib/selecteurMagasinCore";
 // #56.6 — realized_saving Core scopé à un ticket, réutilise #56.5.B
 import { calculerRealizedSavingTicket } from "./lib/economiesCoreConfirmees";
 // #56.4 — vrai moteur Core (produits/prix/magasins via la vue prix_comparables),
@@ -1550,6 +1552,20 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   // Chantier 93 Lot 7 — doublon de ticket détecté AVANT import : null ou
   // { date_ticket } du ticket existant. Tant que non nul, rien n'a été écrit.
   const [doublonTicket,     setDoublonTicket]     = useState(null);
+  // Chantier 97 — magasin CORE obligatoire avant tout import. magasinCore est
+  // LE gate : tant qu'il est nul, goToShare/confirm refusent, donc AUCUNE
+  // écriture (ni Core, ni legacy price_db/community_prices/archive) n'est
+  // possible. Le ref miroir évite les lectures d'état périmé dans les
+  // enchaînements async (session, création de magasin).
+  const [magasinCore,        setMagasinCoreState]  = useState(null);
+  const magasinCoreRef = useRef(null);
+  const definirMagasinCore = (m) => { magasinCoreRef.current = m; setMagasinCoreState(m); };
+  // Sélecteur : { tous, habituels, proches, autres } ; null = pas encore chargé.
+  const [magasinsCore,        setMagasinsCore]        = useState(null);
+  const [magasinsCoreLoading, setMagasinsCoreLoading] = useState(false);
+  const magasinsCoreLoadingRef = useRef(false);
+  const [rechercheMagasin,    setRechercheMagasin]    = useState('');
+  const [modeAjoutMagasin,    setModeAjoutMagasin]    = useState(false);
   const ambiguResolverRef = useRef(null);
   const fileInputRef    = useRef(null);
   const galleryInputRef = useRef(null);
@@ -1584,8 +1600,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     }
     setStoreNameEdit(initialResult.store || "");
     setStoreLocation(estFrancois ? "" : (initialResult.address || ""));
-    fetchKnownStores(enseigne, initialResult.address || null);
-    setStatus("store");
+    arriverEtapeMagasin(enseigne, initialResult.address || null, initialResult.store || null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1647,6 +1662,59 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     setKnownStoresLoading(false);
   };
 
+  // ── Chantier 97 — sélecteur de magasin CORE ─────────────────────────────
+  // Charge magasins actifs + fréquences d'usage (tickets & sessions) +
+  // position (GPS seulement si permission déjà accordée, sinon zone
+  // utilisateur du chantier 81, sinon rien). Jamais bloquant : toute panne
+  // aboutit à des listes vides et l'utilisateur passe par la recherche ou
+  // l'ajout. `suggestion` (nom OCR du ticket, ex. « Auchan ») pré-remplit la
+  // recherche UNIQUEMENT si elle matche au moins un magasin.
+  const chargerSelecteurMagasins = async (suggestion = null) => {
+    if (magasinsCoreLoadingRef.current) return;
+    magasinsCoreLoadingRef.current = true;
+    setMagasinsCoreLoading(true);
+    try {
+      const [tous, frequences, positionGps] = await Promise.all([
+        chargerMagasinsCoreActifs(),
+        chargerFrequencesMagasins(),
+        obtenirPositionAppareil({ timeoutMs: 2500 }),
+      ]);
+      const position = positionGps || lireZoneStockee()?.userPos || null;
+      setMagasinsCore({ tous, ...classerMagasinsSelecteur({ magasins: tous, frequences, position }) });
+      if (suggestion && filtrerMagasins(tous, suggestion).length > 0) {
+        setRechercheMagasin(prev => prev || suggestion);
+      }
+    } catch (e) {
+      console.error('[C97] chargement sélecteur magasins', e);
+      setMagasinsCore({ tous: [], habituels: [], proches: [], autres: [] });
+    }
+    magasinsCoreLoadingRef.current = false;
+    setMagasinsCoreLoading(false);
+  };
+
+  // Choix d'un magasin CORE existant : satisfait le gate, et ALIGNE le circuit
+  // legacy sur le même magasin (nom/adresse affichés + store_id legacy via la
+  // correspondance, best effort — null si aucune fiche legacy rattachée).
+  const choisirMagasinCore = async (m) => {
+    definirMagasinCore({ id: m.id, nom: m.nom, adresse: m.adresse || '', code_postal: m.code_postal || '', ville: m.ville || '' });
+    setError('');
+    setStoreNameEdit(m.nom || '');
+    setStoreLocation(formaterAdresseMagasin(m));
+    const slugLegacy = storeIdFromName(m.enseignes?.nom || m.nom);
+    if (slugLegacy) setSelectedStore(slugLegacy);
+    const legacyId = await trouverStoreLegacyPourMagasin(m.id);
+    setResolvedStoreId(legacyId);
+  };
+
+  // Arrivée à l'étape magasin (tous les points d'entrée du scan) : le
+  // sélecteur Core se charge en parallèle, la résolution legacy silencieuse
+  // (fetchKnownStores) continue pour la cohérence du circuit legacy.
+  const arriverEtapeMagasin = async (enseigne, adresse, nomOcr = null) => {
+    setStatus("store"); // l'étape s'affiche tout de suite, chaque chargement a son propre état
+    chargerSelecteurMagasins(nomOcr);
+    await fetchKnownStores(enseigne, adresse || null);
+  };
+
   // LOT 1 « reconnaissance magasin au scan » — heuristique de catégorie :
   // les enseignes/format de proximité -> 'proximite', sinon 'grande_surface'.
   // Sert de PRÉ-sélection (l'utilisateur peut changer d'un tap).
@@ -1695,25 +1763,29 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   // comparaison). Sinon, comportement inchangé : insertStoreInDB crée la
   // fiche.
   //
-  // LOT 1 (shadow estFrancois) : une fois la fiche legacy obtenue, on crée AUSSI
-  // la fiche Core (magasins + correspondance) via la RPC, pour qu'un magasin
-  // inconnu aboutisse enfin à un ticket. La zone grise (candidat proche mais
-  // incertain) est tranchée par l'utilisateur. Hors François : comportement
-  // strictement inchangé.
+  // LOT 1, ouvert à tous par le Chantier 97 : une fois la fiche legacy
+  // obtenue, on crée AUSSI la fiche Core (magasins + correspondance) via la
+  // RPC — son magasin_id est désormais REQUIS par le gate magasin. La zone
+  // grise (candidat proche mais incertain) est tranchée par l'utilisateur.
+  // Renvoie { legacyId, magasinCoreId, magasinCoreNom } ; magasinCoreId null
+  // = échec côté Core (le gate reste fermé, l'utilisateur réessaie ou choisit
+  // dans la liste).
   const resoudreOuCreerStore = async (enseigne, adresse, lat, lng, nom) => {
     const existant = knownStores.find(s => s.address && normName(s.address) === normName(adresse));
     const legacyId = existant ? existant.id : await insertStoreInDB(enseigne, adresse, lat, lng, nom);
-    if (!legacyId || !estFrancois) return legacyId;
+    if (!legacyId) return { legacyId: null, magasinCoreId: null, magasinCoreNom: null };
 
-    const res = await appelerCreationMagasinCore(legacyId, enseigne, adresse, lat, lng, nom);
+    let magasinCoreNom = null;
+    let res = await appelerCreationMagasinCore(legacyId, enseigne, adresse, lat, lng, nom);
     if (res && res.statut === 'ambigu' && res.candidat) {
       const choix = await demanderChoixMagasinAmbigu(res.candidat);
-      await appelerCreationMagasinCore(legacyId, enseigne, adresse, lat, lng, nom,
+      if (choix === 'rattacher') magasinCoreNom = res.candidat.nom || null;
+      res = await appelerCreationMagasinCore(legacyId, enseigne, adresse, lat, lng, nom,
         choix === 'rattacher'
           ? { rattacherMagasinId: res.candidat.magasin_id }
           : { forcerCreation: true });
     }
-    return legacyId;
+    return { legacyId, magasinCoreId: res?.magasin_id ?? null, magasinCoreNom };
   };
 
   const EXAMPLE = `{
@@ -1739,8 +1811,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
       setStoreNameEdit(parsed.store||"");
       setStoreLocation(estFrancois ? "" : (parsed.address||""));
       setError("");
-      await fetchKnownStores(enseigne, parsed.address || null);
-      setStatus("store");
+      await arriverEtapeMagasin(enseigne, parsed.address || null, parsed.store || null);
     } catch(e) { setError("JSON invalide : "+e.message); }
   };
 
@@ -1766,7 +1837,13 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     setStoreNameEdit(resumeDraft.storeNameEdit || "");
     setStoreLocation(resumeDraft.storeLocation || "");
     setShareChecked(new Set(Array.isArray(resumeDraft.shareChecked) ? resumeDraft.shareChecked : []));
-    setStatus(resumeDraft.status === 'share' ? 'share' : 'store');
+    // Chantier 97 — le magasin CORE fait partie du brouillon. Un vieux
+    // brouillon sans magasinCore (d'avant le chantier) ne peut PAS reprendre
+    // en share : retour à l'étape magasin, le gate reste étanche.
+    definirMagasinCore(resumeDraft.magasinCore?.id ? resumeDraft.magasinCore : null);
+    const statutRepris = resumeDraft.status === 'share' && resumeDraft.magasinCore?.id ? 'share' : 'store';
+    if (statutRepris === 'store') chargerSelecteurMagasins();
+    setStatus(statutRepris);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1782,10 +1859,11 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
       result, editableProducts, selectedStore, resolvedStoreId,
       storeNameEdit, storeLocation, status,
       shareChecked: Array.from(shareChecked),
+      magasinCore, // Chantier 97 — le magasin CORE validé voyage avec le brouillon
     };
     draftRef.current = draft;
     ecrireScanDraft(draft);
-  }, [result, editableProducts, selectedStore, resolvedStoreId, storeNameEdit, storeLocation, status, shareChecked]);
+  }, [result, editableProducts, selectedStore, resolvedStoreId, storeNameEdit, storeLocation, status, shareChecked, magasinCore]);
 
   // Flush fiable juste avant que iOS évince/recharge la page : on re-écrit le
   // dernier brouillon connu sur passage en arrière-plan (visibilitychange
@@ -1807,6 +1885,16 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
 
   const confirm = async (idsToShare) => {
     if (saving) return;
+    // Chantier 97 — ceinture et bretelles du gate magasin : même si un état
+    // inattendu (vieux brouillon, enchaînement imprévu) a mené jusqu'ici sans
+    // magasin CORE, RIEN n'est écrit — ni Core, ni legacy. Retour à l'étape
+    // magasin avec message clair.
+    if (!magasinCoreRef.current?.id) {
+      setError("Choisis d'abord le magasin de ce ticket");
+      if (!magasinsCore && !magasinsCoreLoadingRef.current) chargerSelecteurMagasins();
+      setStatus("store");
+      return;
+    }
     setSaving(true);
     if (resolvedStoreId && selectedStore && selectedStore !== 'autre') {
       localStorage.setItem(`prixmalin_lastStore_${selectedStore}`, resolvedStoreId);
@@ -1869,9 +1957,14 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     // transmise à onImport (au lieu d'être ignorée via void) pour permettre
     // un realized_saving Core scopé à ce ticket quand core_actif=true — mais
     // confirm() ne l'attend jamais lui-même, le flux legacy reste inchangé.
+    // Chantier 97 — le magasin CORE validé part dans le payload sous la clé
+    // magasin_id (contrat : la base le lira en priorité) ; magasin_texte
+    // devient le nom exact de la fiche Core (résolution par texte exact OK
+    // même avant la mise à jour SQL) et store_legacy_id reste le filet.
     const ecritureCorePromise = envoyerTicketCore(toImport, {
+      magasinId:     magasinCoreRef.current?.id || null,
       storeLegacyId: resolvedStoreId || null,
-      magasinTexte:  storeNameEdit.trim() || result?.store || null,
+      magasinTexte:  magasinCoreRef.current?.nom || storeNameEdit.trim() || result?.store || null,
       dateTicket:    result?.date || null,
     });
     // Chantier 93 — pose de l'empreinte sur le ticket créé (fire & forget,
@@ -1899,6 +1992,17 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   };
 
   const goToShare = (products) => {
+    // Chantier 97 — GATE MAGASIN : aucun passage à la validation/partage des
+    // articles sans magasin CORE validé. Comme confirm() n'est atteignable
+    // que depuis l'étape share, ce verrou bloque LES DEUX circuits (Core ET
+    // legacy price_db/community_prices/archive). Lecture via le ref pour ne
+    // jamais rater une sélection posée dans le même tick (session, création).
+    if (!magasinCoreRef.current?.id) {
+      setError("Choisis d'abord le magasin de ce ticket");
+      if (!magasinsCore && !magasinsCoreLoadingRef.current) chargerSelecteurMagasins();
+      setStatus("store");
+      return;
+    }
     const list = products || editableProducts;
     const ids = new Set(list.filter(p => p.keep && p.name && p.price > 0).map(p => p.id));
     setShareChecked(ids);
@@ -1921,8 +2025,23 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     setSelectedStore(enseigne);
     setStoreNameEdit(nom);
     setStoreLocation(adresse);
-    await fetchKnownStores(enseigne, adresse || null);
-    goToShare(prods);
+    // Chantier 97 — le magasin CORE de la session satisfait directement le
+    // gate (c'est déjà un magasin validé par l'utilisateur à l'ouverture de
+    // la session). Sans magasin_id Core en session (cas limite), pas de
+    // passe-droit : l'étape magasin s'affiche avec le sélecteur.
+    if (magasinSession?.magasin_id) {
+      definirMagasinCore({
+        id: magasinSession.magasin_id,
+        nom: nom || 'Magasin',
+        adresse: magasinSession?.adresse || '',
+        code_postal: magasinSession?.code_postal || '',
+        ville: magasinSession?.ville || '',
+      });
+      await fetchKnownStores(enseigne, adresse || null);
+      goToShare(prods);
+    } else {
+      await arriverEtapeMagasin(enseigne, adresse, nom || parsed?.store || null);
+    }
   };
 
   const repondreAmbigu = (choix) => {
@@ -2030,8 +2149,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   } else {
                     setStoreNameEdit(parsed.store||"");
                     setStoreLocation(estFrancois ? "" : (parsed.address||""));
-                    await fetchKnownStores(enseigne, parsed.address || null);
-                    setStatus("store");
+                    await arriverEtapeMagasin(enseigne, parsed.address || null, parsed.store || null);
                   }
                 } catch(e) { setError("Erreur scan : " + e.message); }
                 setScanning(false);
@@ -2063,8 +2181,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   } else {
                     setStoreNameEdit(parsed.store || "");
                     setStoreLocation(estFrancois ? "" : (parsed.address || ""));
-                    await fetchKnownStores(enseigne, parsed.address || null);
-                    setStatus("store");
+                    await arriverEtapeMagasin(enseigne, parsed.address || null, parsed.store || null);
                   }
                 } catch(e) { setError("Erreur scan : " + e.message); }
                 setGalleryScanning(false);
@@ -2108,8 +2225,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   } else {
                     setStoreNameEdit(parsed.store||"");
                     setStoreLocation(estFrancois ? "" : (parsed.address||""));
-                    await fetchKnownStores(enseigne, parsed.address || null);
-                    setStatus("store");
+                    await arriverEtapeMagasin(enseigne, parsed.address || null, parsed.store || null);
                   }
                 } catch(e) { setError("Erreur scan : " + e.message); }
                 setScanning(false);
@@ -2135,20 +2251,22 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                 {result.date && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>📅 {new Date(result.date).toLocaleDateString("fr-FR",{day:"numeric",month:"long",year:"numeric"})}</div>}
               </div>
 
-              {knownStoresLoading ? (
-                <div style={{ textAlign:"center", padding:"24px 0", fontFamily:"'Nunito',sans-serif", fontSize:14, color:C.textLight }}>⏳ Recherche du magasin...</div>
-
-              ) : resolvedStoreId ? (
-                /* ── Cas 1 : magasin reconnu ── */
+              {/* Chantier 97 — étape magasin refondue : le magasin CORE est
+                  obligatoire (gate des DEUX circuits d'écriture). Trois vues :
+                  magasin validé -> carte de confirmation ; sinon sélecteur
+                  intelligent (habituels / proximité / recherche) ; sinon
+                  formulaire d'ajout (ex-formulaire unifié). */}
+              {magasinCore ? (
+                /* ── Magasin CORE validé ── */
                 <>
                   <div style={{ background:"#F0FFF5", borderRadius:14, padding:"16px", marginBottom:20, border:`1.5px solid ${C.green}` }}>
                     <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.green, marginBottom:4 }}>
-                      ✅ {storeNameEdit || "Magasin reconnu"}
+                      ✅ {magasinCore.nom}
                     </div>
                     <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>
-                      {knownStores.find(s=>s.id===resolvedStoreId)?.address || "Position GPS enregistrée"}
+                      {formaterAdresseMagasin(magasinCore) || "Adresse non renseignée"}
                     </div>
-                    <button onClick={()=>{ setResolvedStoreId(null); setShowManualAddress(false); setSavedGpsCoords(null); setError(""); }}
+                    <button onClick={()=>{ definirMagasinCore(null); setResolvedStoreId(null); setShowManualAddress(false); setSavedGpsCoords(null); setError(""); if (!magasinsCore && !magasinsCoreLoadingRef.current) chargerSelecteurMagasins(); }}
                       style={{ marginTop:8, background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.blue, fontWeight:800, cursor:"pointer", padding:0, textDecoration:"underline" }}>
                       Changer de magasin
                     </button>
@@ -2161,8 +2279,75 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   </button>
                 </>
 
+              ) : !modeAjoutMagasin ? (
+                /* ── Sélecteur intelligent de magasins CORE ── */
+                <>
+                  <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.text, marginBottom:10 }}>
+                    🏪 Dans quel magasin as-tu fait ce ticket ?
+                  </div>
+                  {error && <div style={{ background:"#FEE", borderRadius:10, padding:"10px 14px", marginBottom:12, fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.red, fontWeight:700 }}>⚠️ {error}</div>}
+                  <div style={{ position:"relative", marginBottom:14 }}>
+                    <span style={{ position:"absolute", left:12, top:"50%", transform:"translateY(-50%)", fontSize:16, pointerEvents:"none" }}>🔍</span>
+                    <input value={rechercheMagasin} onChange={e=>setRechercheMagasin(e.target.value)}
+                      placeholder="Enseigne, ville ou code postal..."
+                      style={{ width:"100%", padding:"11px 14px 11px 38px", borderRadius:10, border:`2px solid ${rechercheMagasin.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:14, color:C.text, outline:"none", boxSizing:"border-box" }} />
+                  </div>
+                  {(magasinsCoreLoading || !magasinsCore) ? (
+                    <div style={{ textAlign:"center", padding:"24px 0", fontFamily:"'Nunito',sans-serif", fontSize:14, color:C.textLight }}>⏳ Chargement des magasins...</div>
+                  ) : (()=>{
+                    const q = rechercheMagasin.trim();
+                    const titreSection = (t) => (
+                      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", margin:"12px 0 6px" }}>{t}</div>
+                    );
+                    const boutonMagasin = (m, badge=null) => (
+                      <button key={m.id} onClick={()=>choisirMagasinCore(m)}
+                        style={{ width:"100%", padding:"11px 14px", borderRadius:10, border:`2px solid ${C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", cursor:"pointer", textAlign:"left", boxSizing:"border-box" }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                          <span style={{ fontWeight:800, fontSize:14, color:C.text, flex:1 }}>{m.nom}</span>
+                          {badge && <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.blue, flexShrink:0 }}>{badge}</span>}
+                        </div>
+                        {formaterAdresseMagasin(m) && <div style={{ fontSize:11, fontWeight:600, color:C.textLight, marginTop:2 }}>{formaterAdresseMagasin(m)}</div>}
+                      </button>
+                    );
+                    if (q) {
+                      const resultats = filtrerMagasins(magasinsCore.tous, q).slice(0, 30);
+                      return resultats.length > 0 ? (
+                        <div style={{ display:"flex", flexDirection:"column", gap:6, maxHeight:280, overflowY:"auto" }}>{resultats.map(m=>boutonMagasin(m))}</div>
+                      ) : (
+                        <div style={{ textAlign:"center", padding:"14px 0", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>Aucun magasin trouvé pour « {q} » — ajoute-le ci-dessous.</div>
+                      );
+                    }
+                    return (
+                      <>
+                        {magasinsCore.habituels.length > 0 && <>
+                          {titreSection("⭐ Tes magasins habituels")}
+                          <div style={{ display:"flex", flexDirection:"column", gap:6 }}>{magasinsCore.habituels.map(m=>boutonMagasin(m))}</div>
+                        </>}
+                        {magasinsCore.proches.length > 0 && <>
+                          {titreSection("📍 À proximité")}
+                          <div style={{ display:"flex", flexDirection:"column", gap:6 }}>{magasinsCore.proches.map(m=>boutonMagasin(m, m.distance_km != null ? formaterDistance(m.distance_km) : null))}</div>
+                        </>}
+                        {magasinsCore.autres.length > 0 && <>
+                          {titreSection("Tous les magasins")}
+                          <div style={{ display:"flex", flexDirection:"column", gap:6, maxHeight:220, overflowY:"auto" }}>{magasinsCore.autres.map(m=>boutonMagasin(m))}</div>
+                        </>}
+                        {magasinsCore.tous.length === 0 && (
+                          <div style={{ textAlign:"center", padding:"14px 0", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>Aucun magasin enregistré pour l'instant — ajoute le tien ci-dessous.</div>
+                        )}
+                      </>
+                    );
+                  })()}
+                  <button onClick={()=>{ setModeAjoutMagasin(true); setError(""); if (!storeNameEdit.trim() && result?.store) setStoreNameEdit(result.store); }}
+                    style={{ width:"100%", padding:"13px", marginTop:14, border:`2px dashed ${C.blue}`, borderRadius:12, background:C.blueLight, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.blue, cursor:"pointer" }}>
+                    ➕ Ajouter un magasin
+                  </button>
+                  <button onClick={()=>setStatus("idle")} style={{ width:"100%", padding:"13px", marginTop:8, border:`2px solid ${C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.textLight, cursor:"pointer" }}>
+                    ← Retour
+                  </button>
+                </>
+
               ) : (
-                /* ── Cas 2 : formulaire unifié ── */
+                /* ── Ajout d'un magasin (ex-formulaire unifié) ── */
                 <>
                   {/* Nom du magasin */}
                   <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Nom du magasin</div>
@@ -2275,29 +2460,10 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                     );
                   })()}
 
-                  {/* #54 — magasins déjà connus pour cette enseigne : sélection
-                      manuelle possible avant de créer une nouvelle fiche
-                      (filet de sécurité complémentaire au dédoublonnage
-                      automatique par adresse de resoudreOuCreerStore). */}
-                  {knownStores.length > 0 && (
-                    <div style={{ marginBottom:16 }}>
-                      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:700, color:C.gray, marginBottom:6 }}>Ou sélectionne un magasin déjà connu</div>
-                      <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-                        {knownStores.map(s => (
-                          <button key={s.id} onClick={()=>setResolvedStoreId(s.id)}
-                            style={{ padding:"10px 14px", borderRadius:10, border:`2px solid ${C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, cursor:"pointer", textAlign:"left" }}>
-                            {s.name || storeNameEdit}
-                            {s.address && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:600, color:C.textLight, marginTop:2 }}>{s.address}</div>}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* LOT 1 (shadow estFrancois) — Catégorie du magasin, 1 tap.
-                      Pré-sélection heuristique sur le nom ; l'utilisateur peut
-                      basculer. Transmise à la RPC de création Core. */}
-                  {estFrancois && (()=>{
+                  {/* LOT 1, ouvert à tous (Chantier 97) — Catégorie du magasin,
+                      1 tap. Pré-sélection heuristique sur le nom ; l'utilisateur
+                      peut basculer. Transmise à la RPC de création Core. */}
+                  {(()=>{
                     const cat = categorieMagasin || devinerCategorieMagasin(storeNameEdit);
                     const opts = [
                       { id:'grande_surface', label:'🛒 Grande surface' },
@@ -2394,46 +2560,53 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
 
                   {error && <div style={{ background:"#FEE", borderRadius:10, padding:"10px 14px", marginBottom:12, fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.red, fontWeight:700 }}>⚠️ {error}</div>}
 
+                  {/* Chantier 97 — la création du magasin CORE est le SEUL chemin
+                      de sortie de ce formulaire : plus de « Passer », et une
+                      adresse (GPS, manuelle ou celle du ticket) est requise pour
+                      que l'anti-doublon (CP/GPS) puisse travailler. En cas
+                      d'échec Core, le gate reste fermé — message et on réessaie. */}
                   <button disabled={!storeNameEdit.trim() || manualGeocoding} onClick={async()=>{
-                    if (showManualAddress && (manualRue.trim() || manualVille.trim())) {
-                      setManualGeocoding(true); setError("");
-                      if (savedGpsCoords) {
-                        const fullAddress = [manualRue.trim(), manualCP.trim(), manualVille.trim()].filter(Boolean).join(', ');
-                        const id = await resoudreOuCreerStore(selectedStore, fullAddress, savedGpsCoords.lat, savedGpsCoords.lng, storeNameEdit.trim()||null);
-                        setResolvedStoreId(id);
-                      } else {
-                        const fullAddress = `${manualRue.trim()}, ${manualCP.trim()} ${manualVille.trim()}`.trim();
-                        const coords = await geocodeAddress(fullAddress);
-                        if (coords) {
-                          const id = await resoudreOuCreerStore(selectedStore, fullAddress, coords.lat, coords.lng, storeNameEdit.trim()||null);
-                          setResolvedStoreId(id);
-                        } else {
-                          setError("Adresse introuvable — vérifie et réessaie");
-                          setManualGeocoding(false);
-                          return;
-                        }
-                      }
-                      setManualGeocoding(false);
-                    } else if (!showManualAddress && storeLocation.trim()) {
-                      setManualGeocoding(true); setError("");
-                      const coords = await geocodeAddress(storeLocation.trim());
-                      if (coords) {
-                        const id = await resoudreOuCreerStore(selectedStore, storeLocation.trim(), coords.lat, coords.lng, storeNameEdit.trim()||null);
-                        setResolvedStoreId(id);
-                      }
-                      setManualGeocoding(false);
+                    setError("");
+                    const aAdresseManuelle = showManualAddress && (manualRue.trim() || manualCP.trim() || manualVille.trim());
+                    const aAdresseTicket   = !showManualAddress && storeLocation.trim();
+                    if (!aAdresseManuelle && !aAdresseTicket) {
+                      setError("Ajoute l'adresse du magasin (GPS ou manuel) pour pouvoir le créer");
+                      return;
                     }
-                    goToShare();
+                    setManualGeocoding(true);
+                    let adresse, coords;
+                    if (aAdresseManuelle) {
+                      adresse = [manualRue.trim(), [manualCP.trim(), manualVille.trim()].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+                      coords = savedGpsCoords || await geocodeAddress(adresse);
+                      if (!coords && !manualCP.trim()) {
+                        // sans coordonnées NI code postal, l'anti-doublon est aveugle
+                        setError("Adresse introuvable — vérifie (ou ajoute au moins le code postal) et réessaie");
+                        setManualGeocoding(false);
+                        return;
+                      }
+                    } else {
+                      adresse = storeLocation.trim();
+                      coords = await geocodeAddress(adresse); // peut échouer : on continue (comportement d'avant)
+                    }
+                    const creation = await resoudreOuCreerStore(selectedStore, adresse, coords?.lat ?? null, coords?.lng ?? null, storeNameEdit.trim()||null);
+                    setManualGeocoding(false);
+                    if (creation?.magasinCoreId) {
+                      if (creation.legacyId) setResolvedStoreId(creation.legacyId);
+                      const nomFinal = creation.magasinCoreNom || storeNameEdit.trim() || 'Magasin';
+                      setStoreNameEdit(nomFinal);
+                      setStoreLocation(adresse);
+                      definirMagasinCore({ id: creation.magasinCoreId, nom: nomFinal, adresse, code_postal: '', ville: '' });
+                      setModeAjoutMagasin(false);
+                      goToShare();
+                    } else {
+                      setError("Magasin non enregistré — réessaie, ou choisis-le dans la liste");
+                    }
                   }}
                     style={{ width:"100%", padding:"16px", border:"none", borderRadius:12, background:storeNameEdit.trim()&&!manualGeocoding?C.orange:C.grayLight, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:storeNameEdit.trim()&&!manualGeocoding?C.white:C.gray, cursor:storeNameEdit.trim()&&!manualGeocoding?"pointer":"default", marginBottom:12, boxShadow:storeNameEdit.trim()&&!manualGeocoding?"0 6px 20px rgba(204,0,0,0.35)":"none" }}>
-                    {manualGeocoding ? "⏳ Validation..." : "Valider →"}
+                    {manualGeocoding ? "⏳ Validation..." : "Créer et valider →"}
                   </button>
-                  <button onClick={()=>goToShare()}
-                    style={{ width:"100%", marginBottom:8, background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.gray, cursor:"pointer", padding:"8px 0", textDecoration:"underline" }}>
-                    Passer — ne pas lier à un magasin
-                  </button>
-                  <button onClick={()=>setStatus("idle")} style={{ width:"100%", padding:"13px", border:`2px solid ${C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.textLight, cursor:"pointer" }}>
-                    ← Retour
+                  <button onClick={()=>{ setModeAjoutMagasin(false); setError(""); }} style={{ width:"100%", padding:"13px", border:`2px solid ${C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.textLight, cursor:"pointer" }}>
+                    ← Choisir dans la liste
                   </button>
                 </>
               )}

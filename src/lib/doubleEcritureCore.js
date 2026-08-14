@@ -6,7 +6,13 @@
 // techniques (RPC en erreur, exception réseau/JS), en console uniquement.
 import { supabase } from './supabase';
 
-export async function envoyerTicketCore(toImport, { storeLegacyId, magasinTexte, dateTicket } = {}) {
+// Chantier 97 — magasinId : id du magasin CORE validé par l'utilisateur avant
+// l'import. Envoyé sous la clé `magasin_id` du payload (contrat coordonné avec
+// la base : enregistrer_ticket_core lira p_ticket->>'magasin_id' et le passera
+// en 1er argument de resoudre_magasin_core). Tant que la base ne le lit pas,
+// la clé est simplement ignorée — magasin_texte (nom exact de la fiche Core)
+// et store_legacy_id restent les filets de résolution.
+export async function envoyerTicketCore(toImport, { magasinId, storeLegacyId, magasinTexte, dateTicket } = {}) {
   try {
     if (!Array.isArray(toImport) || toImport.length === 0) return null;
 
@@ -26,6 +32,7 @@ export async function envoyerTicketCore(toImport, { storeLegacyId, magasinTexte,
     );
 
     const payload = {
+      magasin_id:      magasinId || null,
       store_legacy_id: storeLegacyId || null,
       magasin_texte:   magasinTexte || null,
       date_ticket:     dateTicket || new Date().toISOString().slice(0, 10),

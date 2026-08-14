@@ -62,6 +62,36 @@ describe('envoyerTicketCore — propagation libelle_ticket (#68)', () => {
   });
 });
 
+describe('envoyerTicketCore — magasin_id Core dans le payload (Chantier 97)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('transmet magasin_id quand un magasin Core est validé', async () => {
+    supabase.rpc.mockResolvedValue({ data: { statut: 'ok', prix_ecrits: 1, rejets: [] }, error: null });
+
+    await envoyerTicketCore(
+      [{ id: 1, product: 'Lait', brand: '', format: '', qty: 1, price: 1.15 }],
+      { magasinId: '09112b4e-2858-4f15-a1e4-a5072d87e65c', storeLegacyId: 's1', magasinTexte: 'Auchan Mazargues', dateTicket: '2026-08-14' }
+    );
+
+    const [, payload] = supabase.rpc.mock.calls[0];
+    expect(payload.p_ticket.magasin_id).toBe('09112b4e-2858-4f15-a1e4-a5072d87e65c');
+    expect(payload.p_ticket.store_legacy_id).toBe('s1');
+    expect(payload.p_ticket.magasin_texte).toBe('Auchan Mazargues');
+  });
+
+  it('envoie magasin_id=null quand absent (non-régression des anciens appels)', async () => {
+    supabase.rpc.mockResolvedValue({ data: { statut: 'ok', prix_ecrits: 1, rejets: [] }, error: null });
+
+    await envoyerTicketCore(
+      [{ id: 1, product: 'Lait', brand: '', format: '', qty: 1, price: 1.15 }],
+      { storeLegacyId: 's1', magasinTexte: 'Carrefour', dateTicket: '2026-07-10' }
+    );
+
+    const [, payload] = supabase.rpc.mock.calls[0];
+    expect(payload.p_ticket.magasin_id).toBeNull();
+  });
+});
+
 describe('envoyerPrixManuelCore — non modifié par #68', () => {
   beforeEach(() => vi.clearAllMocks());
 
