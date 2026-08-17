@@ -2,7 +2,7 @@ import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback, Com
 import { imageFileToJpegBase64, scanMultipleTicketsWithClaude, filtrerProduitsExploitables, scanTicketRobuste, MESSAGES_SCAN, badgeProduit } from "./scanTicket";
 import { STORES, STALE_DAYS, JOURS_MOYENNE } from "./constants";
 import { supabase } from "./lib/supabase";
-import { mapperLigneListeCourses, chargerVariantes, getCategoryPresentation, formatFormatStructure, calculerPrixUnitaire } from "./lib/catalogueCore";
+import { mapperLigneListeCourses, chargerVariantes, getCategoryPresentation, formatFormatStructure, calculerPrixUnitaire, prixEstFiable, offresPrioritaires, MENTION_PRIX_A_VERIFIER } from "./lib/catalogueCore";
 import { calculerPrixReferenceParUnite } from "./lib/unitesCore";
 import { urlPhotoVariante, offLargeSource, offFullUrl, cloudinaryAgrandi } from "./lib/photosProduits";
 import { nomComposeVariante, formatEtiquetteVariante } from "./lib/nomProduit";
@@ -1539,6 +1539,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   const [manualVille, setManualVille] = useState('');
   const [manualGeocoding,   setManualGeocoding]   = useState(false);
   const [enseigneQuery,     setEnseigneQuery]     = useState('');
+  const champEnseigneRef = useRef(null); // Chantier 104c — refocus après effacement
   const [showEnseigneDrop,   setShowEnseigneDrop]   = useState(false);
   const [showEnseigneSearch, setShowEnseigneSearch] = useState(false);
   const [showManualAddress, setShowManualAddress] = useState(false);
@@ -2492,12 +2493,20 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                             <div style={{ position:"relative" }}>
                               <span style={{ position:"absolute", left:12, top:"50%", transform:"translateY(-50%)", fontSize:16, pointerEvents:"none" }}>🔍</span>
                               <input
+                                ref={champEnseigneRef}
                                 value={enseigneQuery}
                                 onChange={e=>{ setEnseigneQuery(e.target.value); setShowEnseigneDrop(true); }}
                                 onFocus={e=>{ setShowEnseigneDrop(true); e.target.style.borderColor=enseigneQuery.trim()?C.orange:C.grayLight; }}
                                 onBlur={e=>{ setTimeout(()=>setShowEnseigneDrop(false), 150); e.target.style.borderColor=enseigneQuery.trim()?C.orange:C.grayLight; }}
                                 placeholder="Rechercher une enseigne..."
-                                style={{ width:"100%", padding:"11px 14px 11px 38px", borderRadius:10, border:`2px solid ${enseigneQuery.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:14, color:C.text, outline:"none", boxSizing:"border-box" }}
+                                style={{ width:"100%", padding:`11px ${TAILLE_TACTILE}px 11px 38px`, borderRadius:10, border:`2px solid ${enseigneQuery.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:14, color:C.text, outline:"none", boxSizing:"border-box" }}
+                              />
+                              {/* Chantier 104c — la liste déroulante des enseignes
+                                  se referme avec la requête. */}
+                              <BoutonEffacerRecherche
+                                visible={enseigneQuery.length > 0}
+                                champRef={champEnseigneRef}
+                                onEffacer={()=>{ setEnseigneQuery(""); setShowEnseigneDrop(false); }}
                               />
                               <style>{`input::placeholder { color: #6B7280; font-style: italic; }`}</style>
                             </div>
@@ -3362,9 +3371,20 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
     const base = (segmentMarque === 'nationale' && marqueSelectionnee !== 'all')
       ? variantesSegment.filter(v => v.marque_id === marqueSelectionnee)
       : variantesSegment;
-    const labels = new Set();
-    base.forEach(v => { const l = formatFormatStructure(v); if (l) labels.add(l); });
-    return [...labels];
+    // Chantier 104 — un format n'est marqué « à vérifier » que si TOUTES les
+    // variantes qui le portent le sont : le choisir mène alors forcément à un
+    // prix invérifiable. Un format mixte (une vraie fiche de 1 kg à côté d'une
+    // fiche factice) n'est pas marqué — ce serait une fausse alerte sur la
+    // bonne fiche.
+    const parLabel = new Map();
+    base.forEach(v => {
+      const l = formatFormatStructure(v);
+      if (!l) return;
+      const e = parLabel.get(l);
+      if (!e) parLabel.set(l, { label: l, aVerifier: !prixEstFiable(v) });
+      else if (prixEstFiable(v)) e.aVerifier = false;
+    });
+    return [...parLabel.values()];
   }, [variantesSegment, marqueSelectionnee, segmentMarque]);
 
   // Variante(s) résolues par (segment, marque, format). La marque ne filtre
@@ -3596,9 +3616,13 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
                 <button onClick={()=>setFormatSelectionne('all')} style={pillStyle(formatSelectionne==='all')}>
                   Tous les formats
                 </button>
-                {formatsListe.map(label => (
-                  <button key={label} onClick={()=>setFormatSelectionne(label)} style={pillStyle(formatSelectionne===label)}>
+                {formatsListe.map(({ label, aVerifier }) => (
+                  <button key={label} onClick={()=>setFormatSelectionne(label)} style={pillStyle(formatSelectionne===label)}
+                    title={aVerifier ? MENTION_PRIX_A_VERIFIER : undefined}>
                     {label}
+                    {/* Chantier 104 — marqueur discret : ce format ne mène qu'à
+                        des fiches dont le prix ne peut pas être garanti. */}
+                    {aVerifier && <span style={{ marginLeft:5, color:"#B8860B", fontWeight:900 }}>⚠</span>}
                   </button>
                 ))}
               </div>
@@ -3657,6 +3681,63 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
 // quand modeRayon=true (la recherche reste strictement inchangée) : les fiches
 // SANS relevé restent visibles en repli, et une sous_famille nulle regroupe par
 // produit (pas un gros « Autres »). onOpenProduct ouvre la modale (fiches repli).
+// Chantier 104c — croix d'effacement d'une barre de recherche.
+//
+// À poser dans un conteneur position:relative qui entoure UNIQUEMENT le champ
+// (marge externe sur le conteneur, pas sur l'input, sinon la croix se centre
+// sur la marge). L'input doit réserver la place à droite (paddingRight), pour
+// que le texte saisi ne passe pas dessous.
+//
+// Trois points qui font que ça marche vraiment sur iPhone :
+//  - vrai bouton, jamais la croix native de type="search" (Safari iOS l'affiche
+//    de façon inconstante) ;
+//  - preventDefault sur mousedown/touchstart : sans lui, le champ perd le focus
+//    AVANT le clic, le clavier se referme, et il faut retoucher le champ — on
+//    n'aurait rien gagné. Le focus() du onClick est la ceinture de sécurité ;
+//  - 44 × 44 points de zone tactile (recommandation Apple) alors que la croix
+//    dessinée reste discrète.
+const TAILLE_TACTILE = 44;
+function BoutonEffacerRecherche({ visible, onEffacer, champRef }) {
+  if (!visible) return null;
+  const garderLeClavier = (e) => e.preventDefault();
+  return (
+    <button
+      type="button"
+      aria-label="Effacer la recherche"
+      onMouseDown={garderLeClavier}
+      onTouchStart={garderLeClavier}
+      onClick={() => { onEffacer(); champRef?.current?.focus(); }}
+      style={{
+        position: "absolute", right: 0, top: 0, bottom: 0, width: TAILLE_TACTILE,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        background: "none", border: "none", padding: 0, cursor: "pointer",
+        color: "#9AA0A6", fontSize: 15, lineHeight: 1,
+      }}
+    >
+      ✕
+    </button>
+  );
+}
+
+// Chantier 104b — « Sans marque » servait À LA FOIS de clé de regroupement
+// (Map des marques, clé d'ouverture `sorte||marque`) et d'étiquette affichée.
+// La renommer directement aurait cassé silencieusement les regroupements, donc
+// les deux rôles sont désormais séparés : CLE_MARQUE_ABSENTE reste la valeur
+// technique, LIBELLE_MARQUE_ABSENTE est ce que l'utilisateur lit.
+//
+// Pourquoi « Marque à compléter » et surtout PAS « Marques distributeurs » :
+// ce groupe (marque_id NULL) contient des marques NATIONALES bien réelles
+// (Bénénuts, Curly, Lay's, Vico, Belin, Menguy's...). Les MDD, elles, existent
+// déjà comme vraies marques avec est_mdd=true et ne passent jamais par ici.
+// Les appeler « distributeurs » affirmerait que le Curly est une marque de
+// magasin — c'est faux. Et 363 de ces fiches ont perdu leur marque lors de
+// l'incident du 07/08 : leur donner un nom légitime masquerait le problème au
+// lieu de le réparer. « À compléter » dit ce qui est vrai : l'information
+// manque et attend d'être saisie.
+const CLE_MARQUE_ABSENTE = 'Sans marque';
+const LIBELLE_MARQUE_ABSENTE = 'Marque à compléter';
+const libelleMarque = (cle) => (cle === CLE_MARQUE_ABSENTE ? LIBELLE_MARQUE_ABSENTE : cle);
+
 function FamilleDepliee({ membres, items, onAdd, onUpdate, onRemove, modeRayon = false, onOpenProduct }) {
   const [prix,       setPrix]       = useState([]);
   const [loading,    setLoading]    = useState(true);
@@ -3709,6 +3790,13 @@ function FamilleDepliee({ membres, items, onAdd, onUpdate, onRemove, modeRayon =
         nombre_unites:  row.nombre_unites,
       });
       if (!ref) continue; // pas de €/kg (pièce, unité inconnue, donnée manquante) -> exclu
+      // Chantier 104 — quantite_fiable=false : la quantité est inventée, donc
+      // ref.valeur est faux. On garde la ligne VISIBLE (on informe, on ne cache
+      // pas) mais sans aucune valeur au kilo : kgMin/kgMax restent null, et tout
+      // ce qui trie, compare ou badge se fait plus bas sur les seuls formats qui
+      // ont un kgMin. Invariant : quantite_fiable est porté par la VARIANTE,
+      // donc constant pour toutes les lignes d'un même format.
+      const fiable = prixEstFiable(row);
       const paq = Number(row.prix_total);
       const dateMs = row.observe_le ? new Date(row.observe_le).getTime() : null;
       const e = parFormat.get(row.variante_produit_id);
@@ -3720,17 +3808,24 @@ function FamilleDepliee({ membres, items, onAdd, onUpdate, onRemove, modeRayon =
           // regroupées sous une marque virtuelle unique « Marques distributeurs »
           // (fusion, pas renommage). La vraie marque en base reste intacte.
           marqueNom: row.est_mdd ? 'Marques distributeurs'
-            : ((row.nom_marque && row.nom_marque.trim()) ? row.nom_marque.trim() : 'Sans marque'),
+            // Chantier 104b — valeur TECHNIQUE (clé de regroupement), jamais
+            // affichée telle quelle : le rendu passe par libelleMarque().
+            : ((row.nom_marque && row.nom_marque.trim()) ? row.nom_marque.trim() : CLE_MARQUE_ABSENTE),
           // Signature de format (quantité + unité + conditionnement) pour fusionner
           // les formats identiques de MDD différentes une fois le groupe déplié.
           sig: `${row.quantite_nette}|${(row.unite_quantite || '').toLowerCase().trim()}|${Number(row.nombre_unites) || 1}`,
           label: formatFormatStructure(row) || row.libelle_variante || 'Format',
           uniteRef: ref.unite,
-          kgMin: ref.valeur, kgMax: ref.valeur, paqMin: paq, paqMax: paq, dateAncienne: dateMs,
+          prixAVerifier: !fiable,
+          kgMin: fiable ? ref.valeur : null, kgMax: fiable ? ref.valeur : null,
+          paqMin: paq, paqMax: paq, dateAncienne: dateMs,
         });
       } else {
-        if (ref.valeur < e.kgMin) e.kgMin = ref.valeur;
-        if (ref.valeur > e.kgMax) e.kgMax = ref.valeur;
+        if (!fiable) e.prixAVerifier = true;
+        if (fiable) {
+          if (e.kgMin == null || ref.valeur < e.kgMin) e.kgMin = ref.valeur;
+          if (e.kgMax == null || ref.valeur > e.kgMax) e.kgMax = ref.valeur;
+        }
         if (paq < e.paqMin) e.paqMin = paq;
         if (paq > e.paqMax) e.paqMax = paq;
         if (dateMs != null && (e.dateAncienne == null || dateMs < e.dateAncienne)) e.dateAncienne = dateMs;
@@ -3745,9 +3840,15 @@ function FamilleDepliee({ membres, items, onAdd, onUpdate, onRemove, modeRayon =
 
     // Fusion MDD par signature de format (plusieurs MDD au même quantité+unité ->
     // une seule ligne « Marques distributeurs »).
+    // Chantier 104 — les formats « à vérifier » ne sont PAS fusionnés : une
+    // ligne fusionnée qui mélangerait une quantité sûre et une quantité inventée
+    // n'aurait plus de lecture honnête possible. Ils restent des lignes à part,
+    // chacune portant sa mention.
     const fusionnerMdd = (fmts) => {
       const parSig = new Map();
+      const aPart = [];
       for (const f of fmts) {
+        if (f.prixAVerifier) { aPart.push(f); continue; }
         const e = parSig.get(f.sig);
         if (!e) { parSig.set(f.sig, { ...f, mddMerged: true }); }
         else {
@@ -3758,14 +3859,22 @@ function FamilleDepliee({ membres, items, onAdd, onUpdate, onRemove, modeRayon =
           if (f.dateAncienne != null && (e.dateAncienne == null || f.dateAncienne < e.dateAncienne)) e.dateAncienne = f.dateAncienne;
         }
       }
-      return [...parSig.values()];
+      return [...parSig.values(), ...aPart];
     };
-    const stats = (formats) => ({
-      best:  formats[0]?.kgMin ?? Infinity,
-      kgMin: Math.min(...formats.map(f => f.kgMin)),
-      kgMax: Math.max(...formats.map(f => f.kgMax)),
-      uniteRef: formats[0]?.uniteRef || 'kg',
-    });
+    // Chantier 104 — toutes les statistiques au kilo se calculent sur les seuls
+    // formats qui ont un kgMin (donc jamais sur une quantité inventée).
+    // nbComparables sert aux badges : « Meilleur rapport » n'a de sens que s'il
+    // y a au moins deux formats réellement comparables.
+    const stats = (formats) => {
+      const comparables = formats.filter(f => f.kgMin != null);
+      return {
+        best:  comparables[0]?.kgMin ?? Infinity,
+        kgMin: comparables.length ? Math.min(...comparables.map(f => f.kgMin)) : null,
+        kgMax: comparables.length ? Math.max(...comparables.map(f => f.kgMax)) : null,
+        uniteRef: comparables[0]?.uniteRef || formats[0]?.uniteRef || 'kg',
+        nbComparables: comparables.length,
+      };
+    };
     const ordreCle = (a, b) => (a === 'Autres') - (b === 'Autres') || a.localeCompare(b, 'fr');
 
     // ── Arbre sorte (sous_famille) -> marque -> formats. Marques et formats triés
@@ -3786,8 +3895,19 @@ function FamilleDepliee({ membres, items, onAdd, onUpdate, onRemove, modeRayon =
       sansPrixParSorte.get(sorte).push(m);
     }
     const buildMarques = (marques) => [...marques.entries()].map(([nom, fmts]) => {
-      const formats = (nom === 'Marques distributeurs' ? fusionnerMdd(fmts) : fmts.slice()).sort((a, b) => a.kgMin - b.kgMin);
+      // Chantier 104 — tri : les formats comparables d'abord, du meilleur au
+      // pire €/kg ; les « à vérifier » ensuite, entre eux par prix du paquet.
+      // Ils ne peuvent donc jamais occuper la 1re place ni fausser le classement.
+      const formats = (nom === 'Marques distributeurs' ? fusionnerMdd(fmts) : fmts.slice())
+        .sort((a, b) => {
+          const aSansKg = a.kgMin == null, bSansKg = b.kgMin == null;
+          if (aSansKg !== bSansKg) return aSansKg ? 1 : -1;
+          if (aSansKg) return a.paqMin - b.paqMin;
+          return a.kgMin - b.kgMin;
+        });
       return { nom, formats, ...stats(formats) };
+      // best vaut Infinity pour une marque sans aucun format comparable : elle
+      // se range naturellement en fin de liste, sans cas particulier.
     }).sort((a, b) => a.best - b.best);
     const toutesSortes = new Set([...sortesMarques.keys(), ...sansPrixParSorte.keys()]);
     return [...toutesSortes].sort(ordreCle).map(sorte => ({
@@ -3885,9 +4005,13 @@ function FamilleDepliee({ membres, items, onAdd, onUpdate, onRemove, modeRayon =
     const mdd = !!f.mddMerged;                             // groupe « Marques distributeurs »
     const q = mdd ? 0 : (itemDeFormat(f)?.qty ?? 0);
     const picked = !mdd && q > 0;
-    const estBest = idx === 0 && mq.formats.length >= 2;   // le moins cher du groupe (si comparable)
-    const gap = f.kgMax >= 1.4 * f.kgMin;
-    const ratio = mq.best > 0 ? f.kgMin / mq.best : 1;
+    // Chantier 104 — un format « à vérifier » n'a pas de €/kg exploitable : il
+    // ne peut ni être « Meilleur rapport », ni porter un écart, ni un multiple
+    // du meilleur prix. Les trois badges l'ignorent totalement.
+    const aVerifier = f.kgMin == null;
+    const estBest = !aVerifier && idx === 0 && mq.nbComparables >= 2;   // le moins cher du groupe (si comparable)
+    const gap = !aVerifier && f.kgMax >= 1.4 * f.kgMin;
+    const ratio = (!aVerifier && mq.best > 0 && Number.isFinite(mq.best)) ? f.kgMin / mq.best : 1;
     const fr = fraicheur(f.dateAncienne);
     return (
       // BUG 2 (chantier 85) — fond vert PLEIN = « dans ma liste » (picked), identique
@@ -3903,9 +4027,17 @@ function FamilleDepliee({ membres, items, onAdd, onUpdate, onRemove, modeRayon =
             fallback={<div style={{ width:"100%", height:"100%", borderRadius:9, background:M.thumb }} />} />
         </div>
         <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ fontFamily:F, fontWeight:800, fontSize:19, color:M.ink, letterSpacing:"-.3px" }}>
-            {rng(f.kgMin, f.kgMax)} <span style={{ fontSize:13, fontWeight:700, color:M.ink2 }}>{labelUnite(f.uniteRef)}</span>
-          </div>
+          {/* Chantier 104 — à la place du €/kg faux : la mention, dans le même
+              emplacement et la même taille, jamais un « 0 € » ni un tiret seul. */}
+          {aVerifier ? (
+            <div style={{ fontFamily:F, fontWeight:800, fontSize:16, color:"#B8860B", letterSpacing:"-.2px" }}>
+              {MENTION_PRIX_A_VERIFIER}
+            </div>
+          ) : (
+            <div style={{ fontFamily:F, fontWeight:800, fontSize:19, color:M.ink, letterSpacing:"-.3px" }}>
+              {rng(f.kgMin, f.kgMax)} <span style={{ fontSize:13, fontWeight:700, color:M.ink2 }}>{labelUnite(f.uniteRef)}</span>
+            </div>
+          )}
           <div style={{ fontFamily:F, fontSize:12.5, color:M.ink2, marginTop:2, lineHeight:1.35 }}>
             {!mdd && `${f.nomProduit} · `}{f.label} · le paquet {rng(f.paqMin, f.paqMax)} €
           </div>
@@ -3920,9 +4052,13 @@ function FamilleDepliee({ membres, items, onAdd, onUpdate, onRemove, modeRayon =
   const blocLigneMarque = (mq, cle, ouvert) => (
     <button onClick={()=>setOpenMarque(ouvert ? null : cle)}
       style={{ display:"flex", alignItems:"center", justifyContent:"space-between", width:"100%", background:M.card, border:`${ouvert?'1.5px':'1px'} solid ${ouvert?M.brand:M.line}`, borderRadius:14, padding:"15px 16px", cursor:"pointer", textAlign:"left" }}>
-      <span style={{ fontFamily:F, fontWeight:800, fontSize:16, color:M.ink }}>{mq.nom}</span>
-      <span style={{ display:"flex", alignItems:"center", gap:8, fontFamily:F, fontWeight:700, fontSize:14, color:M.green }}>
-        {rng(mq.kgMin, mq.kgMax)} {labelUnite(mq.uniteRef)}
+      {/* Chantier 104b — SEUL point où l'étiquette est rendue : mq.nom reste la
+          clé technique, libelleMarque() donne le texte lu par l'utilisateur. */}
+      <span style={{ fontFamily:F, fontWeight:800, fontSize:16, color:M.ink }}>{libelleMarque(mq.nom)}</span>
+      {/* Chantier 104 — une marque dont AUCUN format n'est comparable n'affiche
+          pas de fourchette : la mention prend sa place. */}
+      <span style={{ display:"flex", alignItems:"center", gap:8, fontFamily:F, fontWeight:700, fontSize:14, color: mq.kgMin == null ? "#B8860B" : M.green }}>
+        {mq.kgMin == null ? MENTION_PRIX_A_VERIFIER : `${rng(mq.kgMin, mq.kgMax)} ${labelUnite(mq.uniteRef)}`}
         <span style={{ color:M.ink3, fontSize:12, transform: ouvert?"rotate(90deg)":"none", transition:"transform .15s" }}>›</span>
       </span>
     </button>
@@ -4012,6 +4148,7 @@ function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab }) {
   // Chantier 88 (suite) — fiches dépliées dans les résultats de RECHERCHE (à plat).
   const [openFiches,      setOpenFiches]      = useState(new Set());
   const searchSeq = useRef(0);
+  const champRechercheRef = useRef(null); // Chantier 104c — refocus après effacement
 
   const toggleFamille = (fam) => setOpenFamilles(prev => {
     const next = new Set(prev);
@@ -4204,17 +4341,34 @@ function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab }) {
       </div>
 
       {/* Barre de recherche */}
-      <input value={searchQuery} onChange={e=>{
-          const val = e.target.value;
-          setSearchQuery(val);
-          if (val.trim().length < 2) {
-            searchSeq.current++; // invalide toute requête en cours
+      {/* Chantier 104c — la remise à zéro passe par le MÊME code que la saisie
+          d'un texte trop court (séquence invalidée, résultats vidés, message
+          d'erreur et spinner éteints) : vider l'affichage sans réinitialiser
+          l'état laisserait un « aucun résultat » orphelin à l'écran. */}
+      <div style={{ position:"relative", marginBottom:16 }}>
+        <input ref={champRechercheRef} value={searchQuery} onChange={e=>{
+            const val = e.target.value;
+            setSearchQuery(val);
+            if (val.trim().length < 2) {
+              searchSeq.current++; // invalide toute requête en cours
+              setSearchResults([]);
+              setSearchError(null);
+              setSearching(false);
+            }
+          }} placeholder="🔍 Chercher un produit..."
+          style={{ width:"100%", padding:"12px 16px", paddingRight:TAILLE_TACTILE, borderRadius:12, border:`2px solid ${searchQuery?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }} />
+        <BoutonEffacerRecherche
+          visible={searchQuery.length > 0}
+          champRef={champRechercheRef}
+          onEffacer={() => {
+            setSearchQuery("");
+            searchSeq.current++;
             setSearchResults([]);
             setSearchError(null);
             setSearching(false);
-          }
-        }} placeholder="🔍 Chercher un produit..."
-        style={{ width:"100%", padding:"12px 16px", borderRadius:12, border:`2px solid ${searchQuery?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:16 }} />
+          }}
+        />
+      </div>
 
       {/* Résultats de recherche */}
       {searching && (
@@ -4455,6 +4609,7 @@ function EditItemSheet({ item, onClose, onSave }) {
   const [changingProduct,  setChangingProduct]  = useState(false);
   const [searchQuery,      setSearchQuery]      = useState("");
   const [suggestions,      setSuggestions]      = useState([]);
+  const champRechercheRef = useRef(null); // Chantier 104c — refocus après effacement
   const [variantes,        setVariantes]        = useState([]);
   const [varianteId,       setVarianteId]       = useState(item.variante_produit_id || null);
   const [variantesLoading, setVariantesLoading] = useState(isCore);
@@ -4634,12 +4789,22 @@ function EditItemSheet({ item, onClose, onSave }) {
                 ) : (
                   <div style={{ position:"relative" }}>
                     <input
+                      ref={champRechercheRef}
                       value={searchQuery}
                       onChange={e=>{ const val = e.target.value; setSearchQuery(val); searchProducts(val); }}
                       onBlur={()=>setTimeout(()=>setSuggestions([]), 150)}
                       placeholder="Chercher un nouveau produit..."
                       autoFocus
-                      style={{ width:"100%", padding:"13px 16px", borderRadius:10, border:`2px solid ${C.blue}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:15, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }}
+                      style={{ width:"100%", padding:"13px 16px", paddingRight:TAILLE_TACTILE, borderRadius:10, border:`2px solid ${C.blue}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:15, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }}
+                    />
+                    {/* Chantier 104c — searchProducts('') est le chemin normal de
+                        remise à zéro : il vide les suggestions et annule la
+                        requête en cours, exactement comme un champ effacé au
+                        clavier. */}
+                    <BoutonEffacerRecherche
+                      visible={searchQuery.length > 0}
+                      champRef={champRechercheRef}
+                      onEffacer={()=>{ setSearchQuery(""); searchProducts(""); }}
                     />
                     {suggestions.length > 0 && (
                       <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0, right:0, background:C.white, border:`1px solid ${C.grayLight}`, borderRadius:10, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", zIndex:300, overflow:"hidden" }}>
@@ -4681,8 +4846,12 @@ function EditItemSheet({ item, onClose, onSave }) {
                           color:      varianteId===v.id ? C.white : C.text,
                           border:     varianteId===v.id ? `2px solid ${C.green}` : '2px solid transparent',
                           fontWeight: varianteId===v.id ? 700 : 400,
-                        }}>
+                        }}
+                        title={!prixEstFiable(v) ? MENTION_PRIX_A_VERIFIER : undefined}>
                         {formatEtiquetteVariante(v)}
+                        {/* Chantier 104 — ici chaque puce EST une variante
+                            précise : le marqueur est donc sans ambiguïté. */}
+                        {!prixEstFiable(v) && <span style={{ marginLeft:5, color: varianteId===v.id ? "#fff" : "#B8860B", fontWeight:900 }}>⚠</span>}
                       </button>
                     ))}
                     <button onClick={()=>setVarianteId('any')}
@@ -5184,6 +5353,7 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
   const [sortBy,         setSortBy]         = useState("date");
   const [searchQuery,    setSearchQuery]    = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const champRechercheRef = useRef(null); // Chantier 104c — refocus après effacement
   const [toast,         setToast]         = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
 
@@ -5415,13 +5585,21 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
       {priceDB.length>0 && (
         <div style={{ position:"relative", marginBottom:10 }}>
           <input
+            ref={champRechercheRef}
             value={searchQuery}
             onChange={e=>{ setSearchQuery(e.target.value); setShowSuggestions(true); }}
             onFocus={()=>setShowSuggestions(true)}
             onBlur={()=>setTimeout(()=>setShowSuggestions(false),150)}
             onKeyDown={e=>e.key==="Escape"&&setShowSuggestions(false)}
             placeholder="🔍 Chercher un produit..."
-            style={{ width:"100%", padding:"11px 14px", borderRadius:10, border:`2px solid ${searchQuery?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }}
+            style={{ width:"100%", padding:"11px 14px", paddingRight:TAILLE_TACTILE, borderRadius:10, border:`2px solid ${searchQuery?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }}
+          />
+          {/* Chantier 104c — la liste de suggestions se referme avec la requête :
+              on ne laisse pas un panneau ouvert au-dessus d'un champ vide. */}
+          <BoutonEffacerRecherche
+            visible={searchQuery.length > 0}
+            champRef={champRechercheRef}
+            onEffacer={()=>{ setSearchQuery(""); setShowSuggestions(false); }}
           />
           {showSuggestions && suggestions.length>0 && (
             <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0, right:0, background:C.white, borderRadius:10, border:`1.5px solid ${C.blue}`, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", zIndex:50, overflow:"hidden" }}>
@@ -5771,7 +5949,11 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
         articleId,
         libelle,
         total: rawEntry ? rawEntry.price * qty : null,
-        ratioLabel: rawEntry ? fmtUnitPrice(rawEntry.price, item?.format) : null,
+        // Chantier 104 — même règle que la carte magasin : pas de €/kg calculé
+        // sur une quantité inventée, la mention prend sa place.
+        ratioLabel: !rawEntry
+          ? null
+          : (!prixEstFiable(rawEntry) ? MENTION_PRIX_A_VERIFIER : fmtUnitPrice(rawEntry.price, item?.format)),
       };
     };
 
@@ -5939,11 +6121,22 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
           });
 
           parMagasin.forEach((lignesMagasin, magasinId) => {
-            const enrichies = lignesMagasin.map(p => ({ p, unitaire: calculerPrixUnitaire({ prix: p.prix_total }, p) }));
+            // Chantier 104 — une offre dont la quantité est inventée a un €/kg
+            // faux, donc elle gagnerait ce duel pour de mauvaises raisons et
+            // deviendrait le prix retenu du magasin — faussant son total ET le
+            // classement des enseignes. On ne la met donc jamais en concurrence
+            // avec une offre fiable.
+            //
+            // Si TOUT est à vérifier, on en garde quand même une : la retirer
+            // ferait disparaître l'article de ce magasin en silence, ce qui
+            // amputerait le total et ferait paraître le magasin moins cher
+            // qu'il n'est. On la garde et on la signale.
+            const candidates = offresPrioritaires(lignesMagasin);
+            const enrichies = candidates.map(p => ({ p, unitaire: calculerPrixUnitaire({ prix: p.prix_total }, p) }));
             const avecUnitaire = enrichies.filter(e => e.unitaire);
             const choisi = avecUnitaire.length > 0
               ? avecUnitaire.reduce((a, b) => (a.unitaire.valeur <= b.unitaire.valeur ? a : b)).p
-              : lignesMagasin.reduce((a, b) => (a.prix_total <= b.prix_total ? a : b));
+              : candidates.reduce((a, b) => (a.prix_total <= b.prix_total ? a : b));
 
             if (!regroupementEtendu[magasinId]) regroupementEtendu[magasinId] = [];
             regroupementEtendu[magasinId] = [...regroupementEtendu[magasinId], { itemId: item.id, produit_id: item.produit_id, prix: choisi }];
@@ -6000,6 +6193,11 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
         total: entree.total,
         found: entree.found,
         missing: entree.articlesManquants.map(c => c.item.product),
+        // Chantier 104 — le total INCLUT les lignes à vérifier (l'amputer ferait
+        // paraître le magasin moins cher qu'il n'est, et fausserait le
+        // classement des enseignes — on remplacerait un mensonge par un pire).
+        // On le dit donc au lieu de le cacher.
+        aPrixAVerifier: (entree.articlesTrouves || []).some(a => !prixEstFiable(a.prix)),
       };
     });
 
@@ -6395,6 +6593,13 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
                   </div>
                 )}
                 {maxSavingsAffiche>0.05 && <div style={{ fontFamily:F, fontSize:11, color:"rgba(255,255,255,0.6)", marginTop:2 }}>−{maxSavingsAffiche.toFixed(2)} € vs le + cher</div>}
+                {/* Chantier 104 — mention discrète sur le total : il contient au
+                    moins un prix qu'on ne peut pas garantir. */}
+                {bestAffiche.aPrixAVerifier && (
+                  <div style={{ fontFamily:F, fontSize:11, color:"#FFD700", fontWeight:700, marginTop:2 }}>
+                    Contient des prix à vérifier
+                  </div>
+                )}
               </div>
             </div>
 
@@ -6457,7 +6662,12 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
                       <div style={{ textAlign:"right", flexShrink:0 }}>
                         <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:"#FFD700" }}>{total.toFixed(2)} €</div>
                         {item.qty>1 && <div style={{ fontFamily:F, fontSize:10, color:"rgba(255,255,255,0.4)" }}>{p.price.toFixed(2)} €/u</div>}
-                        {fmtUnitPrice(p.price, item.format) && (
+                        {/* Chantier 104 — le €/kg d'une offre à quantité inventée
+                            est faux : la mention prend exactement sa place, donc
+                            jamais de ligne vide ni de valeur trompeuse. */}
+                        {!prixEstFiable(p) ? (
+                          <div style={{ fontFamily:F, fontSize:10, color:"#FFD700", fontWeight:800, marginTop:1 }}>{MENTION_PRIX_A_VERIFIER}</div>
+                        ) : fmtUnitPrice(p.price, item.format) && (
                           <div style={{ fontFamily:F, fontSize:10, color:"rgba(255,255,255,0.35)", marginTop:1 }}>{fmtUnitPrice(p.price, item.format)}</div>
                         )}
                       </div>
@@ -6571,6 +6781,7 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
   const [sort, setSort] = useState("produit");
   const [expandedProduct, setExpandedProduct] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const champRechercheRef = useRef(null); // Chantier 104c — refocus après effacement
   const [filterCategory, setFilterCategory] = useState("all");
   const [filterPeriod, setFilterPeriod] = useState("all");
   const [showImport, setShowImport] = useState(false);
@@ -6803,10 +7014,15 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
         </div>
       )}
       {subTab === "produit" && (<>
-      <input value={searchQuery} onChange={e=>setSearchQuery(e.target.value)}
-        placeholder="🔍 Chercher un produit ou une marque..."
-        style={{ width:"100%", padding:"11px 14px", borderRadius:10, border:`2px solid ${searchQuery?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:14 }}
-      />
+      {/* Chantier 104c — filtrage purement local ici : vider la requête suffit
+          à remettre la liste dans son état « aucune recherche en cours ». */}
+      <div style={{ position:"relative", marginBottom:14 }}>
+        <input ref={champRechercheRef} value={searchQuery} onChange={e=>setSearchQuery(e.target.value)}
+          placeholder="🔍 Chercher un produit ou une marque..."
+          style={{ width:"100%", padding:"11px 14px", paddingRight:TAILLE_TACTILE, borderRadius:10, border:`2px solid ${searchQuery?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }}
+        />
+        <BoutonEffacerRecherche visible={searchQuery.length > 0} champRef={champRechercheRef} onEffacer={()=>setSearchQuery("")} />
+      </div>
       {archives.length === 0 ? (
         <div style={{ textAlign:"center", padding:"40px 0 20px" }}>
           <div style={{ fontSize:60, marginBottom:14 }}>📦</div>
@@ -6967,6 +7183,7 @@ function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onCl
   const [saving, setSaving] = useState(false);
   const [confirmation, setConfirmation] = useState(null);
   const seq = useRef(0);
+  const champRechercheRef = useRef(null); // Chantier 104c — refocus après effacement
   // Chantier #71.1 — résolution de la variante. resolvingVariante : appel en
   // cours pour compter les variantes actives du produit tapé. produitEnAttente
   // + variantesAChoisir : on entre dans l'écran de choix uniquement si
@@ -7280,10 +7497,16 @@ Résultat : ${scanDiag.resultat}`}
           </>
         ) : (
           <>
-            <input autoFocus value={query} onChange={e=>setQuery(e.target.value)}
-              placeholder="🔍 Chercher un produit du catalogue..."
-              style={{ width:"100%", padding:"11px 14px", borderRadius:10, border:`2px solid ${query?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:12 }}
-            />
+            <div style={{ position:"relative", marginBottom:12 }}>
+              <input ref={champRechercheRef} autoFocus value={query} onChange={e=>setQuery(e.target.value)}
+                placeholder="🔍 Chercher un produit du catalogue..."
+                style={{ width:"100%", padding:"11px 14px", paddingRight:TAILLE_TACTILE, borderRadius:10, border:`2px solid ${query?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }}
+              />
+              {/* Chantier 104c — l'effet de recherche (debounce 280 ms) est piloté
+                  par `query` : le remettre à vide éteint résultats et erreur par
+                  le chemin normal, sans court-circuit. */}
+              <BoutonEffacerRecherche visible={query.length > 0} champRef={champRechercheRef} onEffacer={()=>setQuery("")} />
+            </div>
             {estFrancois && (
               <button onClick={()=>{ setBarcodeMessage(null); setScanDiag(null); setScanOuvert(true); }} disabled={rechercheBarcode} style={{ width:"100%", padding:"10px", marginBottom:12, border:`1.5px dashed ${C.blue}`, borderRadius:10, background:"transparent", color:C.blue, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, cursor:"pointer" }}>
                 📷 Scanner le code-barres
@@ -7642,6 +7865,7 @@ function MicroLienSheet({ element, onClose, onResolu, onIntrouvable }) {
   const [searchErr, setSearchErr] = useState(null);
   const [produitChoisi, setProduitChoisi] = useState(null);
   const seq = useRef(0);
+  const champRechercheRef = useRef(null); // Chantier 104c — refocus après effacement
 
   // Même colonnes que la recherche du Catalogue (rayon + catégorie pour
   // l'emoji), même protection anti-désordre.
@@ -7696,18 +7920,27 @@ function MicroLienSheet({ element, onClose, onResolu, onIntrouvable }) {
         </div>
 
         <div style={{ padding:"12px 14px", overflowY:"auto", flex:1 }}>
-          <input value={query} onChange={e=>{
-              const val = e.target.value;
-              setQuery(val);
-              if (val.trim().length < 2) {
-                seq.current++; // invalide toute requête en cours
-                setResults([]);
-                setSearchErr(null);
-                setSearching(false);
-              }
-            }}
-            placeholder="🔍 Chercher dans le catalogue…"
-            style={{ width:"100%", padding:"11px 14px", borderRadius:11, border:`2px solid ${C.blue}`, background:C.white, fontFamily:F, fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:12 }} />
+          <div style={{ position:"relative", marginBottom:12 }}>
+            <input ref={champRechercheRef} value={query} onChange={e=>{
+                const val = e.target.value;
+                setQuery(val);
+                if (val.trim().length < 2) {
+                  seq.current++; // invalide toute requête en cours
+                  setResults([]);
+                  setSearchErr(null);
+                  setSearching(false);
+                }
+              }}
+              placeholder="🔍 Chercher dans le catalogue…"
+              style={{ width:"100%", padding:"11px 14px", paddingRight:TAILLE_TACTILE, borderRadius:11, border:`2px solid ${C.blue}`, background:C.white, fontFamily:F, fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }} />
+            {/* Chantier 104c — même remise à zéro que la saisie d'un texte trop
+                court : séquence invalidée, résultats et erreur effacés. */}
+            <BoutonEffacerRecherche
+              visible={query.length > 0}
+              champRef={champRechercheRef}
+              onEffacer={()=>{ setQuery(""); seq.current++; setResults([]); setSearchErr(null); setSearching(false); }}
+            />
+          </div>
 
           {searching && <div style={{ fontFamily:F, fontSize:13, color:C.gray }}>Recherche…</div>}
           {searchErr && !searching && (

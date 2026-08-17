@@ -37,6 +37,7 @@ export default function RechercheProduitSheet({ titre = 'Choisir le bon produit'
   const [varianteChoisie, setVarianteChoisie] = useState(null);
   const seq = useRef(0);
   const selectionFaite = useRef(false);
+  const champRef = useRef(null); // Chantier 104c — refocus après effacement
   // Chantier 103b — le repli n'est armé que pour la recherche automatique de
   // départ, et se désarme dès qu'il a servi (ou dès que l'utilisateur tape).
   const repliArme = useRef(Boolean(repliProgressif && requeteInitiale.trim()));
@@ -226,7 +227,14 @@ export default function RechercheProduitSheet({ titre = 'Choisir le bon produit'
           </>
         ) : (
           <>
+            {/* Chantier 104c — la croix sert surtout ici : le champ arrive
+                prérempli d'un nom OpenFoodFacts à rallonge, et l'effacer au
+                pouce était pénible. Comme une frappe, l'effacement DÉSARME le
+                repli progressif : la recherche suivante est celle que
+                l'utilisateur tape, pas une recherche automatique relancée. */}
+            <div style={{ position:'relative', marginBottom:12 }}>
             <input
+              ref={champRef}
               autoFocus
               value={query}
               // Termes préremplis : sélectionnés au premier focus, pour qu'une
@@ -237,8 +245,21 @@ export default function RechercheProduitSheet({ titre = 'Choisir le bon produit'
               // sa saisie est cherchée telle quelle, comme au chantier 101.
               onChange={e => { repliArme.current = false; setQuery(e.target.value); }}
               placeholder="🔍 Chercher un produit du catalogue..."
-              style={{ width: '100%', padding: '11px 14px', borderRadius: 10, border: `2px solid ${query ? '#0066FF' : '#F5F6F8'}`, background: '#fff', fontFamily: F, fontSize: 14, fontWeight: 700, color: '#1a1a1a', outline: 'none', boxSizing: 'border-box', marginBottom: 12 }}
+              style={{ width: '100%', padding: '11px 14px', paddingRight: 44, borderRadius: 10, border: `2px solid ${query ? '#0066FF' : '#F5F6F8'}`, background: '#fff', fontFamily: F, fontSize: 14, fontWeight: 700, color: '#1a1a1a', outline: 'none', boxSizing: 'border-box' }}
             />
+            {query.length > 0 && (
+              <button
+                type="button"
+                aria-label="Effacer la recherche"
+                onMouseDown={e => e.preventDefault()}
+                onTouchStart={e => e.preventDefault()}
+                onClick={() => { repliArme.current = false; setQuery(''); champRef.current?.focus(); }}
+                style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: '#9AA0A6', fontSize: 15, lineHeight: 1 }}
+              >
+                ✕
+              </button>
+            )}
+            </div>
             {error && <div style={{ fontFamily: F, fontSize: 13, color: '#CC0000', marginBottom: 8 }}>⚠️ {error}</div>}
             <div style={{ overflowY: 'auto', WebkitOverflowScrolling: 'touch', flex: 1, minHeight: 0, paddingBottom: 24 }}>
               {query.trim().length < 2 && (

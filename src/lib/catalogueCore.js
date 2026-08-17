@@ -66,7 +66,10 @@ export function mapperLigneListeCourses(row) {
 export async function chargerVariantes(produitId) {
   const { data, error } = await supabase
     .from('variantes_produit')
-    .select('id, produit_id, libelle, quantite_nette, unite_quantite, nombre_unites, marque_id, marques(nom, est_mdd)')
+    // Chantier 104 — quantite_fiable remonté ici pour que les sélecteurs de
+    // format puissent signaler une fiche dont le prix est à vérifier AVANT
+    // qu'elle soit choisie.
+    .select('id, produit_id, libelle, quantite_nette, unite_quantite, nombre_unites, marque_id, quantite_fiable, marques(nom, est_mdd)')
     .eq('produit_id', produitId)
     .eq('actif', true)
     .order('quantite_nette', { ascending: true, nullsFirst: false });
@@ -98,6 +101,45 @@ export function formatFormatStructure(variante) {
 
   const n = Number(variante?.nombre_unites) || 1;
   return n > 1 ? `${n} × ${base}` : base;
+}
+
+// Chantier 104 — « prix à vérifier ».
+//
+// 363 variantes sont des « 1 kg » factices issues d'une migration : quantité
+// inventée, donc le €/kg calculé vaut mécaniquement le prix stocké — il est
+// faux. Et sur une partie d'entre elles le prix stocké est lui-même un €/kg mal
+// rangé (Morilles à 430 €, Chips nature jusqu'à 93 €), indistinguable ligne par
+// ligne. La mention porte donc sur le PRIX, pas sur la quantité.
+//
+// La colonne quantite_fiable (base) vaut false sur ces fiches. Ce prédicat est
+// LE point unique de décision côté front, et son repli est volontairement
+// permissif : colonne absente (cache navigateur, réponse d'une ancienne
+// version, chemin legacy price_db) -> fiable, donc comportement actuel. Aucun
+// écran ne doit se vider à cause de cette colonne. Réversibilité : repasser une
+// fiche à true en base lui rend son affichage normal, sans toucher au code.
+export function prixEstFiable(source) {
+  return source?.quantite_fiable !== false;
+}
+
+// Libellé unique de la mention, pour qu'elle soit identique partout.
+export const MENTION_PRIX_A_VERIFIER = 'Prix à vérifier';
+
+// Chantier 104 — LA règle qui protège le classement des enseignes.
+//
+// Quand le comparateur choisit l'offre retenue d'un magasin pour un article
+// « format indifférent », il prend la moins chère au kilo. Une quantité inventée
+// donne un €/kg faux : l'offre gagnerait le duel pour de mauvaises raisons et
+// deviendrait le prix du magasin, faussant son total ET le classement.
+// On ne met donc jamais une offre douteuse en concurrence avec une offre sûre.
+//
+// Mais s'il n'y a QUE des offres douteuses, on les garde : les retirer ferait
+// disparaître l'article de ce magasin en silence, donc amputerait son total et
+// le ferait paraître moins cher qu'il n'est. Ce serait remplacer un mensonge
+// par un pire, puisqu'il toucherait le classement. On garde, et on signale.
+export function offresPrioritaires(lignes) {
+  const toutes = Array.isArray(lignes) ? lignes : [];
+  const fiables = toutes.filter(prixEstFiable);
+  return fiables.length > 0 ? fiables : toutes;
 }
 
 // Chantier 75 — prix ramené à l'unité de mesure (€/kg, €/L, €/pièce), pour
