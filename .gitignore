@@ -30,5 +30,8 @@ supabase/.temp/
 # #66 — script d'import contient une clé service_role, jamais commitée
 scripts/.env
 
-# CSV bruts d'import Drive — données de tickets/relevés, jamais commitées
+# CSV bruts d'import Drive — données de tickets/relevés, jamais commitées.
+# La règle couvre TOUT scripts/, pas seulement scripts/imports/ : deux relevés
+# posés à la racine du dossier avaient échappé au filet.
 scripts/imports/
+scripts/**/*.csv
