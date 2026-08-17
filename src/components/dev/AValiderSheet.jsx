@@ -2,8 +2,16 @@ import { Component, useCallback, useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import BarcodeScannerSheet from '../BarcodeScannerSheet';
 import RechercheProduitSheet from '../admin/RechercheProduitSheet';
-import { ficheOFF, cloudinaryFetch } from '../../lib/photosProduits';
+import { ficheOFFAvecStatut, cloudinaryFetch } from '../../lib/photosProduits';
 import { termesRechercheOff } from '../../lib/rechercheRepli';
+import {
+  verifierCoherenceCodeBarres,
+  passerOutreAutorise,
+  NIVEAU_AVERTISSEMENT,
+  OFF_INCONNU,
+  SIGNAL_AUCUN_MOT_COMMUN,
+  SIGNAL_QUANTITE_DIVERGENTE,
+} from '../../lib/coherenceCodeBarres';
 
 // PANNEAU DEV UNIQUEMENT — chantier anti-doublon. Ne monte JAMAIS ce
 // composant hors de import.meta.env.DEV (voir App.jsx). Liste les
@@ -153,6 +161,123 @@ function AssistantOffCard({ assistant, enCours, onOuiChoisir, onCeNestPasCa, onF
         <div style={{ fontFamily: F, fontSize: 11, color: '#999', marginTop: 8, textAlign: 'center', lineHeight: 1.4 }}>
           « Ce n'est pas ça » reprend le comportement habituel : la ligne part en file de validation. Fermer (✕) ne change rien.
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Chantier 105 — LE garde-fou. Montre les deux identités CÔTE À CÔTE : ce que
+// dit OpenFoodFacts du code scanné, et la fiche qu'on s'apprête à lui associer.
+// C'est la confrontation visuelle qui manquait le 17/08, quand un code de
+// boulgour est parti sur une fiche de cônes glacés sans un mot.
+//
+// Hiérarchie assumée des deux boutons : « Je vérifie l'emballage » est LE geste
+// mis en avant (c'est la seule vérification qui tranche vraiment) ; « apprendre
+// quand même » est volontairement discret, parce qu'on avertit sans interdire —
+// OFF se trompe parfois, et certains produits n'y sont pas du tout.
+// Une des deux colonnes de la confrontation. Hors du composant parent : défini
+// à l'intérieur, il serait recréé à chaque rendu (react-hooks/static-components).
+function ColonneIdentite({ etiquette, nom, marque, quantiteTexte, fond }) {
+  return (
+    <div style={{ flex: 1, minWidth: 0, padding: 12, background: fond, borderRadius: 10 }}>
+      <div style={{ fontFamily: F, fontSize: 10, fontWeight: 800, color: '#666', letterSpacing: 0.3 }}>{etiquette}</div>
+      <div style={{ fontFamily: F, fontSize: 14, fontWeight: 900, color: '#1a1a1a', marginTop: 4, lineHeight: 1.3, wordBreak: 'break-word' }}>
+        {nom || '(sans nom)'}
+      </div>
+      {marque && (
+        <div style={{ fontFamily: F, fontSize: 12, color: '#666', marginTop: 3 }}>{marque}</div>
+      )}
+      <div style={{ fontFamily: F, fontSize: 12, fontWeight: 800, color: quantiteTexte ? '#1a1a1a' : '#999', marginTop: 5 }}>
+        {quantiteTexte || 'quantité inconnue'}
+      </div>
+    </div>
+  );
+}
+
+function AvertissementCoherenceCard({ avertissement, enCours, onVerifier, onApprendreQuandMeme, peutPasserOutre }) {
+  const { verdict, nomProduit, code } = avertissement;
+  const { off, fiche, signaux, quantite } = verdict;
+
+  // On affiche la quantité RÉELLEMENT comparée. Sur un lot (nombre_unites > 1),
+  // montrer « 432 g » alors que le calcul a porté sur 2 592 g rendrait le
+  // pourcentage annoncé juste en dessous incompréhensible : on détaille donc
+  // l'opération.
+  const quantiteNette = versNombre(fiche?.quantite_nette);
+  const unites = versNombre(fiche?.nombre_unites);
+  const quantiteFiche = (quantiteNette != null && fiche?.unite_quantite)
+    ? (unites != null && unites > 1
+      ? `${quantiteNette} ${fiche.unite_quantite} × ${unites} = ${quantiteNette * unites} ${fiche.unite_quantite}`
+      : `${quantiteNette} ${fiche.unite_quantite}`)
+    : null;
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 570, display: 'flex', alignItems: 'flex-end' }}>
+      <div style={{ background: '#fff', borderRadius: '20px 20px 0 0', width: '100%', maxHeight: '92vh', overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '20px 20px calc(20px + env(safe-area-inset-bottom, 0px))', boxSizing: 'border-box' }}>
+        <div style={{ fontFamily: F, fontWeight: 900, fontSize: 18, color: '#CC0000' }}>
+          ⚠️ Ce code-barres ne semble pas être celui de ce produit
+        </div>
+        <div style={{ fontFamily: F, fontSize: 11, color: '#999', marginTop: 3 }}>Code lu : {code}</div>
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 14, alignItems: 'stretch' }}>
+          <ColonneIdentite
+            etiquette="LE CODE DÉSIGNE (OFF)"
+            nom={off?.nom}
+            marque={off?.marque}
+            quantiteTexte={off?.quantite}
+            fond="#FFF3F3"
+          />
+          <ColonneIdentite
+            etiquette="LA FICHE CHOISIE"
+            nom={nomProduit || fiche?.nomProduit}
+            marque={fiche?.marque}
+            quantiteTexte={quantiteFiche}
+            fond="#F5F6F8"
+          />
+        </div>
+
+        <div style={{ marginTop: 12, padding: 12, background: '#FFF3F3', border: '1px solid #F3C5C5', borderRadius: 10 }}>
+          <div style={{ fontFamily: F, fontSize: 12, fontWeight: 800, color: '#CC0000', lineHeight: 1.5 }}>
+            {signaux.includes(SIGNAL_AUCUN_MOT_COMMUN) && (
+              <div>• Les deux noms n'ont aucun mot en commun.</div>
+            )}
+            {signaux.includes(SIGNAL_QUANTITE_DIVERGENTE) && quantite?.comparable && (
+              <div>• Les quantités diffèrent de {Math.round(quantite.ecart * 100)} %.</div>
+            )}
+          </div>
+          <div style={{ fontFamily: F, fontSize: 12, color: '#666', marginTop: 8, lineHeight: 1.5 }}>
+            Si tu apprends ce code ici, il rattachera automatiquement cet article
+            à cette fiche à chaque scan suivant. Une erreur se propage.
+          </div>
+        </div>
+
+        <button
+          onClick={onVerifier}
+          disabled={enCours}
+          style={{ width: '100%', marginTop: 14, padding: 14, border: 'none', borderRadius: 12, background: enCours ? '#ccc' : '#00B341', color: '#fff', fontFamily: F, fontWeight: 900, fontSize: 15, cursor: enCours ? 'default' : 'pointer' }}
+        >
+          Je vérifie l'emballage
+        </button>
+        <div style={{ fontFamily: F, fontSize: 11, color: '#999', marginTop: 8, textAlign: 'center', lineHeight: 1.4 }}>
+          Rien n'est écrit : la ligne reste dans la liste, tu pourras rescanner.
+        </div>
+
+        {/* La décision « apprendre quand même » est isolée derrière
+            passerOutreAutorise : le jour où le scan s'ouvre à tous, ce bloc
+            disparaît pour les non-administrateurs sans réécriture, et le
+            désaccord partira en file de propositions au lieu d'écrire. */}
+        {peutPasserOutre ? (
+          <button
+            onClick={onApprendreQuandMeme}
+            disabled={enCours}
+            style={{ width: '100%', marginTop: 12, padding: 10, border: 'none', borderRadius: 10, background: 'transparent', color: '#999', fontFamily: F, fontWeight: 700, fontSize: 12, textDecoration: 'underline', cursor: enCours ? 'default' : 'pointer' }}
+          >
+            {enCours ? '...' : "C'est bien ça, apprendre quand même"}
+          </button>
+        ) : (
+          <div style={{ fontFamily: F, fontSize: 11, color: '#999', marginTop: 12, textAlign: 'center', lineHeight: 1.4 }}>
+            En cas de désaccord, ta proposition part en file de validation : rien n'est écrit directement.
+          </div>
+        )}
       </div>
     </div>
   );
@@ -411,7 +536,12 @@ function LigneCard({ ligne, resultat, validation, enCours, erreurAction, onValid
   );
 }
 
-export default function AValiderSheet({ onClose }) {
+// estAdmin — chantier 105 : gouverne le SEUL bouton « apprendre quand même ».
+// L'écran entier n'est aujourd'hui monté que pour un administrateur (voir
+// App.jsx), donc ce drapeau y vaut true ; il est explicite pour que l'ouverture
+// du scan à tous ne soit qu'un changement de valeur. Défaut false : en cas
+// d'oubli, on refuse de passer outre plutôt que de l'autoriser par accident.
+export default function AValiderSheet({ onClose, estAdmin = false }) {
   const [lignes, setLignes] = useState([]);
   const [chargement, setChargement] = useState(true);
   const [erreur, setErreur] = useState(null);
@@ -438,6 +568,10 @@ export default function AValiderSheet({ onClose }) {
   // s'intercale que là où la ligne partait en file sans autre information.
   const [assistantOff, setAssistantOff] = useState(null);
   const [rechercheCatalogue, setRechercheCatalogue] = useState(false);
+  // Chantier 105 — { verdict, nomProduit, code, ecriture }. Présent uniquement
+  // quand le garde-fou a quelque chose à dire ; `ecriture` est la fonction
+  // d'écriture mise en pause, rejouée telle quelle si l'utilisateur passe outre.
+  const [avertissementCoherence, setAvertissementCoherence] = useState(null);
 
   useEffect(() => {
     let annule = false;
@@ -571,17 +705,24 @@ export default function AValiderSheet({ onClose }) {
       // montre sa photo et on propose l'assignation en un geste ; s'il ne sait
       // pas (ou est indisponible/lent), on retombe exactement sur l'écran de
       // confirmation d'avant. Aucune écriture n'est déclenchée ici.
+      // Chantier 105 — on retient AUSSI le statut OFF (trouvé / inconnu /
+      // indisponible) : c'est lui qui décide, plus bas, entre une note honnête
+      // (« personne ne peut vérifier à ta place ») et un silence complet.
+      let statutOff = null;
       if (!variante) {
         setRechercheCode('Recherche du produit sur Open Food Facts...');
         let off = null;
         try {
-          off = await ficheOFF(code);
+          const resultat = await ficheOFFAvecStatut(code);
+          off = resultat.fiche;
+          statutOff = resultat.statut;
         } catch (e) {
           console.error('[AValiderSheet] fiche Open Food Facts :', e);
           off = null;
+          statutOff = null;
         }
         if (off) {
-          setAssistantOff({ ligneId, libelle, libelleTicket: cible.libelleTicket, code, off });
+          setAssistantOff({ ligneId, libelle, libelleTicket: cible.libelleTicket, code, off, statutOff });
           return;
         }
       }
@@ -597,6 +738,7 @@ export default function AValiderSheet({ onClose }) {
         libelleTicket: cible.libelleTicket,
         code,
         variante,
+        statutOff,
         concordent: variante
           ? libellesConcordent(`${libelle} ${cible.libelleTicket || ''}`, `${nomProduit} ${variante.libelle || ''} ${variante.marques?.nom || ''}`)
           : true,
@@ -615,13 +757,12 @@ export default function AValiderSheet({ onClose }) {
   // alias), puis on rejoue le scan habituel (lever_doute_par_code_barres) : la
   // ligne portant maintenant produit + variante, la base apprend le code
   // elle-même ('appris_direct'). Aucune fiche n'est jamais créée ici.
-  const assignerDepuisAssistant = async ({ produitId, varianteId, nomProduit }) => {
-    const a = assistantOff;
-    if (!a) return { ok: false, message: "Assistant fermé, refais le scan." };
-    const { ligneId, libelle, code } = a;
-    const ligne = lignes.find(l => l.id === ligneId);
-    const libelleAlias = ligne ? (ligne.libelle_brut || ligne.libelle_ticket) : libelle;
-
+  //
+  // Chantier 105 — l'écriture proprement dite est isolée ici pour pouvoir être
+  // MISE EN PAUSE par le garde-fou puis rejouée à l'identique. Tous ses
+  // paramètres sont explicites : elle ne lit plus l'état `assistantOff`, qui
+  // peut avoir été refermé entre-temps par l'écran d'avertissement.
+  const ecrireAssignationDepuisAssistant = async ({ ligneId, libelle, code, libelleAlias, produitId, varianteId, nomProduit }) => {
     setEnCoursParLigne(prev => ({ ...prev, [ligneId]: true }));
     setErreurActionParLigne(prev => ({ ...prev, [ligneId]: null }));
     try {
@@ -694,6 +835,89 @@ export default function AValiderSheet({ onClose }) {
     }
   };
 
+  // Chantier 105 — LE garde-fou, intercalé entre « l'utilisateur a choisi une
+  // fiche » et « on écrit ». C'est le seul endroit où le code-barres du 103 est
+  // appris sur une fiche que l'utilisateur a désignée à la main, donc le seul
+  // endroit où l'erreur du 17/08 pouvait se produire.
+  //
+  // ficheOFFAvecStatut(code) tape le cache rempli à l'ouverture de l'assistant :
+  // aucun appel réseau supplémentaire ici.
+  //
+  // Toute défaillance du garde-fou lui-même (exception inattendue) le rend
+  // MUET et laisse passer l'écriture : un filet de sécurité qui casse l'écran
+  // serait pire que pas de filet.
+  const assignerDepuisAssistant = async ({ produitId, varianteId, nomProduit, variante = null }) => {
+    const a = assistantOff;
+    if (!a) return { ok: false, message: "Assistant fermé, refais le scan." };
+    const { ligneId, libelle, code } = a;
+    const ligne = lignes.find(l => l.id === ligneId);
+    const libelleAlias = ligne ? (ligne.libelle_brut || ligne.libelle_ticket) : libelle;
+    const parametres = { ligneId, libelle, code, libelleAlias, produitId, varianteId, nomProduit };
+
+    let verdict = null;
+    try {
+      const { fiche: off, statut } = await ficheOFFAvecStatut(code);
+      verdict = verifierCoherenceCodeBarres({
+        statutOff: statut,
+        off,
+        fiche: {
+          nomProduit,
+          marque: variante?.marques?.nom ?? null,
+          libelleVariante: variante?.libelle ?? null,
+          quantite_nette: variante?.quantite_nette ?? null,
+          unite_quantite: variante?.unite_quantite ?? null,
+          nombre_unites: variante?.nombre_unites ?? null,
+        },
+      });
+    } catch (e) {
+      console.error('[AValiderSheet] garde-fou code-barres :', e);
+      verdict = null;
+    }
+
+    if (verdict?.niveau === NIVEAU_AVERTISSEMENT) {
+      // On referme la feuille de recherche et la carte OFF pour que
+      // l'avertissement soit seul à l'écran, et on met l'écriture en pause.
+      // `ok: true` ne veut pas dire « écrit » : il veut dire « aucune erreur à
+      // afficher dans la feuille de recherche », qui peut donc se fermer.
+      setRechercheCatalogue(false);
+      setAssistantOff(null);
+      setAvertissementCoherence({
+        verdict,
+        nomProduit,
+        code,
+        ligneId,
+        ecriture: () => ecrireAssignationDepuisAssistant(parametres),
+      });
+      return { ok: true, ecritureDifferee: true };
+    }
+
+    return ecrireAssignationDepuisAssistant(parametres);
+  };
+
+  // Chantier 105 — « Je vérifie l'emballage » : on ne touche à RIEN. La ligne
+  // est restée dans la liste, le code n'a pas été appris, aucun prix ni alias
+  // n'a été créé. On le dit explicitement plutôt que de refermer en silence.
+  const renoncerApresAvertissement = () => {
+    const a = avertissementCoherence;
+    setAvertissementCoherence(null);
+    if (!a) return;
+    setResultatScan({
+      ton: 'attente',
+      titre: 'Rien n\'a été enregistré',
+      detail: "Vérifie l'emballage, puis rescanne le code depuis la ligne. Aucune association, aucun prix, aucun code-barres n'a été écrit.",
+      libelle: a.verdict?.fiche?.nomProduit || a.nomProduit,
+    });
+  };
+
+  // Chantier 105 — « C'est bien ça, apprendre quand même » : on rejoue
+  // l'écriture mise en pause, telle quelle.
+  const poursuivreMalgreAvertissement = async () => {
+    const a = avertissementCoherence;
+    if (!a?.ecriture) return;
+    setAvertissementCoherence(null);
+    await a.ecriture();
+  };
+
   // Chantier 103 — « ce n'est pas ça » / abandon de l'assistant : on repasse
   // exactement par l'écran de confirmation d'avant (code inconnu -> file).
   const retomberSurLaFile = () => {
@@ -706,6 +930,7 @@ export default function AValiderSheet({ onClose }) {
       libelleTicket: a.libelleTicket,
       code: a.code,
       variante: null,
+      statutOff: a.statutOff,
       concordent: true,
     });
   };
@@ -975,6 +1200,19 @@ export default function AValiderSheet({ onClose }) {
         />
       )}
 
+      {/* Chantier 105 — le garde-fou passe DEVANT tout le reste (zIndex 570) :
+          quand il a quelque chose à dire, il doit être la seule chose à
+          l'écran. Il ne s'affiche que sur signal — aucun signal, aucun pixel. */}
+      {avertissementCoherence && (
+        <AvertissementCoherenceCard
+          avertissement={avertissementCoherence}
+          enCours={!!enCoursParLigne[avertissementCoherence.ligneId]}
+          peutPasserOutre={passerOutreAutorise({ estAdmin })}
+          onVerifier={renoncerApresAvertissement}
+          onApprendreQuandMeme={poursuivreMalgreAvertissement}
+        />
+      )}
+
       {assistantOff && rechercheCatalogue && (
         <RechercheProduitSheet
           titre="Choisir la fiche du catalogue"
@@ -1028,6 +1266,18 @@ export default function AValiderSheet({ onClose }) {
                 )}
               </div>
             </div>
+
+            {/* Chantier 105 — OFF a répondu et ne connaît pas ce code : il n'y
+                a rien à comparer, donc aucun avertissement d'erreur, mais on ne
+                laisse pas croire que quelque chose a été vérifié. Ton neutre,
+                non bloquant. OFF injoignable (statut 'indisponible') n'affiche
+                RIEN : ce serait une erreur technique, pas une information. */}
+            {confirmationScan.statutOff === OFF_INCONNU && (
+              <div style={{ marginTop: 10, padding: 12, background: '#F5F6F8', borderRadius: 10, fontFamily: F, fontSize: 12, color: '#666', lineHeight: 1.5 }}>
+                Ce code-barres est inconnu d'Open Food Facts : personne ne peut vérifier à ta place.
+                Vérifie l'emballage avant de continuer.
+              </div>
+            )}
 
             {confirmationScan.variante && !confirmationScan.concordent && (
               <div style={{ marginTop: 10, padding: 12, background: '#FFF3F3', border: '1px solid #F3C5C5', borderRadius: 10, fontFamily: F, fontSize: 13, color: '#CC0000', fontWeight: 700, lineHeight: 1.4 }}>

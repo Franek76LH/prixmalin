@@ -6,6 +6,9 @@
 // Règle d'or : ne JAMAIS casser l'app. Toute erreur réseau / absence de donnée
 // renvoie null → l'appelant garde son placeholder/fallback existant.
 import { supabase } from './supabase';
+// Chantier 105 — vocabulaire des statuts OFF, défini une seule fois dans le
+// module de garde-fou pour qu'il ne puisse pas dériver entre les deux fichiers.
+import { OFF_TROUVE, OFF_INCONNU, OFF_INDISPONIBLE } from './coherenceCodeBarres';
 
 // Cloud name Cloudinary public (ok en dur).
 export const CLOUDINARY_CLOUD_NAME = 'dur9hgqr';
@@ -115,19 +118,25 @@ const offFicheUrl = (ean) =>
   `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(ean)}.json`
   + '?fields=product_name,product_name_fr,brands,quantity,image_front_url,image_front_small_url';
 
-// ean -> fiche|null. On mémorise aussi les "OFF ne connaît pas" (réponse
+// ean -> { fiche, statut }. On mémorise aussi les "OFF ne connaît pas" (réponse
 // obtenue), mais JAMAIS un échec réseau ou un abandon sur délai : rescanner le
 // même article après une coupure doit pouvoir retenter.
 const cacheFicheOff = new Map();
 
 const texteOuNull = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
 
-// Fiche OFF d'un EAN : { nom, marque, quantite, imageSmall, imageLarge } ou
-// null. On considère qu'il n'y a "rien d'exploitable" si OFF ne donne ni nom ni
-// photo — montrer une carte vide serait pire que le comportement actuel.
-// delaiMax : au-delà, on abandonne (un OFF lent ne doit pas bloquer un scan).
-export async function ficheOFF(ean, { delaiMax = 6000 } = {}) {
-  if (!ean) return null;
+// Chantier 105 — MÊME appel réseau et MÊME cache que ficheOFF, mais on renvoie
+// en plus POURQUOI il n'y a pas de fiche. Le 103 confondait en un seul `null`
+// deux situations qui n'appellent pas du tout la même réaction :
+//   - OFF a répondu et ne connaît pas ce code (OFF_INCONNU) : il n'y a rien à
+//     comparer, mais l'utilisateur doit le savoir — sinon on lui laisse croire
+//     que le code a été vérifié.
+//   - OFF est injoignable ou trop lent (OFF_INDISPONIBLE) : ce n'est pas une
+//     information sur le produit, on ne montre rien du tout.
+//
+// { fiche, statut }. La fiche a exactement la même forme qu'avant.
+export async function ficheOFFAvecStatut(ean, { delaiMax = 6000 } = {}) {
+  if (!ean) return { fiche: null, statut: OFF_INDISPONIBLE };
   if (cacheFicheOff.has(ean)) return cacheFicheOff.get(ean);
   let fiche = null;
   let reponseObtenue = false;
@@ -164,7 +173,24 @@ export async function ficheOFF(ean, { delaiMax = 6000 } = {}) {
   } catch {
     /* réseau KO, abandon sur délai, JSON illisible -> fiche reste null */
   }
-  if (reponseObtenue) cacheFicheOff.set(ean, fiche);
+  const resultat = {
+    fiche,
+    statut: fiche ? OFF_TROUVE : (reponseObtenue ? OFF_INCONNU : OFF_INDISPONIBLE),
+  };
+  if (reponseObtenue) cacheFicheOff.set(ean, resultat);
+  return resultat;
+}
+
+// Fiche OFF d'un EAN : { nom, marque, quantite, imageSmall, imageLarge } ou
+// null. On considère qu'il n'y a "rien d'exploitable" si OFF ne donne ni nom ni
+// photo — montrer une carte vide serait pire que le comportement actuel.
+// delaiMax : au-delà, on abandonne (un OFF lent ne doit pas bloquer un scan).
+//
+// Conservée à l'identique pour les appelants du 103 : même signature, même
+// valeur de retour, même cache (partagé avec ficheOFFAvecStatut, donc appeler
+// les deux sur le même EAN ne déclenche qu'UN appel réseau).
+export async function ficheOFF(ean, options) {
+  const { fiche } = await ficheOFFAvecStatut(ean, options);
   return fiche;
 }
 

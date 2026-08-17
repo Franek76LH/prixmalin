@@ -11450,7 +11450,11 @@ export default function App() {
             )}
           </div>
         )}
-        {showAValider && isAdmin && <AValiderSheet onClose={()=>setShowAValider(false)}/>}
+        {/* Chantier 105 — estAdmin gouverne le seul bouton « apprendre quand
+            même » du garde-fou code-barres. L'écran n'est déjà monté que pour un
+            admin ; le drapeau est explicite pour que l'ouverture du scan à tous
+            se règle ici, sans toucher au composant. */}
+        {showAValider && isAdmin && <AValiderSheet onClose={()=>setShowAValider(false)} estAdmin={isAdmin}/>}
         {showValidationScan && isAdmin && <ValidationScanSheet onClose={()=>setShowValidationScan(false)} onCountChange={setPendingScanCount}/>}
         {appToast && <Toast msg={appToast.msg} ok={appToast.ok}/>}
         {showCircleSheet  && <CircleSheet  circles={circles} userId={session.user.id} userEmail={session.user.email} profileMap={profileMap} pseudo={pseudo} archives={archives} onClose={()=>setShowCircleSheet(false)} onInvite={inviteByPseudo} onUpdateStatus={updateCircleStatus}/>}

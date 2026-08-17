@@ -134,11 +134,16 @@ export default function RechercheProduitSheet({ titre = 'Choisir le bon produit'
     return () => clearTimeout(timer);
   }, [query]);
 
-  const finaliser = async (produit, varianteId) => {
+  // Chantier 105 — on transmet EN PLUS la variante choisie (objet complet :
+  // libellé, marque, quantité), parce que le garde-fou code-barres a besoin de
+  // savoir à quoi ressemble la fiche retenue pour la comparer à OpenFoodFacts.
+  // Champ additionnel : les appelants qui l'ignorent ne changent pas de
+  // comportement. null quand le produit n'a aucune variante active (vrac, frais).
+  const finaliser = async (produit, varianteId, variante = null) => {
     setSaving(true);
     setError(null);
     try {
-      const res = await onChoisir({ produitId: produit.produit_id, varianteId, nomProduit: produit.nom_reference });
+      const res = await onChoisir({ produitId: produit.produit_id, varianteId, nomProduit: produit.nom_reference, variante });
       if (res && res.ok === false) { setError(res.message || 'Action impossible, réessaie.'); return; }
       onClose?.();
     } catch (e) {
@@ -218,7 +223,7 @@ export default function RechercheProduitSheet({ titre = 'Choisir le bon produit'
               ))}
             </div>
             <button
-              onClick={() => { if (varianteChoisie && produitEnAttente) finaliser(produitEnAttente, varianteChoisie); }}
+              onClick={() => { if (varianteChoisie && produitEnAttente) finaliser(produitEnAttente, varianteChoisie, variantesAChoisir.find(v => v.id === varianteChoisie) ?? null); }}
               disabled={!varianteChoisie || saving}
               style={{ marginTop: 12, width: '100%', padding: 13, border: 'none', borderRadius: 12, fontFamily: F, fontWeight: 900, fontSize: 14, color: '#fff', background: (!varianteChoisie || saving) ? '#ccc' : '#0066FF', cursor: (!varianteChoisie || saving) ? 'default' : 'pointer' }}
             >
