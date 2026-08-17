@@ -102,6 +102,72 @@ export function offFullUrl(offUrl) {
   return offUrl.replace(/\.(100|200|400)\.jpg$/, '.full.jpg');
 }
 
+// Chantier 103 « Assistant OpenFoodFacts au scan » — SHADOW, admin seulement.
+// Même API OFF v2 publique que les photos (CORS OK, aucune clé), mais on
+// demande EN PLUS l'identité du produit (nom, marque, quantité) : quand un
+// code-barres est inconnu de notre base, c'est OFF qui dit à quoi il
+// correspond, et la PHOTO sert de preuve visuelle avant toute écriture.
+//
+// Règle d'or identique : ne JAMAIS casser le flux. Absence de produit, réponse
+// mal formée, réseau KO ou trop lent -> null, et l'appelant reprend son
+// comportement habituel (dépôt en file).
+const offFicheUrl = (ean) =>
+  `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(ean)}.json`
+  + '?fields=product_name,product_name_fr,brands,quantity,image_front_url,image_front_small_url';
+
+// ean -> fiche|null. On mémorise aussi les "OFF ne connaît pas" (réponse
+// obtenue), mais JAMAIS un échec réseau ou un abandon sur délai : rescanner le
+// même article après une coupure doit pouvoir retenter.
+const cacheFicheOff = new Map();
+
+const texteOuNull = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+
+// Fiche OFF d'un EAN : { nom, marque, quantite, imageSmall, imageLarge } ou
+// null. On considère qu'il n'y a "rien d'exploitable" si OFF ne donne ni nom ni
+// photo — montrer une carte vide serait pire que le comportement actuel.
+// delaiMax : au-delà, on abandonne (un OFF lent ne doit pas bloquer un scan).
+export async function ficheOFF(ean, { delaiMax = 6000 } = {}) {
+  if (!ean) return null;
+  if (cacheFicheOff.has(ean)) return cacheFicheOff.get(ean);
+  let fiche = null;
+  let reponseObtenue = false;
+  try {
+    // AbortController + setTimeout : AbortSignal.timeout n'existe pas sur les
+    // Safari iOS un peu anciens, et ce code tourne d'abord sur iPhone.
+    const ctrl = new AbortController();
+    const minuterie = setTimeout(() => ctrl.abort(), delaiMax);
+    let r;
+    try {
+      r = await fetch(offFicheUrl(ean), { signal: ctrl.signal });
+    } finally {
+      clearTimeout(minuterie);
+    }
+    if (r.ok) {
+      const j = await r.json();
+      reponseObtenue = true;
+      const p = j && j.status === 1 ? j.product : null;
+      if (p) {
+        const nom = texteOuNull(p.product_name_fr) || texteOuNull(p.product_name);
+        const imageLarge = texteOuNull(p.image_front_url);
+        const imageSmall = texteOuNull(p.image_front_small_url);
+        if (nom || imageLarge || imageSmall) {
+          fiche = {
+            nom,
+            marque: texteOuNull(p.brands),
+            quantite: texteOuNull(p.quantity),
+            imageSmall,
+            imageLarge,
+          };
+        }
+      }
+    }
+  } catch {
+    /* réseau KO, abandon sur délai, JSON illisible -> fiche reste null */
+  }
+  if (reponseObtenue) cacheFicheOff.set(ean, fiche);
+  return fiche;
+}
+
 // Cloudinary pour l'agrandi : c_limit (n'agrandit jamais au-delà de la source),
 // pas de fond blanc forcé. URL OFF passée en encodeURIComponent.
 export function cloudinaryAgrandi(offUrl) {

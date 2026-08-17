@@ -1,5 +1,9 @@
-import { Component, useEffect, useState } from 'react';
+import { Component, useCallback, useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
+import BarcodeScannerSheet from '../BarcodeScannerSheet';
+import RechercheProduitSheet from '../admin/RechercheProduitSheet';
+import { ficheOFF, cloudinaryFetch } from '../../lib/photosProduits';
+import { termesRechercheOff } from '../../lib/rechercheRepli';
 
 // PANNEAU DEV UNIQUEMENT — chantier anti-doublon. Ne monte JAMAIS ce
 // composant hors de import.meta.env.DEV (voir App.jsx). Liste les
@@ -36,6 +40,122 @@ class LigneErrorBoundary extends Component {
     }
     return this.props.children;
   }
+}
+
+// Chantier 101 — filet de sécurité du scan. Le code-barres fait autorité côté
+// base (lever_doute_par_code_barres relie sans rien demander), donc viser la
+// mauvaise ligne écrit instantanément une fausse association, un faux alias ET
+// un faux prix. On regarde donc le code AVANT d'appeler la RPC, on montre à
+// quoi il correspond, et on n'écrit qu'après confirmation explicite.
+
+// Mots significatifs d'un libellé, pour comparer « ce que dit le ticket » et
+// « ce que dit le code-barres ». Volontairement grossier : il ne s'agit pas de
+// décider à la place de l'utilisateur, seulement de lever un drapeau quand les
+// deux n'ont visiblement rien en commun.
+function motsCles(texte) {
+  return new Set(
+    (texte || '')
+      .toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .split(/[^a-z0-9]+/)
+      .filter(mot => mot.length >= 4)
+  );
+}
+
+function libellesConcordent(libelleTicket, nomProduit) {
+  const a = motsCles(libelleTicket);
+  const b = motsCles(nomProduit);
+  if (a.size === 0 || b.size === 0) return true; // rien à comparer : pas d'alerte
+  for (const mot of a) if (b.has(mot)) return true;
+  return false;
+}
+
+
+// Chantier 103 — la carte « Ce produit ? ». La PHOTO est le point de
+// vérification : elle est affichée AVANT toute écriture, et rien n'est écrit
+// tant que l'utilisateur n'a pas reconnu l'article qu'il tient en main.
+// Cloudinary indisponible -> repli sur l'URL OFF brute -> repli sur un carré
+// vide : à aucun moment un échec d'image ne bloque l'écran.
+function AssistantOffCard({ assistant, enCours, onOuiChoisir, onCeNestPasCa, onFermer }) {
+  const { off, libelle, libelleTicket, code } = assistant;
+  const sourceOff = off.imageLarge || off.imageSmall || null;
+  const [srcImage, setSrcImage] = useState(() => cloudinaryFetch(sourceOff, 'large'));
+  const identite = [off.marque, off.nom, off.quantite].filter(Boolean).join(' · ');
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 560, display: 'flex', alignItems: 'flex-end' }} onClick={onFermer}>
+      <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: '20px 20px 0 0', width: '100%', maxHeight: '92vh', overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '20px 20px calc(20px + env(safe-area-inset-bottom, 0px))', boxSizing: 'border-box' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+          <div>
+            <div style={{ fontFamily: F, fontWeight: 900, fontSize: 18, color: '#1a1a1a' }}>Ce produit ?</div>
+            <div style={{ fontFamily: F, fontSize: 11, color: '#999', marginTop: 2 }}>
+              Code inconnu de notre base · {code} · fiche Open Food Facts
+            </div>
+          </div>
+          <button onClick={onFermer} style={{ flexShrink: 0, background: '#F5F6F8', border: 'none', borderRadius: 99, width: 28, height: 28, color: '#999', fontSize: 14, cursor: 'pointer' }}>✕</button>
+        </div>
+
+        <div style={{ marginTop: 14, padding: 12, background: '#F5F6F8', borderRadius: 12, display: 'flex', gap: 12, alignItems: 'center' }}>
+          <div style={{ width: 96, height: 96, borderRadius: 10, background: '#fff', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+            {srcImage ? (
+              <img
+                src={srcImage}
+                alt=""
+                loading="lazy"
+                onError={() => setSrcImage(prev => (prev !== sourceOff ? sourceOff : null))}
+                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+              />
+            ) : (
+              <span style={{ fontSize: 26 }}>📦</span>
+            )}
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontFamily: F, fontSize: 11, fontWeight: 800, color: '#666' }}>OPEN FOOD FACTS DIT</div>
+            <div style={{ fontFamily: F, fontSize: 15, fontWeight: 900, color: '#1a1a1a', marginTop: 3, lineHeight: 1.3 }}>
+              {identite || '(fiche sans nom)'}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 10, padding: 12, background: '#F5F6F8', borderRadius: 12 }}>
+          <div style={{ fontFamily: F, fontSize: 11, fontWeight: 800, color: '#666' }}>LIGNE DU TICKET</div>
+          <div style={{ fontFamily: F, fontSize: 14, fontWeight: 800, color: '#1a1a1a', marginTop: 3 }}>
+            « {libelle || '(libellé vide)'} »
+          </div>
+          {libelleTicket && libelleTicket !== libelle && (
+            <div style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 11, color: '#666', marginTop: 5 }}>
+              Texte imprimé : {libelleTicket}
+            </div>
+          )}
+        </div>
+
+        <div style={{ fontFamily: F, fontSize: 14, fontWeight: 900, color: '#1a1a1a', marginTop: 14, lineHeight: 1.4 }}>
+          C'est bien le produit que tu tiens en main ?
+        </div>
+        <div style={{ fontFamily: F, fontSize: 12, color: '#666', marginTop: 4, lineHeight: 1.4 }}>
+          Aucune fiche n'est créée automatiquement : tu choisis toi-même la fiche du catalogue.
+        </div>
+
+        <button
+          onClick={onOuiChoisir}
+          disabled={enCours}
+          style={{ width: '100%', marginTop: 14, padding: 14, border: 'none', borderRadius: 12, background: enCours ? '#ccc' : '#00B341', color: '#fff', fontFamily: F, fontWeight: 900, fontSize: 15, cursor: enCours ? 'default' : 'pointer' }}
+        >
+          ✓ Oui — choisir la fiche du catalogue
+        </button>
+        <button
+          onClick={onCeNestPasCa}
+          disabled={enCours}
+          style={{ width: '100%', marginTop: 8, padding: 12, border: '1px solid #ddd', borderRadius: 12, background: 'transparent', color: '#333', fontFamily: F, fontWeight: 800, fontSize: 14, cursor: enCours ? 'default' : 'pointer' }}
+        >
+          Ce n'est pas ça / je ne trouve pas
+        </button>
+        <div style={{ fontFamily: F, fontSize: 11, color: '#999', marginTop: 8, textAlign: 'center', lineHeight: 1.4 }}>
+          « Ce n'est pas ça » reprend le comportement habituel : la ligne part en file de validation. Fermer (✕) ne change rien.
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function formatDateFr(iso) {
@@ -202,7 +322,7 @@ function CandidatLigne({ c, enCours, onValider }) {
   );
 }
 
-function LigneCard({ ligne, resultat, validation, enCours, erreurAction, onValider, onCreerProduit, onAnnuler, nouveauProduitOuvert, onToggleNouveauProduit }) {
+function LigneCard({ ligne, resultat, validation, enCours, erreurAction, onValider, onCreerProduit, onAnnuler, nouveauProduitOuvert, onToggleNouveauProduit, onScanner }) {
   if (validation) {
     return (
       <div style={{ background: '#fff', borderRadius: 14, padding: '14px 16px', marginBottom: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.06)', borderLeft: '4px solid #00B341' }}>
@@ -240,6 +360,18 @@ function LigneCard({ ligne, resultat, validation, enCours, erreurAction, onValid
 
       <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #eee' }}>
         {erreurAction && <div style={{ fontFamily: F, fontSize: 12, color: '#CC0000', marginBottom: 8 }}>⚠️ {erreurAction}</div>}
+
+        {/* Chantier 101 — le scan du code-barres tranche la ligne tout de suite
+            (code = vérité). Option EN PLUS : le raccrochage manuel ci-dessous
+            reste strictement inchangé. */}
+        <button
+          onClick={onScanner}
+          disabled={enCours}
+          style={{ width: '100%', padding: '9px 12px', marginBottom: 10, border: '1.5px dashed #0066FF', borderRadius: 10, background: 'transparent', color: '#0066FF', fontFamily: F, fontWeight: 800, fontSize: 13, cursor: enCours ? 'default' : 'pointer', opacity: enCours ? 0.6 : 1 }}
+        >
+          📷 Scanner le code-barres
+        </button>
+
         {!resultat && (
           <div style={{ fontFamily: F, fontSize: 12, color: '#aaa' }}>Recherche de candidats...</div>
         )}
@@ -288,6 +420,24 @@ export default function AValiderSheet({ onClose }) {
   const [enCoursParLigne, setEnCoursParLigne] = useState({});
   const [erreurActionParLigne, setErreurActionParLigne] = useState({});
   const [nouveauProduitOuvertPour, setNouveauProduitOuvertPour] = useState(null);
+  // Chantier 101 — scanCible : ligne dont on scanne le code-barres (caméra
+  // ouverte). resultatScan : bandeau de résultat, volontairement PERSISTANT
+  // (fermé par l'utilisateur, jamais par une minuterie) — après un scan, la
+  // ligne disparaît de la liste et un message fugace laisserait croire à une
+  // ligne « perdue ». Forme : { ton, titre, detail, libelle }.
+  const [scanCible, setScanCible] = useState(null);
+  const [resultatScan, setResultatScan] = useState(null);
+  // Chantier 101 — confirmation obligatoire avant toute écriture :
+  // { ligneId, libelle, code, variante | null, concordent }.
+  const [confirmationScan, setConfirmationScan] = useState(null);
+  // Texte de l'écran d'attente (null = pas d'attente) — il change selon l'étape
+  // (lecture du code, puis interrogation d'Open Food Facts).
+  const [rechercheCode, setRechercheCode] = useState(null);
+  // Chantier 103 — assistant OpenFoodFacts pour un code INCONNU :
+  // { ligneId, libelle, libelleTicket, code, off }. Purement additif : il ne
+  // s'intercale que là où la ligne partait en file sans autre information.
+  const [assistantOff, setAssistantOff] = useState(null);
+  const [rechercheCatalogue, setRechercheCatalogue] = useState(false);
 
   useEffect(() => {
     let annule = false;
@@ -356,6 +506,257 @@ export default function AValiderSheet({ onClose }) {
     })();
     return () => { annule = true; };
   }, [lignes]);
+
+  // Chantier 101 — retire une ligne tranchée (validée ou partie en file) de la
+  // liste, et nettoie les états attachés à son identifiant.
+  const retirerLigne = (ligneId) => {
+    setLignes(prev => prev.filter(l => l.id !== ligneId));
+    setCandidatsParLigne(prev => { const next = { ...prev }; delete next[ligneId]; return next; });
+    setErreurActionParLigne(prev => { const next = { ...prev }; delete next[ligneId]; return next; });
+    setNouveauProduitOuvertPour(prev => (prev === ligneId ? null : prev));
+  };
+
+  // Chantier 101 — code décodé : la base tranche (lever_doute_par_code_barres,
+  // SECURITY DEFINER). Le front n'envoie que le code brut (le rattrapage
+  // UPC-A/EAN-13 et le garde-fou de propriété sont côté base) et se contente de
+  // réagir au statut renvoyé. Toute erreur laisse la ligne en place.
+  // useCallback : identité stable tant que la même ligne est scannée — le
+  // lecteur @zxing garde `onDetected` en dépendance d'effet, une nouvelle
+  // identité à chaque rendu rouvrirait la caméra en boucle. La cible porte son
+  // libellé pour que le bandeau puisse nommer l'article même une fois la ligne
+  // retirée de la liste.
+  const echecScan = (ligneId, libelle, texte) => {
+    setErreurActionParLigne(prev => ({ ...prev, [ligneId]: texte }));
+    setResultatScan({ ton: 'erreur', titre: 'Scan impossible, réessaie', detail: "La ligne reste dans la liste ci-dessous.", libelle });
+  };
+
+  // Étape 1 — code décodé : on NE PROPAGE RIEN encore. On cherche à quoi ce
+  // code correspond (même rattrapage UPC-A/EAN-13 que la base) et on prépare
+  // l'écran de confirmation. Aucune écriture à ce stade.
+  const onCodeDetecte = useCallback(async (codeBrut) => {
+    const cible = scanCible;
+    if (!cible?.id) return;
+    const ligneId = cible.id;
+    const libelle = cible.libelle;
+    setScanCible(null);
+    const code = (codeBrut || '').replace(/\s+/g, '');
+    if (!code) { echecScan(ligneId, libelle, "Scan impossible, réessaie."); return; }
+
+    setRechercheCode('Lecture du code-barres...');
+    try {
+      const candidats = [code];
+      if (/^\d{12}$/.test(code)) candidats.push('0' + code);
+      if (/^0\d{12}$/.test(code)) candidats.push(code.slice(1));
+
+      const { data: cbv, error: errCbv } = await supabase
+        .from('codes_barres_variante')
+        .select('variante_produit_id')
+        .in('code_barres', candidats)
+        .limit(1);
+      if (errCbv) { echecScan(ligneId, libelle, "Recherche du code-barres impossible, réessaie."); return; }
+
+      let variante = null;
+      if (cbv && cbv[0]) {
+        const { data } = await supabase
+          .from('variantes_produit')
+          .select('id, produit_id, libelle, quantite_nette, unite_quantite, url_image, produits(nom_reference), marques(nom)')
+          .eq('id', cbv[0].variante_produit_id)
+          .eq('actif', true)
+          .maybeSingle();
+        variante = data ?? null;
+      }
+
+      // Chantier 103 — CODE INCONNU : avant de laisser la ligne partir en file,
+      // on demande à OpenFoodFacts à quoi ce code correspond. Si OFF sait, on
+      // montre sa photo et on propose l'assignation en un geste ; s'il ne sait
+      // pas (ou est indisponible/lent), on retombe exactement sur l'écran de
+      // confirmation d'avant. Aucune écriture n'est déclenchée ici.
+      if (!variante) {
+        setRechercheCode('Recherche du produit sur Open Food Facts...');
+        let off = null;
+        try {
+          off = await ficheOFF(code);
+        } catch (e) {
+          console.error('[AValiderSheet] fiche Open Food Facts :', e);
+          off = null;
+        }
+        if (off) {
+          setAssistantOff({ ligneId, libelle, libelleTicket: cible.libelleTicket, code, off });
+          return;
+        }
+      }
+
+      const nomProduit = variante?.produits?.nom_reference || '';
+      // La comparaison porte sur le libellé affiché ET le texte brut du ticket :
+      // quand le mapping d'import s'est trompé (« Pâte à tartiner » pour
+      // MADELEINE PEPITE CHOC), c'est le texte du ticket qui dit vrai, et lui
+      // seul concorde avec le produit désigné par le code.
+      setConfirmationScan({
+        ligneId,
+        libelle,
+        libelleTicket: cible.libelleTicket,
+        code,
+        variante,
+        concordent: variante
+          ? libellesConcordent(`${libelle} ${cible.libelleTicket || ''}`, `${nomProduit} ${variante.libelle || ''} ${variante.marques?.nom || ''}`)
+          : true,
+      });
+    } catch (e) {
+      console.error('[AValiderSheet] recherche du code-barres :', e);
+      echecScan(ligneId, libelle, "Recherche du code-barres impossible, réessaie.");
+    } finally {
+      setRechercheCode(null);
+    }
+  }, [scanCible]);
+
+  // Chantier 103 — l'utilisateur a reconnu le produit sur la photo OFF puis
+  // choisi une fiche du catalogue. On emprunte le MÊME chemin que l'assignation
+  // manuelle existante (valider_ligne_dev_avec_alias : association + prix +
+  // alias), puis on rejoue le scan habituel (lever_doute_par_code_barres) : la
+  // ligne portant maintenant produit + variante, la base apprend le code
+  // elle-même ('appris_direct'). Aucune fiche n'est jamais créée ici.
+  const assignerDepuisAssistant = async ({ produitId, varianteId, nomProduit }) => {
+    const a = assistantOff;
+    if (!a) return { ok: false, message: "Assistant fermé, refais le scan." };
+    const { ligneId, libelle, code } = a;
+    const ligne = lignes.find(l => l.id === ligneId);
+    const libelleAlias = ligne ? (ligne.libelle_brut || ligne.libelle_ticket) : libelle;
+
+    setEnCoursParLigne(prev => ({ ...prev, [ligneId]: true }));
+    setErreurActionParLigne(prev => ({ ...prev, [ligneId]: null }));
+    try {
+      const { error } = await supabase.rpc('valider_ligne_dev_avec_alias', {
+        p_ligne_ticket_id: ligneId,
+        p_produit_id: produitId,
+        p_variante_produit_id: varianteId ?? null,
+        p_libelle_alias: libelleAlias,
+      });
+      if (error) {
+        // Rien n'a été écrit : la feuille de recherche reste ouverte avec le
+        // message, la ligne reste dans la liste.
+        const message = messageErreurRpc(error, 'valider_ligne_dev_avec_alias');
+        setErreurActionParLigne(prev => ({ ...prev, [ligneId]: message }));
+        return { ok: false, message };
+      }
+
+      // Le rattachement est acquis. L'apprentissage du code est une étape EN
+      // PLUS : s'il échoue, on le dit, on ne fait pas croire à un demi-succès.
+      let statut = null;
+      let erreurApprentissage = null;
+      try {
+        const { data, error: errCode } = await supabase.rpc('lever_doute_par_code_barres', {
+          p_ligne_ticket_id: ligneId,
+          p_code_barres: code,
+        });
+        if (errCode) erreurApprentissage = messageErreurRpc(errCode, 'lever_doute_par_code_barres');
+        else statut = data?.statut ?? null;
+      } catch (e) {
+        console.error('[AValiderSheet] apprentissage du code après assistant OFF :', e);
+        erreurApprentissage = "le code-barres n'a pas pu être appris";
+      }
+
+      setRechercheCatalogue(false);
+      setAssistantOff(null);
+      retirerLigne(ligneId);
+
+      if (statut === 'appris_direct' || statut === 'valide_auto') {
+        setResultatScan({
+          ton: 'succes',
+          titre: `✓ Rattaché à « ${nomProduit} » — code-barres appris`,
+          detail: "La ligne a quitté cette liste : au prochain scan, ce code sera reconnu tout seul.",
+          libelle,
+        });
+      } else if (statut === 'inconnu_en_file' || statut === 'conflit_en_file') {
+        setResultatScan({
+          ton: 'attente',
+          titre: `Rattaché à « ${nomProduit} » — le code-barres part en file`,
+          detail: "L'article est rattaché, mais le code attend une validation dans 🧾 Validation scan (cas fréquent quand la fiche choisie n'a aucun format enregistré).",
+          libelle,
+        });
+      } else {
+        setResultatScan({
+          ton: 'attente',
+          titre: `Rattaché à « ${nomProduit} » — code-barres NON appris`,
+          detail: erreurApprentissage
+            ? `L'article est bien rattaché, mais ${erreurApprentissage}. Tu peux rescanner ce code plus tard.`
+            : "L'article est bien rattaché, mais la réponse du serveur sur le code-barres était inattendue. Tu peux rescanner ce code plus tard.",
+          libelle,
+        });
+      }
+      return { ok: true };
+    } catch (e) {
+      console.error('[AValiderSheet] assignation depuis l\'assistant OFF :', e);
+      const message = "Assignation impossible, réessaie.";
+      setErreurActionParLigne(prev => ({ ...prev, [ligneId]: message }));
+      return { ok: false, message };
+    } finally {
+      setEnCoursParLigne(prev => ({ ...prev, [ligneId]: false }));
+    }
+  };
+
+  // Chantier 103 — « ce n'est pas ça » / abandon de l'assistant : on repasse
+  // exactement par l'écran de confirmation d'avant (code inconnu -> file).
+  const retomberSurLaFile = () => {
+    const a = assistantOff;
+    if (!a) return;
+    setAssistantOff(null);
+    setConfirmationScan({
+      ligneId: a.ligneId,
+      libelle: a.libelle,
+      libelleTicket: a.libelleTicket,
+      code: a.code,
+      variante: null,
+      concordent: true,
+    });
+  };
+
+  // Étape 2 — l'utilisateur a confirmé : là seulement on écrit.
+  const appliquerScan = async () => {
+    const c = confirmationScan;
+    if (!c) return;
+    const { ligneId, libelle, code } = c;
+    setConfirmationScan(null);
+    const echec = (texte) => echecScan(ligneId, libelle, texte);
+    setEnCoursParLigne(prev => ({ ...prev, [ligneId]: true }));
+    setErreurActionParLigne(prev => ({ ...prev, [ligneId]: null }));
+    try {
+      const { data, error } = await supabase.rpc('lever_doute_par_code_barres', {
+        p_ligne_ticket_id: ligneId,
+        p_code_barres: code,
+      });
+      if (error) {
+        echec(`Scan impossible, réessaie — ${messageErreurRpc(error, 'lever_doute_par_code_barres')}`);
+        return;
+      }
+      const statut = data?.statut;
+      if (statut === 'valide_auto' || statut === 'appris_direct') {
+        retirerLigne(ligneId);
+        setResultatScan({
+          ton: 'succes',
+          titre: '✓ Reconnu et validé — article rattaché (+10 points)',
+          detail: "La ligne a quitté cette liste : elle est traitée, il n'y a plus rien à faire.",
+          libelle,
+        });
+      } else if (statut === 'conflit_en_file' || statut === 'inconnu_en_file') {
+        retirerLigne(ligneId);
+        setResultatScan({
+          ton: 'attente',
+          titre: 'Envoyé pour validation — retrouve-le dans 🧾 Validation scan',
+          detail: "La ligne a quitté cette liste : elle attend maintenant dans la console de validation (+10 points en attente).",
+          libelle,
+        });
+      } else {
+        // Statut inattendu : on ne touche à rien et on le dit honnêtement.
+        console.warn('[AValiderSheet] statut inattendu de lever_doute_par_code_barres :', data);
+        echec("Réponse inattendue du serveur — la ligne reste à valider.");
+      }
+    } catch (e) {
+      console.error('[AValiderSheet] levée de doute par code-barres :', e);
+      echec("Scan impossible, réessaie.");
+    } finally {
+      setEnCoursParLigne(prev => ({ ...prev, [ligneId]: false }));
+    }
+  };
 
   const valider = async (ligne, produitId, varianteId, produitNom) => {
     const ligneId = ligne.id;
@@ -475,6 +876,36 @@ export default function AValiderSheet({ onClose }) {
         <button onClick={onClose} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: 99, width: 30, height: 30, color: '#fff', fontSize: 15, cursor: 'pointer' }}>✕</button>
       </div>
 
+      {/* Chantier 101 — bandeau de résultat du scan : reste affiché jusqu'à ce
+          que l'utilisateur ferme (aucune minuterie), parce qu'un scan réussi
+          fait disparaître la ligne de la liste et que le message est la seule
+          explication de cette disparition. */}
+      {resultatScan && (
+        <div style={{
+          background: resultatScan.ton === 'succes' ? '#00B341' : resultatScan.ton === 'attente' ? '#0066FF' : '#CC0000',
+          color: '#fff', padding: '12px 16px calc(12px)', flexShrink: 0,
+          display: 'flex', alignItems: 'flex-start', gap: 12,
+        }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: F, fontWeight: 900, fontSize: 13 }}>{resultatScan.titre}</div>
+            {resultatScan.libelle && (
+              <div style={{ fontFamily: F, fontWeight: 800, fontSize: 12, opacity: 0.9, marginTop: 3 }}>
+                « {resultatScan.libelle} »
+              </div>
+            )}
+            {resultatScan.detail && (
+              <div style={{ fontFamily: F, fontSize: 12, lineHeight: 1.4, opacity: 0.9, marginTop: 3 }}>{resultatScan.detail}</div>
+            )}
+          </div>
+          <button
+            onClick={() => setResultatScan(null)}
+            style={{ flexShrink: 0, background: 'rgba(255,255,255,0.25)', border: 'none', borderRadius: 8, padding: '7px 14px', color: '#fff', fontFamily: F, fontWeight: 900, fontSize: 13, cursor: 'pointer' }}
+          >
+            OK
+          </button>
+        </div>
+      )}
+
       <div style={{ overflowY: 'auto', WebkitOverflowScrolling: 'touch', flex: 1, padding: '14px 14px calc(14px + env(safe-area-inset-bottom, 0px))' }}>
         {chargement && (
           <div style={{ textAlign: 'center', padding: '30px 0', fontFamily: F, fontSize: 13, color: '#888' }}>Chargement...</div>
@@ -501,10 +932,126 @@ export default function AValiderSheet({ onClose }) {
               onAnnuler={() => annuler(ligne)}
               nouveauProduitOuvert={nouveauProduitOuvertPour === ligne.id}
               onToggleNouveauProduit={() => setNouveauProduitOuvertPour(prev => prev === ligne.id ? null : ligne.id)}
+              onScanner={() => {
+                setErreurActionParLigne(prev => ({ ...prev, [ligne.id]: null }));
+                setResultatScan(null);
+                setScanCible({
+                  id: ligne.id,
+                  libelle: ligne.libelle_brut || ligne.libelle_ticket || '',
+                  libelleTicket: ligne.libelle_ticket || '',
+                });
+              }}
             />
           </LigneErrorBoundary>
         ))}
       </div>
+
+      {/* Chantier 101 — même lecteur @zxing que CorrigerProduitSheet (composant
+          partagé, configuration inchangée). Caméra fermée dès qu'un code est lu
+          ou à l'annulation. */}
+      {scanCible && (
+        <BarcodeScannerSheet onDetected={onCodeDetecte} onClose={() => setScanCible(null)} />
+      )}
+
+      {rechercheCode && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 550, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#fff', borderRadius: 12, padding: '16px 22px', fontFamily: F, fontSize: 13, fontWeight: 800, color: '#1a1a1a', textAlign: 'center', maxWidth: '80%' }}>
+            {rechercheCode}
+          </div>
+        </div>
+      )}
+
+      {/* Chantier 103 — assistant OpenFoodFacts (code inconnu uniquement).
+          Il ne remplace jamais le filet du chantier 101 : soit l'utilisateur
+          reconnaît le produit et choisit une fiche, soit on revient à l'écran
+          de confirmation « Code inconnu de la base ». */}
+      {assistantOff && !rechercheCatalogue && (
+        <AssistantOffCard
+          assistant={assistantOff}
+          enCours={!!enCoursParLigne[assistantOff.ligneId]}
+          onOuiChoisir={() => setRechercheCatalogue(true)}
+          onCeNestPasCa={retomberSurLaFile}
+          onFermer={() => setAssistantOff(null)}
+        />
+      )}
+
+      {assistantOff && rechercheCatalogue && (
+        <RechercheProduitSheet
+          titre="Choisir la fiche du catalogue"
+          sousTitre={[assistantOff.off.marque, assistantOff.off.nom, assistantOff.off.quantite].filter(Boolean).join(' · ') || assistantOff.code}
+          requeteInitiale={termesRechercheOff(assistantOff.off)}
+          repliProgressif
+          onClose={() => setRechercheCatalogue(false)}
+          onChoisir={assignerDepuisAssistant}
+        />
+      )}
+
+      {/* Chantier 101 — LE filet de sécurité : rien n'est écrit tant que
+          l'utilisateur n'a pas vu à quoi le code correspond, en face du libellé
+          de la ligne visée. C'est ce qui manquait quand un code de pâtes scanné
+          sur une ligne de glace a été rattaché sans un mot. */}
+      {confirmationScan && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 560, display: 'flex', alignItems: 'flex-end' }} onClick={() => setConfirmationScan(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: '20px 20px 0 0', width: '100%', padding: '20px 20px calc(20px + env(safe-area-inset-bottom, 0px))', boxSizing: 'border-box' }}>
+            <div style={{ fontFamily: F, fontWeight: 900, fontSize: 16, color: '#1a1a1a' }}>
+              {confirmationScan.variante ? 'Confirmer le rattachement' : 'Code inconnu de la base'}
+            </div>
+            <div style={{ fontFamily: F, fontSize: 11, color: '#999', marginTop: 2 }}>Code lu : {confirmationScan.code}</div>
+
+            <div style={{ marginTop: 14, padding: 12, background: '#F5F6F8', borderRadius: 10 }}>
+              <div style={{ fontFamily: F, fontSize: 11, fontWeight: 800, color: '#666' }}>LIGNE DU TICKET</div>
+              <div style={{ fontFamily: F, fontSize: 14, fontWeight: 800, color: '#1a1a1a', marginTop: 3 }}>
+                « {confirmationScan.libelle || '(libellé vide)'} »
+              </div>
+              {confirmationScan.libelleTicket && confirmationScan.libelleTicket !== confirmationScan.libelle && (
+                <div style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 11, color: '#666', marginTop: 5 }}>
+                  Texte imprimé : {confirmationScan.libelleTicket}
+                </div>
+              )}
+            </div>
+
+            <div style={{ marginTop: 10, padding: 12, background: '#F5F6F8', borderRadius: 10, display: 'flex', gap: 10, alignItems: 'center' }}>
+              {confirmationScan.variante?.url_image && (
+                <img src={confirmationScan.variante.url_image} alt="" style={{ width: 48, height: 48, borderRadius: 8, objectFit: 'cover', background: '#fff', flexShrink: 0 }} />
+              )}
+              <div>
+                <div style={{ fontFamily: F, fontSize: 11, fontWeight: 800, color: '#666' }}>CE CODE-BARRES DÉSIGNE</div>
+                {confirmationScan.variante ? (
+                  <div style={{ fontFamily: F, fontSize: 14, fontWeight: 800, color: '#1a1a1a', marginTop: 3 }}>
+                    {[confirmationScan.variante.marques?.nom, confirmationScan.variante.produits?.nom_reference, confirmationScan.variante.quantite_nette != null && confirmationScan.variante.unite_quantite
+                      ? `${versNombre(confirmationScan.variante.quantite_nette)}${confirmationScan.variante.unite_quantite}` : null].filter(Boolean).join(' · ')}
+                  </div>
+                ) : (
+                  <div style={{ fontFamily: F, fontSize: 13, color: '#666', marginTop: 3, lineHeight: 1.4 }}>
+                    Aucun article connu. En continuant, la ligne part en file de validation (ou le code est appris sur le produit déjà associé à cette ligne).
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {confirmationScan.variante && !confirmationScan.concordent && (
+              <div style={{ marginTop: 10, padding: 12, background: '#FFF3F3', border: '1px solid #F3C5C5', borderRadius: 10, fontFamily: F, fontSize: 13, color: '#CC0000', fontWeight: 700, lineHeight: 1.4 }}>
+                ⚠️ Le libellé du ticket et ce produit n'ont rien en commun. Vérifie que tu as bien scanné l'article de CETTE ligne.
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+              <button
+                onClick={appliquerScan}
+                style={{ flex: 1, padding: 13, border: 'none', borderRadius: 12, fontFamily: F, fontWeight: 900, fontSize: 14, color: '#fff', background: confirmationScan.variante && !confirmationScan.concordent ? '#CC0000' : '#00B341', cursor: 'pointer' }}
+              >
+                {confirmationScan.variante && !confirmationScan.concordent ? 'Rattacher quand même' : 'Oui, rattacher'}
+              </button>
+              <button
+                onClick={() => setConfirmationScan(null)}
+                style={{ padding: '13px 18px', border: 'none', borderRadius: 12, fontFamily: F, fontWeight: 800, fontSize: 14, color: '#333', background: '#eee', cursor: 'pointer' }}
+              >
+                Annuler
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

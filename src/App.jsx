@@ -29,9 +29,10 @@ import ClassementPanierShadow from "./components/dev/ClassementPanierShadow";
 import AdminRejetsCorePanel from "./components/admin/AdminRejetsCorePanel";
 // Chantier "Scan code-barres", bout 1 — BarcodeDetector natif absent d'iOS
 // Safari, on utilise @zxing/browser (getUserMedia + décodage JS, éprouvé sur
-// iOS). Shadow François uniquement, voir estFrancois plus bas.
-import { BrowserMultiFormatReader } from "@zxing/browser";
-import { BarcodeFormat, DecodeHintType } from "@zxing/library";
+// iOS). Shadow François uniquement, voir estFrancois plus bas. Chantier 101 —
+// le lecteur vit désormais dans son propre fichier (partagé avec l'écran admin
+// « À valider »), code et configuration inchangés.
+import BarcodeScannerSheet from "./components/BarcodeScannerSheet";
 import AValiderSheet from "./components/dev/AValiderSheet";
 // Chantier "Scan code-barres", bout 3B — console de validation admin
 import ValidationScanSheet from "./components/admin/ValidationScanSheet";
@@ -6958,79 +6959,6 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
 // par code-barres : marque + libellé + quantité, tel que demandé (distinct de
 // libelleVariante ci-dessus, qui ne sert qu'au sélecteur "plusieurs variantes"
 // de la recherche par nom).
-// ── BARCODE SCANNER SHEET (Chantier "Scan code-barres", bout 1) ────────────
-// Caméra arrière + décodage EAN-13/EAN-8/UPC-A via @zxing/browser
-// (BarcodeDetector natif absent d'iOS Safari — cette lib décode en JS pur à
-// partir du flux vidéo, éprouvée sur iOS). Ferme la caméra dès qu'un code est
-// lu ou à la fermeture manuelle ; ne laisse jamais un flux caméra ouvert.
-function BarcodeScannerSheet({ onDetected, onClose }) {
-  const videoRef = useRef(null);
-  const [erreur, setErreur] = useState(null);
-  const [pret, setPret] = useState(false);
-
-  useEffect(() => {
-    let annule = false;
-    let controls = null;
-    (async () => {
-      try {
-        const hints = new Map();
-        // Formats : EAN/UPC courants + UPC-E (sûr). Code 128 / ITF volontairement
-        // EXCLUS pour l'instant (faux positifs). TRY_HARDER = décodage plus robuste
-        // (codes mats, petits, légèrement bombés) pour lire les vrais emballages.
-        hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.EAN_13, BarcodeFormat.EAN_8, BarcodeFormat.UPC_A, BarcodeFormat.UPC_E]);
-        hints.set(DecodeHintType.TRY_HARDER, true);
-        const reader = new BrowserMultiFormatReader(hints);
-        controls = await reader.decodeFromConstraints(
-          // Contraintes en IDEAL (souples, jamais 'exact' -> pas d'OverconstrainedError) :
-          // meilleure résolution pour résoudre les fines barres + autofocus continu
-          // (best-effort, ignoré si l'appareil ne le supporte pas).
-          { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, advanced: [{ focusMode: 'continuous' }] } },
-          videoRef.current,
-          (result) => {
-            if (annule || !result) return;
-            controls?.stop();
-            // Remonte le texte ET le format détecté (nom lisible via BarcodeFormat).
-            onDetected(result.getText(), BarcodeFormat[result.getBarcodeFormat()]);
-          }
-        );
-        if (!annule) setPret(true);
-      } catch (e) {
-        if (annule) return;
-        console.error('[BarcodeScannerSheet] ouverture caméra :', e);
-        setErreur(
-          e?.name === 'NotAllowedError'
-            ? "Accès à la caméra refusé — autorise-le dans Réglages > Safari > Caméra, puis réessaie."
-            : "Impossible d'ouvrir la caméra sur cet appareil."
-        );
-      }
-    })();
-    return () => { annule = true; controls?.stop(); };
-  }, [onDetected]);
-
-  return (
-    <div style={{ position:"fixed", inset:0, background:"#000", zIndex:600, display:"flex", flexDirection:"column" }}>
-      <div style={{ padding:"14px 16px calc(14px + env(safe-area-inset-top, 0px))", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0 }}>
-        <span style={{ color:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14 }}>📷 Scanner le code-barres</span>
-        <button onClick={onClose} style={{ background:"rgba(255,255,255,0.2)", border:"none", borderRadius:99, width:30, height:30, color:"#fff", fontSize:15, cursor:"pointer" }}>✕</button>
-      </div>
-      <div style={{ flex:1, position:"relative", display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden" }}>
-        <video ref={videoRef} style={{ width:"100%", height:"100%", objectFit:"cover" }} muted playsInline autoPlay />
-        {!pret && !erreur && (
-          <div style={{ position:"absolute", color:"#fff", fontFamily:"'Nunito',sans-serif", fontSize:13 }}>Ouverture de la caméra...</div>
-        )}
-        {erreur && (
-          <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center", padding:24, textAlign:"center", background:"rgba(0,0,0,0.7)" }}>
-            <div style={{ color:"#fff", fontFamily:"'Nunito',sans-serif", fontSize:14 }}>{erreur}</div>
-          </div>
-        )}
-        {pret && !erreur && (
-          <div style={{ position:"absolute", width:"72%", maxWidth:320, aspectRatio:"2/1", border:"3px solid #00B341", borderRadius:12, pointerEvents:"none" }} />
-        )}
-      </div>
-    </div>
-  );
-}
-
 function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onClose, onChoisir }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
@@ -11261,7 +11189,11 @@ export default function App() {
             Chantier Micro Lot 6 : REPLIÉS derrière une pastille 🛠️ unique — les
             deux gros boutons chevauchaient les titres d'écran (Micro, Ma liste…).
             Le badge pendingScanCount reste visible sur la pastille repliée. */}
-        {isAdmin && (
+        {/* Chantier 101 — la pastille admin est en zIndex 500, au-dessus des
+            feuilles admin (400) : elle masquait l'en-tête et le bandeau de
+            résultat du scan. On la retire tant qu'une de ces deux feuilles est
+            ouverte (elle y est inutile, chaque feuille a sa croix de fermeture). */}
+        {isAdmin && !showAValider && !showValidationScan && (
           <div style={{ position:"fixed", top:10, left:10, zIndex:500, display:"flex", flexDirection:"column", gap:6, alignItems:"flex-start" }}>
             <button onClick={()=>setAdminOutilsOuverts(o=>!o)} aria-label="Outils admin"
               style={{ width:32, height:32, borderRadius:99, border:"none", background:"rgba(0,0,0,0.55)", color:"#fff", fontSize:14, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", position:"relative", padding:0 }}>

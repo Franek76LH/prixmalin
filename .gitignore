@@ -29,3 +29,6 @@ supabase/.temp/
 
 # #66 — script d'import contient une clé service_role, jamais commitée
 scripts/.env
+
+# CSV bruts d'import Drive — données de tickets/relevés, jamais commitées
+scripts/imports/

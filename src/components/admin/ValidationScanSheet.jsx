@@ -8,9 +8,10 @@
 // Une fois traitée, une proposition disparaît de la liste (pas d'onglet
 // "traitées" à ce stade).
 
-import { Component, useEffect, useState } from 'react';
+import { Component, useEffect, useRef, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { nomComposeVariante } from '../../lib/nomProduit';
+import RechercheProduitSheet from './RechercheProduitSheet';
 
 const F = "'Nunito',sans-serif";
 
@@ -44,7 +45,7 @@ function messageErreurRpc(error) {
   return error?.message || "Action impossible, réessaie.";
 }
 
-function PropositionCard({ p, enCours, erreurAction, onConfirmer, onRefuser }) {
+function PropositionCard({ p, enCours, erreurAction, onConfirmer, onRefuser, onAssigner }) {
   // Réutilise le helper d'affichage produit du bout 1 (nomComposeVariante),
   // à partir des colonnes à plat renvoyées par la RPC (elle ne peut pas
   // renvoyer les objets imbriqués marques/produits d'un embed PostgREST
@@ -56,6 +57,12 @@ function PropositionCard({ p, enCours, erreurAction, onConfirmer, onRefuser }) {
     unite_quantite: p.unite_quantite,
     produits: { nom_reference: p.nom_produit },
   });
+
+  // Chantier 101 — une proposition peut arriver SANS produit (code-barres
+  // inconnu scanné sur une ligne elle-même non rattachée) : la RPC renvoie
+  // produit_id/nom_produit à null. Tant qu'un produit n'a pas été assigné,
+  // valider_proposition_scan lève une exception -> bouton Confirmer bloqué.
+  const aAssigner = !p.produit_id;
 
   return (
     <div style={{ background: '#fff', borderRadius: 14, padding: '14px 16px', marginBottom: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
@@ -71,17 +78,36 @@ function PropositionCard({ p, enCours, erreurAction, onConfirmer, onRefuser }) {
           <img src={p.url_image} alt="" style={{ width: 48, height: 48, borderRadius: 8, objectFit: 'cover', background: '#F5F6F8', flexShrink: 0 }} />
         )}
         <div>
-          <div style={{ fontFamily: F, fontWeight: 800, fontSize: 13, color: '#1a1a1a' }}>{nomAffiche}</div>
+          {aAssigner ? (
+            <div style={{ fontFamily: F, fontWeight: 900, fontSize: 13, color: '#B8860B' }}>⚠️ Produit à assigner</div>
+          ) : (
+            <div style={{ fontFamily: F, fontWeight: 800, fontSize: 13, color: '#1a1a1a' }}>{nomAffiche}</div>
+          )}
           {p.code_barres && (
-            <div style={{ fontFamily: F, fontSize: 11, color: '#999', marginTop: 2 }}>{p.code_barres}</div>
+            <div style={{ fontFamily: F, fontSize: 11, color: '#999', marginTop: 2 }}>
+              {aAssigner ? `Code-barres scanné : ${p.code_barres}` : p.code_barres}
+            </div>
           )}
         </div>
       </div>
 
+      {/* Chantier 101 — « Changer le produit » : une assignation erronée doit
+          pouvoir être reprise. Sans ce bouton, une proposition mal assignée ne
+          laissait que Confirmer (donc écrire une fausse liaison) ou Refuser
+          (donc tout reperdre). Même RPC dans les deux cas : l'assignation
+          écrase simplement produit_id / variante_produit_id. */}
+      <button
+        onClick={onAssigner}
+        disabled={enCours}
+        style={{ width: '100%', padding: 9, marginTop: 10, borderRadius: 8, border: `1.5px dashed ${aAssigner ? '#0066FF' : '#999'}`, background: 'transparent', color: aAssigner ? '#0066FF' : '#666', fontFamily: F, fontWeight: 800, fontSize: 13, cursor: enCours ? 'default' : 'pointer', opacity: enCours ? 0.6 : 1 }}
+      >
+        {aAssigner ? '🔎 Assigner le produit' : '🔄 Changer le produit'}
+      </button>
+
       {erreurAction && <div style={{ fontFamily: F, fontSize: 12, color: '#CC0000', marginTop: 8 }}>⚠️ {erreurAction}</div>}
 
       <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-        <button onClick={onConfirmer} disabled={enCours} style={{ flex: 1, padding: 9, borderRadius: 8, border: 'none', background: enCours ? '#ccc' : '#00B341', color: '#fff', fontFamily: F, fontWeight: 800, fontSize: 13, cursor: enCours ? 'default' : 'pointer' }}>
+        <button onClick={onConfirmer} disabled={enCours || aAssigner} title={aAssigner ? "Assigne d'abord un produit à cette proposition" : undefined} style={{ flex: 1, padding: 9, borderRadius: 8, border: 'none', background: (enCours || aAssigner) ? '#ccc' : '#00B341', color: '#fff', fontFamily: F, fontWeight: 800, fontSize: 13, cursor: (enCours || aAssigner) ? 'default' : 'pointer' }}>
           {enCours ? '...' : '✓ Confirmer'}
         </button>
         <button onClick={onRefuser} disabled={enCours} style={{ flex: 1, padding: 9, borderRadius: 8, border: 'none', background: enCours ? '#eee' : '#F5F6F8', color: '#CC0000', fontFamily: F, fontWeight: 800, fontSize: 13, cursor: enCours ? 'default' : 'pointer' }}>
@@ -99,31 +125,46 @@ export default function ValidationScanSheet({ onClose, onCountChange }) {
   const [enCoursParId, setEnCoursParId] = useState({});
   const [erreurActionParId, setErreurActionParId] = useState({});
   const [message, setMessage] = useState(null);
+  // Chantier 101 — proposition dont on est en train de choisir le produit.
+  const [assignationPour, setAssignationPour] = useState(null);
+  const monte = useRef(true);
+  useEffect(() => () => { monte.current = false; }, []);
+
+  // Chantier 101 — chargement sorti de l'effet pour être rejoué après une
+  // assignation (la liste doit alors afficher le vrai nom du produit, sa
+  // marque et son image, telles que la RPC les compose).
+  // conserverSiErreur : sur un simple rafraîchissement, un échec réseau ne doit
+  // pas vider la liste déjà affichée.
+  const charger = async ({ avecSpinner = true, conserverSiErreur = false } = {}) => {
+    if (avecSpinner) setChargement(true);
+    setErreur(null);
+    try {
+      const { data, error } = await supabase.rpc('lister_propositions_liaison_scan_en_attente');
+      if (!monte.current) return;
+      if (error) {
+        if (conserverSiErreur) { console.error('[ValidationScanSheet] rafraîchissement :', error); return; }
+        setErreur(messageErreurRpc(error));
+        setPropositions([]);
+        onCountChange?.(0);
+      } else {
+        const liste = Array.isArray(data) ? data : [];
+        setPropositions(liste);
+        onCountChange?.(liste.length);
+      }
+    } catch (e) {
+      if (!monte.current) return;
+      console.error('[ValidationScanSheet] chargement :', e);
+      if (!conserverSiErreur) {
+        setErreur("Impossible de charger les propositions.");
+        setPropositions([]);
+      }
+    } finally {
+      if (monte.current && avecSpinner) setChargement(false);
+    }
+  };
 
   useEffect(() => {
-    let annule = false;
-    (async () => {
-      setChargement(true);
-      setErreur(null);
-      try {
-        const { data, error } = await supabase.rpc('lister_propositions_liaison_scan_en_attente');
-        if (annule) return;
-        if (error) {
-          setErreur(messageErreurRpc(error));
-          setPropositions([]);
-          onCountChange?.(0);
-        } else {
-          const liste = Array.isArray(data) ? data : [];
-          setPropositions(liste);
-          onCountChange?.(liste.length);
-        }
-      } catch (e) {
-        if (!annule) { console.error('[ValidationScanSheet] chargement :', e); setErreur("Impossible de charger les propositions."); setPropositions([]); }
-      } finally {
-        if (!annule) setChargement(false);
-      }
-    })();
-    return () => { annule = true; };
+    charger();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -150,6 +191,43 @@ export default function ValidationScanSheet({ onClose, onCountChange }) {
       setErreurActionParId(prev => ({ ...prev, [id]: "Action impossible, réessaie." }));
     } finally {
       setEnCoursParId(prev => ({ ...prev, [id]: false }));
+    }
+  };
+
+  // Chantier 101 — affecte un produit (et sa variante quand elle est
+  // déterminée) à une proposition arrivée sans produit. La proposition reste en
+  // attente : elle devient seulement confirmable. On patche l'affichage tout de
+  // suite, puis on rejoue la RPC de liste pour récupérer le libellé composé
+  // exact (marque, quantité, image) — rafraîchissement best effort.
+  const assignerProduit = async (proposition, { produitId, varianteId, nomProduit }) => {
+    setEnCoursParId(prev => ({ ...prev, [proposition.id]: true }));
+    setErreurActionParId(prev => ({ ...prev, [proposition.id]: null }));
+    try {
+      const { error } = await supabase.rpc('assigner_produit_proposition_scan', {
+        p_proposition_id: proposition.id,
+        p_produit_id: produitId,
+        p_variante_produit_id: varianteId ?? null,
+      });
+      if (error) {
+        const message = messageErreurRpc(error);
+        setErreurActionParId(prev => ({ ...prev, [proposition.id]: message }));
+        return { ok: false, message };
+      }
+      setPropositions(prev => prev.map(p => (
+        p.id === proposition.id
+          ? { ...p, produit_id: produitId, variante_produit_id: varianteId ?? null, nom_produit: nomProduit }
+          : p
+      )));
+      afficherMessage(`Produit assigné : « ${nomProduit} » — vérifie le format, puis Confirmer`);
+      charger({ avecSpinner: false, conserverSiErreur: true });
+      return { ok: true };
+    } catch (e) {
+      console.error('[ValidationScanSheet] assigner_produit_proposition_scan :', e);
+      const message = "Assignation impossible, réessaie.";
+      setErreurActionParId(prev => ({ ...prev, [proposition.id]: message }));
+      return { ok: false, message };
+    } finally {
+      setEnCoursParId(prev => ({ ...prev, [proposition.id]: false }));
     }
   };
 
@@ -195,10 +273,22 @@ export default function ValidationScanSheet({ onClose, onCountChange }) {
               erreurAction={erreurActionParId[p.id]}
               onConfirmer={() => confirmer(p)}
               onRefuser={() => refuser(p)}
+              onAssigner={() => setAssignationPour(p)}
             />
           </LigneErrorBoundary>
         ))}
       </div>
+
+      {/* Chantier 101 — même recherche produit + choix de variante que la
+          correction d'une ligne de ticket (RPC rechercher_produits_pour_correction). */}
+      {assignationPour && (
+        <RechercheProduitSheet
+          titre={assignationPour.produit_id ? 'Changer le produit' : 'Assigner le produit'}
+          sousTitre={`« ${assignationPour.libelle_ticket || 'article sans libellé'} »${assignationPour.code_barres ? ` · ${assignationPour.code_barres}` : ''}`}
+          onClose={() => setAssignationPour(null)}
+          onChoisir={(choix) => assignerProduit(assignationPour, choix)}
+        />
+      )}
     </div>
   );
 }
