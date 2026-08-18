@@ -6,6 +6,7 @@ import {
   comparerQuantites,
   motsCommuns,
   passerOutreAutorise,
+  divergenceAvecLigneTicket,
   SEUIL_ECART_QUANTITE,
   NIVEAU_SILENCIEUX,
   NIVEAU_NOTE,
@@ -300,5 +301,104 @@ describe('passerOutreAutorise', () => {
     expect(passerOutreAutorise({ estAdmin: false })).toBe(false);
     expect(passerOutreAutorise({})).toBe(false);
     expect(passerOutreAutorise()).toBe(false);
+  });
+});
+
+// ── Chantier 107 — « ce produit ne ressemble pas à la ligne du ticket » ──────
+describe('divergenceAvecLigneTicket', () => {
+  it('LE cas réel : un Caprice des Dieux scanné sur une ligne Red Bull', () => {
+    expect(divergenceAvecLigneTicket({
+      statutOff: OFF_TROUVE,
+      off: { nom: 'Caprice des Dieux', marque: 'Caprice des Dieux', quantite: '200 g' },
+      libelle: 'Boisson énergisante Red Bull summer edition',
+      libelleTicket: 'RED BULL THE SUMMER EDITION 25',
+    })).toBe(true);
+  });
+
+  it('au moins un mot commun -> rien du tout, le silence est le message', () => {
+    expect(divergenceAvecLigneTicket({
+      statutOff: OFF_TROUVE,
+      off: { nom: 'Boisson énergisante', marque: 'Red Bull' },
+      libelle: 'Boisson énergisante Red Bull summer edition',
+      libelleTicket: 'RED BULL THE SUMMER EDITION 25',
+    })).toBe(false);
+  });
+
+  it('un seul mot commun suffit à faire taire le bandeau', () => {
+    expect(divergenceAvecLigneTicket({
+      statutOff: OFF_TROUVE,
+      off: { nom: 'Comté râpé', marque: 'Entremont' },
+      libelle: 'COMTE RAPE 200G',
+      libelleTicket: null,
+    })).toBe(false);
+  });
+
+  // FAUSSE ALERTE ASSUMÉE — à ne PAS « corriger ».
+  //
+  // Le ticket de François imprime « GROS BRIDE IGP ARDECHE » pour un fromage de
+  // brebis : ce libellé de caisse ne partage aucun mot avec le nom réel du
+  // produit. Le bandeau s'affiche donc alors que le scan est juste.
+  //
+  // C'est le comportement VOULU. On compare ici à un libellé de caisse, pas à
+  // une fiche du catalogue : les abréviations et les noms de gamme rendent ces
+  // faux positifs inévitables. Le prix à payer est un bandeau ambre discret ;
+  // le prix de l'inverse serait un Caprice des Dieux appris sur une ligne Red
+  // Bull sans un mot. Rien n'est bloqué : le bouton vert reste le bouton
+  // principal et le parcours est identique à celui d'avant le chantier.
+  it('fausse alerte assumée : « GROS BRIDE IGP ARDECHE » contre un vrai fromage de brebis', () => {
+    expect(divergenceAvecLigneTicket({
+      statutOff: OFF_TROUVE,
+      off: { nom: 'Ossau-Iraty', marque: 'Istara' },
+      libelle: 'Fromage de brebis',
+      libelleTicket: 'GROS BRIDE IGP ARDECHE',
+    })).toBe(true);
+  });
+
+  it('OFF injoignable ou muet : aucun bandeau, on ne signale que ce qu\'on a comparé', () => {
+    for (const statutOff of [OFF_INDISPONIBLE, OFF_INCONNU]) {
+      expect(divergenceAvecLigneTicket({
+        statutOff,
+        off: null,
+        libelle: 'Boisson énergisante Red Bull summer edition',
+        libelleTicket: 'RED BULL THE SUMMER EDITION 25',
+      })).toBe(false);
+    }
+    // Même sans statut, une fiche OFF absente ne permet aucune comparaison.
+    expect(divergenceAvecLigneTicket({
+      off: null,
+      libelle: 'Boisson énergisante Red Bull',
+    })).toBe(false);
+  });
+
+  it('module de contribution : aucune ligne de ticket -> aucun bandeau', () => {
+    // Ce que le 106 met dans `assistant` depuis l'accueil : ni libelle ni
+    // libelleTicket. Rien à comparer, donc rien à signaler.
+    expect(divergenceAvecLigneTicket({
+      statutOff: OFF_TROUVE,
+      off: { nom: 'Caprice des Dieux', marque: 'Caprice des Dieux' },
+    })).toBe(false);
+  });
+
+  it('ligne de ticket sans libellé exploitable -> aucun bandeau', () => {
+    for (const paire of [{ libelle: '', libelleTicket: '' }, { libelle: '  ', libelleTicket: null }, { libelle: '25', libelleTicket: 'XX' }]) {
+      expect(divergenceAvecLigneTicket({
+        statutOff: OFF_TROUVE,
+        off: { nom: 'Caprice des Dieux', marque: 'Caprice des Dieux' },
+        ...paire,
+      })).toBe(false);
+    }
+  });
+
+  it('fiche OFF sans texte exploitable -> aucun bandeau', () => {
+    expect(divergenceAvecLigneTicket({
+      statutOff: OFF_TROUVE,
+      off: { nom: null, marque: null, quantite: '200 g' },
+      libelle: 'Boisson énergisante Red Bull',
+    })).toBe(false);
+  });
+
+  it('ne plante jamais, même sans argument', () => {
+    expect(() => divergenceAvecLigneTicket()).not.toThrow();
+    expect(divergenceAvecLigneTicket()).toBe(false);
   });
 });

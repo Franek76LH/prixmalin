@@ -12,7 +12,7 @@
 // et affiche donc, mot pour mot, ce qu'il affichait avant.
 import { useState } from 'react';
 import { cloudinaryFetch } from '../lib/photosProduits';
-import { SIGNAL_AUCUN_MOT_COMMUN, SIGNAL_QUANTITE_DIVERGENTE, texteQuantiteFiche } from '../lib/coherenceCodeBarres';
+import { SIGNAL_AUCUN_MOT_COMMUN, SIGNAL_QUANTITE_DIVERGENTE, texteQuantiteFiche, divergenceAvecLigneTicket } from '../lib/coherenceCodeBarres';
 
 const F = "'Nunito',sans-serif";
 
@@ -26,6 +26,11 @@ const F = "'Nunito',sans-serif";
 // ou n'a pas répondu). On ne montre alors PAS de bloc d'identité vide : on
 // affiche `noteOff`, qui dit franchement que personne ne peut vérifier à la
 // place de l'utilisateur. Le parcours continue quand même.
+//
+// Chantier 107 — bandeau ambre quand ce que dit OFF n'a AUCUN mot en commun
+// avec la ligne du ticket. Calculé ici à partir de `assistant`, qui porte déjà
+// tout le nécessaire : aucun appelant n'a de prop à passer, et le module de
+// contribution (aucune ligne de ticket) n'affiche donc rien, sans le savoir.
 export function AssistantOffCard({
   assistant,
   enCours,
@@ -42,6 +47,10 @@ export function AssistantOffCard({
   const sourceOff = off ? (off.imageLarge || off.imageSmall || null) : null;
   const [srcImage, setSrcImage] = useState(() => cloudinaryFetch(sourceOff, 'large'));
   const identite = off ? [off.marque, off.nom, off.quantite].filter(Boolean).join(' · ') : '';
+  // Chantier 107 — `assistant` porte off, statutOff, libelle et libelleTicket :
+  // la règle lit exactement ce dont elle a besoin et rend false dès qu'il
+  // manque un des deux côtés à comparer (OFF muet, pas de ligne de ticket).
+  const divergenceLigne = divergenceAvecLigneTicket(assistant);
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 560, display: 'flex', alignItems: 'flex-end' }} onClick={onFermer}>
@@ -95,6 +104,17 @@ export function AssistantOffCard({
                 Texte imprimé : {libelleTicket}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Chantier 107 — placé sous la confrontation, avant la question :
+            l'œil lit « OFF dit X », « le ticket dit Y », puis l'alerte. Ton
+            ambre et non rouge, volontairement : on compare ici à un libellé de
+            caisse, souvent abrégé ou trompeur, donc les fausses alertes sont
+            attendues. Aucun bouton n'est modifié, aucun parcours n'est bloqué. */}
+        {divergenceLigne && (
+          <div style={{ marginTop: 10, padding: 12, background: '#FFF8E1', border: '1px solid #F0DFA0', borderRadius: 12, fontFamily: F, fontSize: 12, color: '#7A6000', lineHeight: 1.5 }}>
+            ⚠️ Ce produit ne ressemble pas à la ligne du ticket — vérifie que c'est bien celui que tu tiens.
           </div>
         )}
 

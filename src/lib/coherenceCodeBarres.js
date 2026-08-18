@@ -233,6 +233,46 @@ export function texteQuantiteFiche(fiche) {
     : `${quantiteNette} ${fiche.unite_quantite}`;
 }
 
+// Chantier 107 — DIVERGENCE AVEC LA LIGNE DU TICKET.
+//
+// Le cas réel : ligne « Boisson énergisante Red Bull summer edition » (texte
+// imprimé « RED BULL THE SUMMER EDITION 25 »), code scanné = Caprice des Dieux
+// 200 g. L'écran « Ce produit ? » affichait la photo du fromage juste au-dessus
+// du libellé Red Bull, sans un mot.
+//
+// Ce n'est PAS le garde-fou du 105, et la différence est de nature, pas de
+// degré :
+//   - le 105 compare OFF à une FICHE DU CATALOGUE, écrite par nous, propre.
+//     Un désaccord y est un signal fort, et l'écran est un mur.
+//   - ici on compare OFF à un LIBELLÉ DE CAISSE, abrégé et parfois trompeur.
+//     Le ticket de François dit « GROS BRIDE IGP ARDECHE » pour un fromage de
+//     brebis : zéro mot commun avec n'importe quelle fiche honnête. Les
+//     fausses alertes sont donc ATTENDUES et NORMALES.
+//
+// D'où un bandeau ambre discret, et rien d'autre : aucun bouton ne change,
+// aucun parcours n'est bloqué, rien ne devient plus difficile qu'avant. On
+// attire l'œil, on ne prend pas la décision à la place de l'utilisateur.
+//
+// On ne signale QUE ce qu'on a réellement comparé. Pas d'OFF exploitable, pas
+// de libellé de ticket exploitable -> false. Une absence de donnée n'est pas
+// un désaccord, et le silence n'est jamais un « tout va bien ».
+export function divergenceAvecLigneTicket({ statutOff = null, off = null, libelle = null, libelleTicket = null } = {}) {
+  if (statutOff === OFF_INDISPONIBLE || statutOff === OFF_INCONNU) return false;
+  if (!off) return false;
+
+  // Côté OFF : nom commercial + marque, comme au 105.
+  // Côté ticket : le libellé affiché ET le texte imprimé brut, réunis. Les deux
+  // comptent — quand le mapping d'import s'est trompé, c'est le texte brut qui
+  // dit vrai ; quand la caisse abrège jusqu'à l'illisible, c'est le libellé.
+  const texteOff = [off.nom, off.marque].filter(Boolean).join(' ');
+  const texteLigne = [libelle, libelleTicket].filter(Boolean).join(' ');
+
+  if (motsSignifiants(texteOff).size === 0) return false;
+  if (motsSignifiants(texteLigne).size === 0) return false;
+
+  return motsCommuns(texteOff, texteLigne).length === 0;
+}
+
 // LA décision « apprendre quand même », isolée exprès dans une seule fonction.
 //
 // Aujourd'hui l'écran 🔍 À valider n'est monté que pour un administrateur, donc
