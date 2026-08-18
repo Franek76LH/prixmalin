@@ -210,6 +210,29 @@ export function verifierCoherenceCodeBarres({ statutOff, off = null, fiche = nul
   };
 }
 
+// numeric Postgres arrive en string via PostgREST (ex "1.000") — toujours
+// repasser par Number() avant tout calcul, jamais supposer un type numérique.
+export function versNombre(valeur, repli = null) {
+  if (valeur == null) return repli;
+  const n = Number(valeur);
+  return Number.isFinite(n) ? n : repli;
+}
+
+// Quantité de la fiche telle qu'elle a RÉELLEMENT été comparée ci-dessus. Sur
+// un lot (nombre_unites > 1), afficher « 432 g » alors que le calcul a porté
+// sur 2 592 g rendrait le pourcentage d'écart incompréhensible : on détaille
+// donc l'opération. Vit ici, à côté du calcul qu'elle explique, pour que
+// l'avertissement du 105 et l'écran admin du 106 disent exactement la même
+// chose.
+export function texteQuantiteFiche(fiche) {
+  const quantiteNette = versNombre(fiche?.quantite_nette);
+  const unites = versNombre(fiche?.nombre_unites);
+  if (quantiteNette == null || !fiche?.unite_quantite) return null;
+  return (unites != null && unites > 1)
+    ? `${quantiteNette} ${fiche.unite_quantite} × ${unites} = ${quantiteNette * unites} ${fiche.unite_quantite}`
+    : `${quantiteNette} ${fiche.unite_quantite}`;
+}
+
 // LA décision « apprendre quand même », isolée exprès dans une seule fonction.
 //
 // Aujourd'hui l'écran 🔍 À valider n'est monté que pour un administrateur, donc

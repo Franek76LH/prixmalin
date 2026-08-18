@@ -36,6 +36,10 @@ import BarcodeScannerSheet from "./components/BarcodeScannerSheet";
 import AValiderSheet from "./components/dev/AValiderSheet";
 // Chantier "Scan code-barres", bout 3B — console de validation admin
 import ValidationScanSheet from "./components/admin/ValidationScanSheet";
+// Chantier 106 Lot A — module de contribution aux codes-barres : parcours
+// utilisateur depuis l'accueil, et file de validation côté François.
+import ContributionCodeBarresSheet from "./components/ContributionCodeBarresSheet";
+import PropositionsCodesBarresSheet from "./components/admin/PropositionsCodesBarresSheet";
 // #65 — bandeau de mise à jour PWA (pont vers registerSW dans main.jsx)
 import { onNeedRefresh, applyUpdate } from "./lib/swUpdate";
 // #56.5.A — double écriture Core, fire-and-forget, invisible pour l'utilisateur
@@ -9120,7 +9124,7 @@ function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, on
   );
 }
 
-function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash, onResumeScan, archives = [], pseudo, onStats, onMesPrix, onFavoris, onProfil = null, onFaq, onSignOut, pendingCagnotte, onConsumeCagnotteCelebration, pendingPotential, onConsumePotentialCelebration, estFrancois = false, sessionCourses = null, onReprendreCourses, onAbandonnerCourses }) {
+function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash, onResumeScan, archives = [], pseudo, onStats, onMesPrix, onFavoris, onProfil = null, onFaq, onSignOut, pendingCagnotte, onConsumeCagnotteCelebration, pendingPotential, onConsumePotentialCelebration, estFrancois = false, sessionCourses = null, onReprendreCourses, onAbandonnerCourses, contributionCodesBarresVisible = false, onContribuerCodeBarres }) {
   const F = "'Nunito',sans-serif";
   // Chantier 79 (ajustement) — scan en cours visible dès l'accueil. HomeTab
   // n'étant monté que sur l'onglet home, la lecture au montage reflète l'état
@@ -9361,6 +9365,27 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash
               Abandonner
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Chantier 106 Lot A — « Complète la base ». Visible UNIQUEMENT si le
+          flag contribution_codes_barres_actif vaut 'true' ou si l'utilisateur
+          est administrateur : sinon rien n'est rendu, pas même un conteneur
+          vide. Le bouton ouvre directement le lecteur de code-barres — la
+          carte a déjà servi d'explication, un écran intermédiaire de plus ne
+          dirait rien. */}
+      {contributionCodesBarresVisible && (
+        <div style={{ margin:'12px 20px 0', padding:'12px 14px', background:'#fff', border:'2px solid #0066FF', borderRadius:14, position:'relative', zIndex:10, boxShadow:'0 3px 12px rgba(0,0,0,0.12)' }}>
+          <div style={{ fontFamily:F, fontWeight:900, fontSize:13, color:'#1a1a1a' }}>
+            🏷️ Complète la base
+          </div>
+          <div style={{ fontFamily:F, fontSize:12, color:'#666', marginTop:2, lineHeight:1.4 }}>
+            Scanne un produit du placard ou du rayon pour proposer son code-barres. Chaque proposition acceptée rapporte 10 points.
+          </div>
+          <button onClick={() => onContribuerCodeBarres?.()}
+            style={{ width:'100%', marginTop:10, padding:'11px', border:'none', borderRadius:10, background:'#0066FF', fontFamily:F, fontWeight:900, fontSize:13, color:'#fff', cursor:'pointer' }}>
+            📷 Scanner un produit
+          </button>
         </div>
       )}
 
@@ -9652,6 +9677,11 @@ export default function App() {
   // François. Absent/illisible => masqué (sauf François), jamais de plantage.
   const [gamificationVisible, setGamificationVisible] = useState(false);
   const profilVisible = gamificationVisible || estFrancois;
+  // Chantier 106 Lot A — flag contribution_codes_barres_actif, même mécanique
+  // défensive que les deux précédents. La carte « Complète la base » n'apparaît
+  // que si le flag vaut 'true' OU si l'utilisateur est administrateur ; absent,
+  // illisible ou table en erreur ⇒ rien du tout, aucune trace à l'écran.
+  const [contributionCodesBarresActive, setContributionCodesBarresActive] = useState(false);
 
   // #65 — bandeau de mise à jour. needRefresh vient de registerSW (main.jsx,
   // hors arbre React) via le pont swUpdate.js ; jamais mis à jour tout seul.
@@ -9943,6 +9973,10 @@ export default function App() {
   // flottant même quand la console n'est pas ouverte.
   const [showValidationScan, setShowValidationScan] = useState(false);
   const [pendingScanCount, setPendingScanCount] = useState(0);
+  // Chantier 106 Lot A — parcours de contribution (utilisateur) et file de
+  // validation des codes-barres proposés (admin), deux écrans distincts.
+  const [showContributionCodeBarres, setShowContributionCodeBarres] = useState(false);
+  const [showPropositionsCodesBarres, setShowPropositionsCodesBarres] = useState(false);
   const handleFlash = () => setShowScanChoix(true);
   const handleFlashConfirmed = () => { setShowScanChoix(false); setAutoOpenCamera(true); setTab("prices"); };
   // Chantier 79 (ajustement) — "Reprendre" depuis l'accueil : bascule sur
@@ -10118,6 +10152,28 @@ export default function App() {
     const onVisibiliteGamif = () => { if (document.visibilityState === 'visible') lireFlagGamification(); };
     document.addEventListener('visibilitychange', onVisibiliteGamif);
     return () => { annule = true; document.removeEventListener('visibilitychange', onVisibiliteGamif); };
+  }, [session]);
+
+  // Chantier 106 Lot A — lecture du flag contribution_codes_barres_actif,
+  // strictement la même mécanique défensive que gamification_visible ci-dessus.
+  useEffect(() => {
+    if (!session) { setContributionCodesBarresActive(false); return; }
+    let annule = false;
+    const lireFlagContribution = () => {
+      try {
+        supabase.from('parametres_globaux').select('valeur').eq('cle', 'contribution_codes_barres_actif').maybeSingle()
+          .then(({ data, error }) => {
+            if (annule) return;
+            setContributionCodesBarresActive(!error && data?.valeur === 'true');
+          }, () => { if (!annule) setContributionCodesBarresActive(false); });
+      } catch {
+        if (!annule) setContributionCodesBarresActive(false);
+      }
+    };
+    lireFlagContribution();
+    const onVisibiliteContribution = () => { if (document.visibilityState === 'visible') lireFlagContribution(); };
+    document.addEventListener('visibilitychange', onVisibiliteContribution);
+    return () => { annule = true; document.removeEventListener('visibilitychange', onVisibiliteContribution); };
   }, [session]);
 
   const fetchStoreRatings = useCallback(async () => {
@@ -11368,7 +11424,7 @@ export default function App() {
             </div>
           )}
           <TabErrorBoundary key={tab}>
-          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} onResumeScan={handleResumeScan} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFavoris={()=>setShowFavorisSheet(true)} onProfil={profilVisible ? ()=>setShowProfilSheet(true) : null} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)} estFrancois={estFrancois} sessionCourses={sessionCoursesAccessible ? sessionCoursesActive : null} onReprendreCourses={()=>setTab("courses")} onAbandonnerCourses={abandonnerSessionCourses}/>}
+          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} onResumeScan={handleResumeScan} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFavoris={()=>setShowFavorisSheet(true)} onProfil={profilVisible ? ()=>setShowProfilSheet(true) : null} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)} estFrancois={estFrancois} sessionCourses={sessionCoursesAccessible ? sessionCoursesActive : null} onReprendreCourses={()=>setTab("courses")} onAbandonnerCourses={abandonnerSessionCourses} contributionCodesBarresVisible={contributionCodesBarresActive || isAdmin} onContribuerCodeBarres={()=>setShowContributionCodeBarres(true)}/>}
           {/* Chantier « Micro » Lot 1 — même mécanique shadow que rejets (#56.3b) :
               jamais rendu pour un autre utilisateur, même si tab="micro" traîne en state.
               Lot 5 : onAdd = le addItem OFFICIEL du caddie (même chemin que le Catalogue). */}
@@ -11426,7 +11482,7 @@ export default function App() {
             feuilles admin (400) : elle masquait l'en-tête et le bandeau de
             résultat du scan. On la retire tant qu'une de ces deux feuilles est
             ouverte (elle y est inutile, chaque feuille a sa croix de fermeture). */}
-        {isAdmin && !showAValider && !showValidationScan && (
+        {isAdmin && !showAValider && !showValidationScan && !showPropositionsCodesBarres && (
           <div style={{ position:"fixed", top:10, left:10, zIndex:500, display:"flex", flexDirection:"column", gap:6, alignItems:"flex-start" }}>
             <button onClick={()=>setAdminOutilsOuverts(o=>!o)} aria-label="Outils admin"
               style={{ width:32, height:32, borderRadius:99, border:"none", background:"rgba(0,0,0,0.55)", color:"#fff", fontSize:14, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", position:"relative", padding:0 }}>
@@ -11439,6 +11495,12 @@ export default function App() {
               <>
                 <button onClick={()=>{ setShowAValider(true); setAdminOutilsOuverts(false); }} style={{ padding:"6px 10px", borderRadius:8, border:"none", background:"rgba(0,0,0,0.55)", color:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:10, cursor:"pointer" }}>
                   🔍 À valider
+                </button>
+                {/* Chantier 106 Lot A — écran SÉPARÉ de « 🔍 À valider » (qui
+                    reste la file des lignes de ticket) : ici on n'attribue que
+                    des codes-barres proposés par les utilisateurs. */}
+                <button onClick={()=>{ setShowPropositionsCodesBarres(true); setAdminOutilsOuverts(false); }} style={{ padding:"6px 10px", borderRadius:8, border:"none", background:"rgba(0,0,0,0.55)", color:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:10, cursor:"pointer" }}>
+                  🏷️ Codes-barres à valider
                 </button>
                 <button onClick={()=>{ setShowValidationScan(true); setAdminOutilsOuverts(false); }} style={{ padding:"6px 10px", borderRadius:8, border:"none", background:"rgba(0,0,0,0.55)", color:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:10, cursor:"pointer", display:"flex", alignItems:"center", gap:5 }}>
                   🧾 Validation scan
@@ -11456,6 +11518,17 @@ export default function App() {
             se règle ici, sans toucher au composant. */}
         {showAValider && isAdmin && <AValiderSheet onClose={()=>setShowAValider(false)} estAdmin={isAdmin}/>}
         {showValidationScan && isAdmin && <ValidationScanSheet onClose={()=>setShowValidationScan(false)} onCountChange={setPendingScanCount}/>}
+        {/* Chantier 106 Lot A — file des codes-barres proposés, derrière isAdmin
+            comme les autres écrans admin. */}
+        {showPropositionsCodesBarres && isAdmin && <PropositionsCodesBarresSheet onClose={()=>setShowPropositionsCodesBarres(false)}/>}
+        {/* Chantier 106 Lot A — parcours de contribution. Même garde que la
+            carte d'accueil qui l'ouvre : flag global OU administrateur.
+            estAdmin gouverne le seul bouton « proposer quand même » du
+            garde-fou 105 — pour tout autre utilisateur il n'existe pas, et sa
+            proposition part en file au lieu d'écrire quoi que ce soit. */}
+        {showContributionCodeBarres && (contributionCodesBarresActive || isAdmin) && (
+          <ContributionCodeBarresSheet estAdmin={isAdmin} onClose={()=>setShowContributionCodeBarres(false)}/>
+        )}
         {appToast && <Toast msg={appToast.msg} ok={appToast.ok}/>}
         {showCircleSheet  && <CircleSheet  circles={circles} userId={session.user.id} userEmail={session.user.email} profileMap={profileMap} pseudo={pseudo} archives={archives} onClose={()=>setShowCircleSheet(false)} onInvite={inviteByPseudo} onUpdateStatus={updateCircleStatus}/>}
         {showStatsSheet   && <StatsSheet   userId={session.user.id} archives={archives} onClose={()=>setShowStatsSheet(false)}/>}

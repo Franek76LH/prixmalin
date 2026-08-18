@@ -2,16 +2,18 @@ import { Component, useCallback, useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import BarcodeScannerSheet from '../BarcodeScannerSheet';
 import RechercheProduitSheet from '../admin/RechercheProduitSheet';
-import { ficheOFFAvecStatut, cloudinaryFetch } from '../../lib/photosProduits';
+import { ficheOFFAvecStatut } from '../../lib/photosProduits';
 import { termesRechercheOff } from '../../lib/rechercheRepli';
 import {
   verifierCoherenceCodeBarres,
   passerOutreAutorise,
   NIVEAU_AVERTISSEMENT,
   OFF_INCONNU,
-  SIGNAL_AUCUN_MOT_COMMUN,
-  SIGNAL_QUANTITE_DIVERGENTE,
+  versNombre,
 } from '../../lib/coherenceCodeBarres';
+// Chantier 106 — cartes du parcours « code-barres inconnu », partagées avec le
+// module de contribution depuis l'accueil (voir CartesScanCodeBarres).
+import { AssistantOffCard, AvertissementCoherenceCard } from '../CartesScanCodeBarres';
 
 // PANNEAU DEV UNIQUEMENT — chantier anti-doublon. Ne monte JAMAIS ce
 // composant hors de import.meta.env.DEV (voir App.jsx). Liste les
@@ -79,223 +81,19 @@ function libellesConcordent(libelleTicket, nomProduit) {
 }
 
 
-// Chantier 103 — la carte « Ce produit ? ». La PHOTO est le point de
-// vérification : elle est affichée AVANT toute écriture, et rien n'est écrit
-// tant que l'utilisateur n'a pas reconnu l'article qu'il tient en main.
-// Cloudinary indisponible -> repli sur l'URL OFF brute -> repli sur un carré
-// vide : à aucun moment un échec d'image ne bloque l'écran.
-function AssistantOffCard({ assistant, enCours, onOuiChoisir, onCeNestPasCa, onFermer }) {
-  const { off, libelle, libelleTicket, code } = assistant;
-  const sourceOff = off.imageLarge || off.imageSmall || null;
-  const [srcImage, setSrcImage] = useState(() => cloudinaryFetch(sourceOff, 'large'));
-  const identite = [off.marque, off.nom, off.quantite].filter(Boolean).join(' · ');
-
-  return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 560, display: 'flex', alignItems: 'flex-end' }} onClick={onFermer}>
-      <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: '20px 20px 0 0', width: '100%', maxHeight: '92vh', overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '20px 20px calc(20px + env(safe-area-inset-bottom, 0px))', boxSizing: 'border-box' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
-          <div>
-            <div style={{ fontFamily: F, fontWeight: 900, fontSize: 18, color: '#1a1a1a' }}>Ce produit ?</div>
-            <div style={{ fontFamily: F, fontSize: 11, color: '#999', marginTop: 2 }}>
-              Code inconnu de notre base · {code} · fiche Open Food Facts
-            </div>
-          </div>
-          <button onClick={onFermer} style={{ flexShrink: 0, background: '#F5F6F8', border: 'none', borderRadius: 99, width: 28, height: 28, color: '#999', fontSize: 14, cursor: 'pointer' }}>✕</button>
-        </div>
-
-        <div style={{ marginTop: 14, padding: 12, background: '#F5F6F8', borderRadius: 12, display: 'flex', gap: 12, alignItems: 'center' }}>
-          <div style={{ width: 96, height: 96, borderRadius: 10, background: '#fff', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-            {srcImage ? (
-              <img
-                src={srcImage}
-                alt=""
-                loading="lazy"
-                onError={() => setSrcImage(prev => (prev !== sourceOff ? sourceOff : null))}
-                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-              />
-            ) : (
-              <span style={{ fontSize: 26 }}>📦</span>
-            )}
-          </div>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontFamily: F, fontSize: 11, fontWeight: 800, color: '#666' }}>OPEN FOOD FACTS DIT</div>
-            <div style={{ fontFamily: F, fontSize: 15, fontWeight: 900, color: '#1a1a1a', marginTop: 3, lineHeight: 1.3 }}>
-              {identite || '(fiche sans nom)'}
-            </div>
-          </div>
-        </div>
-
-        <div style={{ marginTop: 10, padding: 12, background: '#F5F6F8', borderRadius: 12 }}>
-          <div style={{ fontFamily: F, fontSize: 11, fontWeight: 800, color: '#666' }}>LIGNE DU TICKET</div>
-          <div style={{ fontFamily: F, fontSize: 14, fontWeight: 800, color: '#1a1a1a', marginTop: 3 }}>
-            « {libelle || '(libellé vide)'} »
-          </div>
-          {libelleTicket && libelleTicket !== libelle && (
-            <div style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 11, color: '#666', marginTop: 5 }}>
-              Texte imprimé : {libelleTicket}
-            </div>
-          )}
-        </div>
-
-        <div style={{ fontFamily: F, fontSize: 14, fontWeight: 900, color: '#1a1a1a', marginTop: 14, lineHeight: 1.4 }}>
-          C'est bien le produit que tu tiens en main ?
-        </div>
-        <div style={{ fontFamily: F, fontSize: 12, color: '#666', marginTop: 4, lineHeight: 1.4 }}>
-          Aucune fiche n'est créée automatiquement : tu choisis toi-même la fiche du catalogue.
-        </div>
-
-        <button
-          onClick={onOuiChoisir}
-          disabled={enCours}
-          style={{ width: '100%', marginTop: 14, padding: 14, border: 'none', borderRadius: 12, background: enCours ? '#ccc' : '#00B341', color: '#fff', fontFamily: F, fontWeight: 900, fontSize: 15, cursor: enCours ? 'default' : 'pointer' }}
-        >
-          ✓ Oui — choisir la fiche du catalogue
-        </button>
-        <button
-          onClick={onCeNestPasCa}
-          disabled={enCours}
-          style={{ width: '100%', marginTop: 8, padding: 12, border: '1px solid #ddd', borderRadius: 12, background: 'transparent', color: '#333', fontFamily: F, fontWeight: 800, fontSize: 14, cursor: enCours ? 'default' : 'pointer' }}
-        >
-          Ce n'est pas ça / je ne trouve pas
-        </button>
-        <div style={{ fontFamily: F, fontSize: 11, color: '#999', marginTop: 8, textAlign: 'center', lineHeight: 1.4 }}>
-          « Ce n'est pas ça » reprend le comportement habituel : la ligne part en file de validation. Fermer (✕) ne change rien.
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Chantier 105 — LE garde-fou. Montre les deux identités CÔTE À CÔTE : ce que
-// dit OpenFoodFacts du code scanné, et la fiche qu'on s'apprête à lui associer.
-// C'est la confrontation visuelle qui manquait le 17/08, quand un code de
-// boulgour est parti sur une fiche de cônes glacés sans un mot.
-//
-// Hiérarchie assumée des deux boutons : « Je vérifie l'emballage » est LE geste
-// mis en avant (c'est la seule vérification qui tranche vraiment) ; « apprendre
-// quand même » est volontairement discret, parce qu'on avertit sans interdire —
-// OFF se trompe parfois, et certains produits n'y sont pas du tout.
-// Une des deux colonnes de la confrontation. Hors du composant parent : défini
-// à l'intérieur, il serait recréé à chaque rendu (react-hooks/static-components).
-function ColonneIdentite({ etiquette, nom, marque, quantiteTexte, fond }) {
-  return (
-    <div style={{ flex: 1, minWidth: 0, padding: 12, background: fond, borderRadius: 10 }}>
-      <div style={{ fontFamily: F, fontSize: 10, fontWeight: 800, color: '#666', letterSpacing: 0.3 }}>{etiquette}</div>
-      <div style={{ fontFamily: F, fontSize: 14, fontWeight: 900, color: '#1a1a1a', marginTop: 4, lineHeight: 1.3, wordBreak: 'break-word' }}>
-        {nom || '(sans nom)'}
-      </div>
-      {marque && (
-        <div style={{ fontFamily: F, fontSize: 12, color: '#666', marginTop: 3 }}>{marque}</div>
-      )}
-      <div style={{ fontFamily: F, fontSize: 12, fontWeight: 800, color: quantiteTexte ? '#1a1a1a' : '#999', marginTop: 5 }}>
-        {quantiteTexte || 'quantité inconnue'}
-      </div>
-    </div>
-  );
-}
-
-function AvertissementCoherenceCard({ avertissement, enCours, onVerifier, onApprendreQuandMeme, peutPasserOutre }) {
-  const { verdict, nomProduit, code } = avertissement;
-  const { off, fiche, signaux, quantite } = verdict;
-
-  // On affiche la quantité RÉELLEMENT comparée. Sur un lot (nombre_unites > 1),
-  // montrer « 432 g » alors que le calcul a porté sur 2 592 g rendrait le
-  // pourcentage annoncé juste en dessous incompréhensible : on détaille donc
-  // l'opération.
-  const quantiteNette = versNombre(fiche?.quantite_nette);
-  const unites = versNombre(fiche?.nombre_unites);
-  const quantiteFiche = (quantiteNette != null && fiche?.unite_quantite)
-    ? (unites != null && unites > 1
-      ? `${quantiteNette} ${fiche.unite_quantite} × ${unites} = ${quantiteNette * unites} ${fiche.unite_quantite}`
-      : `${quantiteNette} ${fiche.unite_quantite}`)
-    : null;
-
-  return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 570, display: 'flex', alignItems: 'flex-end' }}>
-      <div style={{ background: '#fff', borderRadius: '20px 20px 0 0', width: '100%', maxHeight: '92vh', overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '20px 20px calc(20px + env(safe-area-inset-bottom, 0px))', boxSizing: 'border-box' }}>
-        <div style={{ fontFamily: F, fontWeight: 900, fontSize: 18, color: '#CC0000' }}>
-          ⚠️ Ce code-barres ne semble pas être celui de ce produit
-        </div>
-        <div style={{ fontFamily: F, fontSize: 11, color: '#999', marginTop: 3 }}>Code lu : {code}</div>
-
-        <div style={{ display: 'flex', gap: 8, marginTop: 14, alignItems: 'stretch' }}>
-          <ColonneIdentite
-            etiquette="LE CODE DÉSIGNE (OFF)"
-            nom={off?.nom}
-            marque={off?.marque}
-            quantiteTexte={off?.quantite}
-            fond="#FFF3F3"
-          />
-          <ColonneIdentite
-            etiquette="LA FICHE CHOISIE"
-            nom={nomProduit || fiche?.nomProduit}
-            marque={fiche?.marque}
-            quantiteTexte={quantiteFiche}
-            fond="#F5F6F8"
-          />
-        </div>
-
-        <div style={{ marginTop: 12, padding: 12, background: '#FFF3F3', border: '1px solid #F3C5C5', borderRadius: 10 }}>
-          <div style={{ fontFamily: F, fontSize: 12, fontWeight: 800, color: '#CC0000', lineHeight: 1.5 }}>
-            {signaux.includes(SIGNAL_AUCUN_MOT_COMMUN) && (
-              <div>• Les deux noms n'ont aucun mot en commun.</div>
-            )}
-            {signaux.includes(SIGNAL_QUANTITE_DIVERGENTE) && quantite?.comparable && (
-              <div>• Les quantités diffèrent de {Math.round(quantite.ecart * 100)} %.</div>
-            )}
-          </div>
-          <div style={{ fontFamily: F, fontSize: 12, color: '#666', marginTop: 8, lineHeight: 1.5 }}>
-            Si tu apprends ce code ici, il rattachera automatiquement cet article
-            à cette fiche à chaque scan suivant. Une erreur se propage.
-          </div>
-        </div>
-
-        <button
-          onClick={onVerifier}
-          disabled={enCours}
-          style={{ width: '100%', marginTop: 14, padding: 14, border: 'none', borderRadius: 12, background: enCours ? '#ccc' : '#00B341', color: '#fff', fontFamily: F, fontWeight: 900, fontSize: 15, cursor: enCours ? 'default' : 'pointer' }}
-        >
-          Je vérifie l'emballage
-        </button>
-        <div style={{ fontFamily: F, fontSize: 11, color: '#999', marginTop: 8, textAlign: 'center', lineHeight: 1.4 }}>
-          Rien n'est écrit : la ligne reste dans la liste, tu pourras rescanner.
-        </div>
-
-        {/* La décision « apprendre quand même » est isolée derrière
-            passerOutreAutorise : le jour où le scan s'ouvre à tous, ce bloc
-            disparaît pour les non-administrateurs sans réécriture, et le
-            désaccord partira en file de propositions au lieu d'écrire. */}
-        {peutPasserOutre ? (
-          <button
-            onClick={onApprendreQuandMeme}
-            disabled={enCours}
-            style={{ width: '100%', marginTop: 12, padding: 10, border: 'none', borderRadius: 10, background: 'transparent', color: '#999', fontFamily: F, fontWeight: 700, fontSize: 12, textDecoration: 'underline', cursor: enCours ? 'default' : 'pointer' }}
-          >
-            {enCours ? '...' : "C'est bien ça, apprendre quand même"}
-          </button>
-        ) : (
-          <div style={{ fontFamily: F, fontSize: 11, color: '#999', marginTop: 12, textAlign: 'center', lineHeight: 1.4 }}>
-            En cas de désaccord, ta proposition part en file de validation : rien n'est écrit directement.
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
+// Chantier 106 — les trois cartes du parcours « code-barres inconnu »
+// (« Ce produit ? » du 103, la confrontation côte à côte et sa colonne du
+// 105) vivent désormais dans components/CartesScanCodeBarres : le module de
+// contribution rejoue le MÊME parcours depuis l'accueil. Elles ont été
+// déplacées telles quelles — aucun texte, aucun style, aucun comportement
+// n'a changé ici (les libellés propres au ticket sont les valeurs par défaut
+// des props, et cet écran n'en passe aucune).
 
 function formatDateFr(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '—';
   return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
-}
-
-// numeric Postgres arrive en string via PostgREST (ex "1.000") — toujours
-// repasser par Number() avant tout calcul, jamais supposer un type numérique.
-function versNombre(valeur, repli = null) {
-  if (valeur == null) return repli;
-  const n = Number(valeur);
-  return Number.isFinite(n) ? n : repli;
 }
 
 function formatMontant(ligne) {
@@ -579,19 +377,32 @@ export default function AValiderSheet({ onClose, estAdmin = false }) {
       setChargement(true);
       setErreur(null);
       try {
-        const { data, error } = await supabase
+        // Chantier 106 Lot A (retouche) — l'enseigne du ticket est demandée EN
+        // PLUS, via un embed imbriqué (tickets -> magasins). Elle ne sert qu'à
+        // enrichir la recherche produit ; si PostgREST refuse cette relation,
+        // l'écran doit continuer à fonctionner comme avant. On rejoue donc la
+        // requête sans elle plutôt que d'afficher « impossible de charger » —
+        // on perd le signal « déjà vu ici », pas la liste des lignes.
+        const requete = (colonnes) => supabase
           .from('lignes_ticket')
-          .select(`
-            id, libelle_brut, libelle_ticket, quantite, montant_net, prix_unitaire,
-            produit_id, variante_produit_id, statut_validation_produit, methode_validation_produit,
-            produit_valide_le, produit_valide_par, statut_validation_variante, methode_validation_variante,
-            variante_validee_le, variante_validee_par, association_corrigee_utilisateur,
-            tickets!inner(date_ticket)
-          `)
+          .select(colonnes)
           .eq('type_ligne', 'produit')
           .or('statut_validation_produit.eq.non_valide,produit_id.is.null')
           .order('cree_le', { ascending: false })
           .limit(50);
+
+        const COLONNES = `
+            id, libelle_brut, libelle_ticket, quantite, montant_net, prix_unitaire,
+            produit_id, variante_produit_id, statut_validation_produit, methode_validation_produit,
+            produit_valide_le, produit_valide_par, statut_validation_variante, methode_validation_variante,
+            variante_validee_le, variante_validee_par, association_corrigee_utilisateur,
+        `;
+
+        let { data, error } = await requete(`${COLONNES} tickets!inner(date_ticket, magasins(enseigne_id))`);
+        if (error) {
+          console.error('[AValiderSheet] enseigne du ticket indisponible, repli sans elle :', error);
+          ({ data, error } = await requete(`${COLONNES} tickets!inner(date_ticket)`));
+        }
         if (annule) return;
         if (error) {
           setErreur("Impossible de charger les lignes à valider.");
@@ -607,6 +418,21 @@ export default function AValiderSheet({ onClose, estAdmin = false }) {
     })();
     return () => { annule = true; };
   }, []);
+
+  // Chantier 106 Lot A (retouche) — enseigne du ticket portant cette ligne.
+  // Elle sert à la recherche produit : sur un ticket Leclerc, une fiche déjà
+  // relevée chez Leclerc est très probablement la bonne, et la base remonte ce
+  // signal (deja_vu_dans_enseigne) quand on le lui donne.
+  //
+  // PostgREST rend un embed to-one tantôt en objet, tantôt en tableau selon la
+  // façon dont il détecte la clé étrangère : on accepte les deux. Ticket sans
+  // magasin (import ancien) -> null, et la recherche se comporte comme avant.
+  const enseigneDeLigne = (ligneId) => {
+    const ligne = lignes.find(l => l.id === ligneId);
+    const magasins = ligne?.tickets?.magasins;
+    const magasin = Array.isArray(magasins) ? magasins[0] : magasins;
+    return magasin?.enseigne_id ?? null;
+  };
 
   useEffect(() => {
     if (lignes.length === 0) return;
@@ -1219,6 +1045,7 @@ export default function AValiderSheet({ onClose, estAdmin = false }) {
           sousTitre={[assistantOff.off.marque, assistantOff.off.nom, assistantOff.off.quantite].filter(Boolean).join(' · ') || assistantOff.code}
           requeteInitiale={termesRechercheOff(assistantOff.off)}
           repliProgressif
+          enseigneId={enseigneDeLigne(assistantOff.ligneId)}
           onClose={() => setRechercheCatalogue(false)}
           onChoisir={assignerDepuisAssistant}
         />

@@ -1,18 +1,34 @@
 // Chantier 101 — recherche produit réutilisable pour les écrans admin.
-// Même moteur que CorrigerProduitSheet (App.jsx) : RPC
-// rechercher_produits_pour_correction (recherche tolérante côté serveur,
-// debounce 280 ms, réponses obsolètes ignorées), puis même résolution de
-// variante — 0 variante active -> null légitime (vrac/frais), 1 -> automatique,
+// Recherche tolérante côté serveur (debounce 280 ms, réponses obsolètes
+// ignorées), puis résolution de variante — 0 variante active -> null légitime (vrac/frais), 1 -> automatique,
 // plusieurs -> écran de choix explicite, jamais de repli silencieux.
 //
 // Volontairement autonome (pas d'extraction de CorrigerProduitSheet, dont le
 // flux de rattachement/apprentissage reste inchangé) : ici on ne fait que
 // REMONTER le couple (produit, variante) choisi, l'appelant décide quoi en faire.
+//
+// Chantier 106 Lot A (retouche) — on interroge désormais
+// rechercher_produits_catalogue et non plus rechercher_produits_pour_correction.
+// Motif : le test terrain. La seconde ne cherchait que dans nom_reference, donc
+// une canette de Red Bull, dont la fiche s'appelle « Boisson énergisante »,
+// était introuvable ; 221 fiches actives sur 902 étaient dans ce cas. La
+// première cherche aussi dans la famille, la sous-famille, les marques des
+// variantes actives et les alias de tickets, et classe par pertinence.
+//
+// Elle rend aussi dernier_prix et deja_vu_dans_enseigne, et prend un
+// p_enseigne facultatif. Ce dernier signal n'est pas décoratif : sur un ticket
+// Leclerc, une fiche déjà relevée chez Leclerc est très probablement la bonne,
+// et la base s'en sert déjà pour classer. Les écrans qui connaissent l'enseigne
+// du ticket la passent (voir la prop enseigneId) ; les autres ne passent rien
+// et retombent sur le comportement par défaut, sans rien casser.
 
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { formatEtiquetteVariante } from '../../lib/nomProduit';
 import { motsPourRepli, fusionnerResultatsParMot } from '../../lib/rechercheRepli';
+// Chantier 106 Lot A (retouche) — la marque et les formats font partie de
+// l'identification du produit, pas de la décoration : voir rechercheCatalogue.
+import { sousTitreResultat, formatPrixIndicatif } from '../../lib/rechercheCatalogue';
 
 const F = "'Nunito',sans-serif";
 
@@ -25,7 +41,10 @@ const F = "'Nunito',sans-serif";
 // fusionne (voir lib/rechercheRepli). Une seule fois, et jamais sur la saisie
 // manuelle : le parcours « Assigner le produit » de ValidationScanSheet, qui
 // n'active pas ce drapeau, garde exactement le comportement du chantier 101.
-export default function RechercheProduitSheet({ titre = 'Choisir le bon produit', sousTitre = null, requeteInitiale = '', repliProgressif = false, onClose, onChoisir }) {
+// enseigneId : l'enseigne du ticket en cours de traitement, quand l'écran la
+// connaît. Facultative — sans elle, deja_vu_dans_enseigne vaut toujours false
+// et l'écran se comporte exactement comme avant.
+export default function RechercheProduitSheet({ titre = 'Choisir le bon produit', sousTitre = null, requeteInitiale = '', repliProgressif = false, enseigneId = null, onClose, onChoisir }) {
   const [query, setQuery] = useState(requeteInitiale);
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -55,9 +74,9 @@ export default function RechercheProduitSheet({ titre = 'Choisir le bon produit'
     if (query.trim().length < 2) { setResults([]); setError(null); setNoteRepli(null); setAucuneCorrespondance(false); return; }
     const mySeq = ++seq.current;
     setSearching(true); setError(null);
-    const chercher = (terme) => supabase.rpc('rechercher_produits_pour_correction', {
+    const chercher = (terme) => supabase.rpc('rechercher_produits_catalogue', {
       p_terme: terme,
-      p_enseigne: null,
+      p_enseigne: enseigneId ?? null,
     });
     const timer = setTimeout(async () => {
       try {
@@ -132,7 +151,7 @@ export default function RechercheProduitSheet({ titre = 'Choisir le bon produit'
       }
     }, 280);
     return () => clearTimeout(timer);
-  }, [query]);
+  }, [query, enseigneId]);
 
   // Chantier 105 — on transmet EN PLUS la variante choisie (objet complet :
   // libellé, marque, quantité), parce que le garde-fou code-barres a besoin de
@@ -294,16 +313,49 @@ export default function RechercheProduitSheet({ titre = 'Choisir le bon produit'
                     : 'Aucun produit trouvé'}
                 </div>
               )}
-              {results.map(p => (
-                <div key={p.produit_id} onClick={() => choisir(p)} style={{ padding: '12px 10px', borderBottom: '1px solid #F5F6F8', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, cursor: (saving || resolvingVariante) ? 'default' : 'pointer', opacity: (saving || resolvingVariante) ? 0.6 : 1 }}>
-                  <span style={{ fontFamily: F, fontSize: 14, fontWeight: 700, color: '#1a1a1a' }}>{p.nom_reference}</span>
-                  {p.dernier_prix != null && (
-                    <span style={{ fontFamily: F, fontSize: 12, fontWeight: 700, color: '#999', flexShrink: 0 }}>
-                      {Number(p.dernier_prix).toFixed(2).replace('.', ',')} €
+              {/* Chantier 106 Lot A (retouche) — l'ordre de `results` est celui
+                  que la base a renvoyé : mot entier d'abord, morceau de mot
+                  ensuite. On ne le retrie JAMAIS ici — un tri alphabétique
+                  par-dessus ferait remonter « Olives vertes réduite en sel »
+                  avant « Red Bull » sur la recherche « red ». */}
+              {results.map(p => {
+                const sousTitreLigne = sousTitreResultat(p);
+                const prix = formatPrixIndicatif(p.dernier_prix);
+                return (
+                  <div key={p.produit_id} onClick={() => choisir(p)} style={{ padding: '12px 10px', borderBottom: '1px solid #F5F6F8', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, cursor: (saving || resolvingVariante) ? 'default' : 'pointer', opacity: (saving || resolvingVariante) ? 0.6 : 1 }}>
+                    <span style={{ minWidth: 0 }}>
+                      <span style={{ display: 'block', fontFamily: F, fontSize: 14, fontWeight: 700, color: '#1a1a1a' }}>{p.nom_reference}</span>
+                      {/* Marque et formats : c'est ce qui permet de reconnaître
+                          sa canette derrière une fiche « Boisson énergisante ».
+                          Absents des deux côtés -> aucune ligne, surtout pas un
+                          « Sans marque » qui n'apprend rien à personne.
+                          « déjà vu ici » : le produit a déjà été relevé dans
+                          l'enseigne du ticket traité. C'est une aide à la
+                          décision — sur un ticket Leclerc, une fiche jamais vue
+                          chez Leclerc mérite un deuxième regard. */}
+                      {(sousTitreLigne || p.deja_vu_dans_enseigne) && (
+                        <span style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 3 }}>
+                          {sousTitreLigne && (
+                            <span style={{ fontFamily: F, fontSize: 12, fontWeight: 600, color: '#999', lineHeight: 1.35 }}>
+                              {sousTitreLigne}
+                            </span>
+                          )}
+                          {p.deja_vu_dans_enseigne && (
+                            <span style={{ fontFamily: F, fontSize: 10, fontWeight: 800, color: '#00833A', background: '#E6F7EE', borderRadius: 99, padding: '2px 7px', whiteSpace: 'nowrap', lineHeight: 1.4 }}>
+                              déjà vu ici
+                            </span>
+                          )}
+                        </span>
+                      )}
                     </span>
-                  )}
-                </div>
-              ))}
+                    {prix && (
+                      <span style={{ fontFamily: F, fontSize: 12, fontWeight: 700, color: '#999', flexShrink: 0 }}>
+                        {prix}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </>
         )}

@@ -280,7 +280,15 @@ export default function ValidationScanSheet({ onClose, onCountChange }) {
       </div>
 
       {/* Chantier 101 — même recherche produit + choix de variante que la
-          correction d'une ligne de ticket (RPC rechercher_produits_pour_correction). */}
+          correction d'une ligne de ticket.
+          Chantier 106 Lot A (retouche) — enseigneId n'est PAS passé ici, faute
+          de donnée : lister_propositions_liaison_scan_en_attente ne renvoie ni
+          magasin ni enseigne, et la ligne de ticket d'origine appartient à un
+          autre utilisateur, donc sa RLS « lecture propre » interdit de
+          remonter jusqu'au ticket depuis le client. Le signal « déjà vu ici »
+          reste donc muet sur cet écran ; il faudrait pour l'obtenir ajouter
+          enseigne_id à cette RPC. Sans enseigneId, le comportement est celui
+          d'avant, rien n'est cassé. */}
       {assignationPour && (
         <RechercheProduitSheet
           titre={assignationPour.produit_id ? 'Changer le produit' : 'Assigner le produit'}
