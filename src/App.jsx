@@ -33,6 +33,9 @@ import AdminRejetsCorePanel from "./components/admin/AdminRejetsCorePanel";
 // le lecteur vit désormais dans son propre fichier (partagé avec l'écran admin
 // « À valider »), code et configuration inchangés.
 import BarcodeScannerSheet from "./components/BarcodeScannerSheet";
+// Chantier 108 — contrôle de cohérence de la lecture d'un ticket.
+import { controlerCoherenceTicket, controlerDateTicket, NIVEAU_BLOCAGE, NIVEAU_AVERTISSEMENT } from "./lib/coherenceTicket";
+import { EcranLectureRefusee, BandeauLectureIncomplete, ConfirmationDateTicket } from "./components/ControleLectureTicket";
 import AValiderSheet from "./components/dev/AValiderSheet";
 // Chantier "Scan code-barres", bout 3B — console de validation admin
 import ValidationScanSheet from "./components/admin/ValidationScanSheet";
@@ -1524,6 +1527,13 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   const [status,   setStatus]   = useState(directCamera ? "camera" : "idle");
   const [error,    setError]    = useState("");
   const [result,   setResult]   = useState(null);
+  // Chantier 108 — contrôle de cohérence de la lecture.
+  // lectureRefusee : écart > 10 %, écran bloquant, RIEN n'est importé.
+  // avertissementLecture : écart entre 2 % et 10 %, bandeau, import possible.
+  // dateAConfirmer : date future ou vieille de plus de 90 jours.
+  const [lectureRefusee, setLectureRefusee] = useState(null);
+  const [avertissementLecture, setAvertissementLecture] = useState(null);
+  const [dateAConfirmer, setDateAConfirmer] = useState(null);
   const [selectedStore, setSelectedStore] = useState("");
   const [editableProducts, setEditableProducts] = useState([]);
   const [scanning,      setScanning]      = useState(false);
@@ -1584,6 +1594,47 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     galleryInputRef.current?.click();
   }, []);
 
+  // Chantier 108 — LE portillon. Appelé par tous les chemins d'arrivée d'une
+  // lecture (caméra, galerie, autre-options, résultat déjà scanné en amont).
+  //
+  // Renvoie true quand l'import doit être REFUSÉ : l'appelant s'arrête là et
+  // n'écrit rien dans result/editableProducts, donc aucune ligne n'atteint la
+  // file de validation.
+  //
+  // Toute défaillance du contrôle lui-même le rend MUET et laisse passer la
+  // lecture : un garde-fou qui casse l'import serait pire que pas de garde-fou.
+  const controlerLecture = (parsed) => {
+    let controle = null;
+    let controleDate = null;
+    try {
+      controle = controlerCoherenceTicket(parsed);
+      controleDate = controlerDateTicket(parsed?.date);
+    } catch (e) {
+      console.error('[C108] contrôle de cohérence du ticket :', e);
+      setAvertissementLecture(null);
+      setDateAConfirmer(null);
+      return false;
+    }
+
+    if (controle.niveau === NIVEAU_BLOCAGE) {
+      setLectureRefusee(controle);
+      setAvertissementLecture(null);
+      setDateAConfirmer(null);
+      return true;
+    }
+    setLectureRefusee(null);
+    setAvertissementLecture(controle.niveau === NIVEAU_AVERTISSEMENT ? controle : null);
+    setDateAConfirmer(controleDate?.suspecte ? controleDate : null);
+    return false;
+  };
+
+  // Chantier 108 — la date retenue par l'utilisateur remplace celle qui a été
+  // lue. On ne touche qu'à `result.date`, que l'import lit déjà.
+  const retenirDateTicket = (dateIso) => {
+    setResult(prev => (prev ? { ...prev, date: dateIso } : prev));
+    setDateAConfirmer(null);
+  };
+
   useEffect(() => {
     // Chantier 79 — la reprise d'un brouillon prime sur un initialResult
     // (scan frais). Les deux ne s'appliquent jamais ensemble.
@@ -1596,6 +1647,9 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
       setError(MESSAGES_SCAN.lecture_vide);
       return;
     }
+    // Chantier 108 — même portillon que les scans directs : une lecture
+    // manifestement fausse n'entre pas, même arrivée d'un scan fait en amont.
+    if (controlerLecture(initialResult)) return;
     const enseigne = storeIdFromName(initialResult.store);
     const prods = initialResult.products.map((p, i) => ({ ...p, id: i, keep: true }));
     setResult(initialResult);
@@ -2199,6 +2253,9 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                     return;
                   }
                   const parsed = scan.resultat;
+                  // Chantier 108 — contrôle de cohérence AVANT toute écriture
+                  // d'état : au-delà de 10 % d'écart, on n'importe pas.
+                  if (controlerLecture(parsed)) { setScanning(false); return; }
                   const enseigne = storeIdFromName(parsed.store);
                   const prods = parsed.products.map((p,i) => ({...p, id:i, keep:true}));
                   setResult(parsed); setSelectedStore(enseigne);
@@ -2232,6 +2289,8 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                     return;
                   }
                   const parsed = scan.resultat;
+                  // Chantier 108 — même portillon que la caméra.
+                  if (controlerLecture(parsed)) { setGalleryScanning(false); e.target.value = ""; return; }
                   const enseigne = storeIdFromName(parsed.store);
                   const prods = parsed.products.map((p,i) => ({...p, id:i, keep:true, share:true}));
                   setResult(parsed); setSelectedStore(enseigne);
@@ -2277,6 +2336,9 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                     return;
                   }
                   const parsed = scan.resultat;
+                  // Chantier 108 — contrôle de cohérence AVANT toute écriture
+                  // d'état : au-delà de 10 % d'écart, on n'importe pas.
+                  if (controlerLecture(parsed)) { setScanning(false); return; }
                   const enseigne = storeIdFromName(parsed.store);
                   const prods = parsed.products.map((p,i) => ({...p, id:i, keep:true}));
                   setResult(parsed); setSelectedStore(enseigne);
@@ -2320,6 +2382,16 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                 </div>
                 {result.date && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>📅 {new Date(result.date).toLocaleDateString("fr-FR",{day:"numeric",month:"long",year:"numeric"})}</div>}
               </div>
+
+              {/* Chantier 108 — lecture partiellement douteuse (2 % à 10 %) :
+                  on prévient, on n'empêche rien. Et une date invraisemblable
+                  ne s'enregistre jamais en silence. */}
+              <BandeauLectureIncomplete controle={avertissementLecture} />
+              <ConfirmationDateTicket
+                controleDate={dateAConfirmer}
+                onGarder={retenirDateTicket}
+                onRemplacer={retenirDateTicket}
+              />
 
               {/* Chantier 97 — étape magasin refondue : le magasin CORE est
                   obligatoire (gate des DEUX circuits d'écriture). Trois vues :
@@ -2700,6 +2772,16 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                 {result.date && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>📅 {new Date(result.date).toLocaleDateString("fr-FR",{day:"numeric",month:"long",year:"numeric"})}</div>}
               </div>
 
+              {/* Chantier 108 — lecture partiellement douteuse (2 % à 10 %) :
+                  on prévient, on n'empêche rien. Et une date invraisemblable
+                  ne s'enregistre jamais en silence. */}
+              <BandeauLectureIncomplete controle={avertissementLecture} />
+              <ConfirmationDateTicket
+                controleDate={dateAConfirmer}
+                onGarder={retenirDateTicket}
+                onRemplacer={retenirDateTicket}
+              />
+
               <div style={{ background:C.grayLight, borderRadius:10, padding:"10px 14px", marginBottom:16, display:"flex", alignItems:"center", gap:8 }}>
                 <span style={{ fontSize:16 }}>🏪</span>
                 <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{storeNameEdit}{storeLocation.trim()?` – ${storeLocation.trim()}`:""}</span>
@@ -2847,6 +2929,20 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
           <div style={{ width:48, height:48, border:"4px solid rgba(255,255,255,0.2)", borderTopColor:"#F5C200", borderRadius:"50%", animation:"spin 0.8s linear infinite", marginBottom:20 }}/>
           <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:16, color:"#fff" }}>Analyse en cours...</div>
         </div>
+      )}
+
+      {/* Chantier 108 — écart supérieur à 10 % : on n'importe PAS. L'écran
+          passe devant tout le reste, et aucune ligne n'a été posée dans
+          result/editableProducts, donc rien ne peut atteindre la file de
+          validation. Deux sorties seulement : reprendre la photo, ou saisir
+          à la main. Pas de « continuer quand même » — il n'y a rien à sauver
+          dans une lecture à ce point fausse. */}
+      {lectureRefusee && (
+        <EcranLectureRefusee
+          controle={lectureRefusee}
+          onReprendrePhoto={() => { setLectureRefusee(null); setError(""); setStatus("idle"); }}
+          onSaisieManuelle={() => { setLectureRefusee(null); onClose(); onManualEntry?.(); }}
+        />
       )}
     </div>
   );
