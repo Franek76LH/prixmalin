@@ -47,6 +47,10 @@ import RecapitulatifAssociation from "./components/RecapitulatifAssociation";
 // SUGGÈRE. On affiche la devinette, on ne la pré-remplit jamais.
 import { construireCarteSuggestion, compterAConfirmerParJour, jourArchive } from "./lib/suggestionsRattachement";
 import CarteSuggestion from "./components/CarteSuggestion";
+// Chantier 112 — un ticket scanné produit TOUJOURS une archive : on ne
+// rattache qu'une session qui correspond vraiment (même magasin, moins de 24 h).
+import { choisirArchiveARattacher } from "./lib/rattachementArchiveTicket";
+const MESSAGE_ARCHIVE_MANQUANTE = "Ton ticket est enregistré, mais il n'apparaîtra pas dans tes archives.";
 import AValiderSheet from "./components/dev/AValiderSheet";
 // Chantier "Scan code-barres", bout 3B — console de validation admin
 import ValidationScanSheet from "./components/admin/ValidationScanSheet";
@@ -5498,9 +5502,20 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
       bilanCore = null;
     }
     // Trouve la dernière archive sans ticket scanné
-    const openArchive = [...archives].reverse().find(a => !a.ticket_scanned);
+    // Chantier 112 — on ne rattache QUE ce qui correspond vraiment : même
+    // enseigne, moins de 24 h, pas déjà scannée. Avant, la seule condition
+    // était « pas encore scannée », et sept sessions abandonnées le 11/08
+    // captaient tous les tickets sans jamais les marquer — plus aucune archive
+    // n'était créée depuis huit jours.
+    const openArchive = choisirArchiveARattacher(archives, {
+      magasinId: entries[0]?.storeId ?? null,
+      maintenant: Date.now(),
+    });
 
     let realizedSaving = null;
+    // Chantier 112 — le ticket a-t-il bien trouvé une archive (rattachée ou
+    // créée) ? Faux = on n'annonce jamais un succès plein.
+    let archiveOk = true;
     if (openArchive) {
       if (coreActifGlobal) {
         // #56.6 — attend l'écriture Core déjà lancée par confirm() (un seul
@@ -5550,9 +5565,20 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
       // Chantier 96 — marquage UNIQUEMENT si un ticket a réellement été
       // ingéré (branche Core) ou en mode legacy historique (realizedSaving
       // est alors toujours un nombre). null = échec Core, archive intacte.
+      //
+      // Chantier 112 — le marquage est désormais ATTENDU et son résultat LU.
+      // Avant, l'appel partait sans que personne ne regarde ce qu'il renvoyait :
+      // une écriture qui échouait laissait l'archive non scannée en silence, et
+      // c'est exactement le défaut du chantier 109 (une réponse d'échec traitée
+      // comme un succès) reproduit un cran plus loin.
       if (realizedSaving !== null) {
-        updateArchive(openArchive.id, { ticket_scanned: true, realized_saving: realizedSaving });
-        onTicketValidated?.(openArchive.id, openArchive.store);
+        const { error: erreurMarquage } = await updateArchive(openArchive.id, { ticket_scanned: true, realized_saving: realizedSaving });
+        if (erreurMarquage) archiveOk = false;
+        else onTicketValidated?.(openArchive.id, openArchive.store);
+      } else {
+        // Core n'a pas abouti : l'archive reste intacte, donc ce ticket n'est
+        // rattaché nulle part. On ne le passera pas pour un succès plein.
+        archiveOk = false;
       }
     } else {
       const storeId = entries[0]?.storeId || "autre";
@@ -5570,7 +5596,11 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
         realized_saving:  0,
         ticket_scanned:   true,
       };
-      onCreateArchive?.(newArc);
+      // Chantier 112 — création vérifiée : si elle échoue, le ticket est bien
+      // enregistré côté Core mais il n'apparaîtra pas dans les archives, et il
+      // faut le dire.
+      const creation = await onCreateArchive?.(newArc);
+      if (creation && creation.ok === false) archiveOk = false;
     }
 
     let updated = [...priceDB];
@@ -5605,6 +5635,14 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
       return;
     }
 
+    // Chantier 112 — jamais de succès plein quand l'archive manque. Le ticket
+    // EST enregistré côté Core (on ne le renie pas), mais il ne sera pas
+    // visible dans l'onglet Archives : le dire est le minimum, se taire
+    // reproduirait le défaut du 18/08.
+    if (!archiveOk) {
+      showToast(`⚠️ ${MESSAGE_ARCHIVE_MANQUANTE}`, false);
+      return;
+    }
     const savingMsg = realizedSaving !== null
       ? ` · Économies : ${realizedSaving >= 0 ? '+' : ''}${realizedSaving.toFixed(2)} €`
       : '';
@@ -11663,8 +11701,19 @@ export default function App() {
       console.error('[C109] interprétation du résultat Core', e);
       bilanCore = null;
     }
-    const openArchive = [...archives].reverse().find(a => !a.ticket_scanned);
+    // Chantier 112 — on ne rattache QUE ce qui correspond vraiment : même
+    // enseigne, moins de 24 h, pas déjà scannée. Avant, la seule condition
+    // était « pas encore scannée », et sept sessions abandonnées le 11/08
+    // captaient tous les tickets sans jamais les marquer — plus aucune archive
+    // n'était créée depuis huit jours.
+    const openArchive = choisirArchiveARattacher(archives, {
+      magasinId: entries[0]?.storeId ?? null,
+      maintenant: Date.now(),
+    });
     let realizedSaving = null;
+    // Chantier 112 — le ticket a-t-il bien trouvé une archive (rattachée ou
+    // créée) ? Faux = on n'annonce jamais un succès plein.
+    let archiveOk = true;
     if (openArchive) {
       if (coreActifGlobal) {
         // #56.6 — même principe que importPrices (PricesTab) : un seul appel
@@ -11705,9 +11754,14 @@ export default function App() {
       }
       // Chantier 96 — marquage uniquement si l'ingestion a réellement abouti
       // (voir importPrices, même règle).
+      // Chantier 112 — attendu et LU, comme dans importPrices : une écriture
+      // qui échoue ne doit plus disparaître dans le vide.
       if (realizedSaving !== null) {
-        updateArchive(openArchive.id, { ticket_scanned: true, realized_saving: realizedSaving });
-        setShowRating({ id: openArchive.id, store: openArchive.store });
+        const { error: erreurMarquage } = await updateArchive(openArchive.id, { ticket_scanned: true, realized_saving: realizedSaving });
+        if (erreurMarquage) archiveOk = false;
+        else setShowRating({ id: openArchive.id, store: openArchive.store });
+      } else {
+        archiveOk = false;
       }
     } else {
       const storeId = entries[0]?.storeId || "autre";
@@ -11722,16 +11776,19 @@ export default function App() {
         realized_saving:  0,
         ticket_scanned:   true,
       };
-      (async () => {
-        const {id:_id,...rest}=newArc;
-        const {data,error}=await supabase.from('archives').insert({...rest,user_id:session?.user?.id}).select('id').single();
-        if(error){ console.error("Erreur création archive ticket :",error); showAppToast("⚠️ Archive non sauvegardée, vérifie ta connexion",false); }
-        else {
-          const {data:all}=await supabase.from('archives').select('*').order('date');
-          if(all) setArchives(all);
-          setShowRating({id:data.id,store:newArc.store});
-        }
-      })();
+      // Chantier 112 — la création est ATTENDUE (elle était lancée sans être
+      // suivie : son échec ne produisait qu'un toast, pendant que le message de
+      // succès s'affichait juste après). Son résultat décide du message final.
+      const {id:_id,...rest}=newArc;
+      const {data:creee,error:erreurCreation}=await supabase.from('archives').insert({...rest,user_id:session?.user?.id}).select('id').single();
+      if(erreurCreation){
+        console.error("Erreur création archive ticket :",erreurCreation);
+        archiveOk = false;
+      } else {
+        const {data:all}=await supabase.from('archives').select('*').order('date');
+        if(all) setArchives(all);
+        setShowRating({id:creee.id,store:newArc.store});
+      }
     }
     let updated = [...priceDB];
     entries.forEach(e => { updated = [...updated.filter(p => priceKey(p) !== priceKey(e)), e]; });
@@ -11760,6 +11817,11 @@ export default function App() {
       return;
     }
 
+    // Chantier 112 — même règle qu'en haut : pas de succès plein sans archive.
+    if (!archiveOk) {
+      showAppToast(`⚠️ ${MESSAGE_ARCHIVE_MANQUANTE}`, false);
+      return;
+    }
     const savingMsg = realizedSaving !== null
       ? ` · Économies : ${realizedSaving >= 0 ? '+' : ''}${realizedSaving.toFixed(2)} €`
       : '';
@@ -11864,12 +11926,14 @@ export default function App() {
           {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} estFrancois={estFrancois} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} magasinSession={scanCaisse?.magasin ?? null} onImportSession={rattacherTicketScanSession} onScanSessionFerme={()=>definirScanCaisse(null)} onVoirTicketExistant={()=>setTab("archive")} notifierPoints={profilVisible} onEchecEcritureCore={setEchecEcritureCore} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;
             const {data,error}=await supabase.from('archives').insert({...rest,user_id:session?.user?.id}).select('id').single();
-            if(error){ console.error("Erreur création archive ticket :",error); showAppToast("⚠️ Archive non sauvegardée, vérifie ta connexion",false); }
-            else {
-              const {data:all}=await supabase.from('archives').select('*').order('date');
-              if(all) setArchives(all);
-              setShowRating({id:data.id,store:newArc.store});
-            }
+            // Chantier 112 — le résultat est RENVOYÉ : l'appelant doit pouvoir
+            // dire la vérité (« ton ticket est enregistré mais n'apparaîtra pas
+            // dans tes archives ») au lieu d'annoncer un succès plein.
+            if(error){ console.error("Erreur création archive ticket :",error); return { ok:false }; }
+            const {data:all}=await supabase.from('archives').select('*').order('date');
+            if(all) setArchives(all);
+            setShowRating({id:data.id,store:newArc.store});
+            return { ok:true };
           }} userId={session?.user?.id} produitsRef={produitsRef}/>}
           {loaded && tab==="archive"   && <ArchiveTab   archives={archives} storeRatings={storeRatings} onDelete={deleteArchive} priceDB={priceDB} onImport={handleImportPrices} onSavePrice={handleSavePrice} produitsRef={produitsRef} libelleVersNomProduit={libelleVersNomProduit} onLibelleResolu={(cle,nom)=>setLibelleVersNomProduit(prev=>({...prev,[cle]:nom}))} estFrancois={estFrancois} onAddToList={arcItem=>{
             const newItem={id:Date.now()+Math.random(),product:arcItem.product,format:arcItem.format||"",brand:arcItem.brand||"",qty:arcItem.qty||1,checked:false};
