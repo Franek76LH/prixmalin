@@ -75,10 +75,23 @@ serve(async (req) => {
   "store": "nom du magasin",
   "date": "YYYY-MM-DD",
   "address": "adresse complète du magasin si présente sur le ticket (numéro, rue, code postal, ville), sinon chaîne vide",
+  "total_ticket": 0.00,
+  "nombre_articles": 0,
+  "total_remises": 0.00,
   "products": [
     { "brand": "marque ou vide", "name": "nom du produit normalisé", "libelle_ticket": "texte du ticket recopié tel quel", "confiance": "haute", "format": "format ou vide", "quantite_nette": null, "unite_quantite": null, "nombre_unites": null, "qty": 1, "unit_price": 0.00, "price": 0.00, "total": 0.00 }
   ]
 }
+CONTRÔLE DE COHÉRENCE DU TICKET (champs "total_ticket" et "nombre_articles") :
+- "total_ticket" (nombre) : le MONTANT TOTAL PAYÉ tel qu'il est IMPRIMÉ sur le ticket (ligne "TOTAL", "TOTAL A PAYER", "NET A PAYER", "MONTANT DU"). C'est le total du ticket, PAS la somme que tu calculerais toi-même à partir des lignes.
+- "nombre_articles" (nombre entier) : le NOMBRE D'ARTICLES tel qu'il est IMPRIMÉ sur le ticket (ligne "NOMBRE D'ARTICLES", "NB ARTICLES", "TOTAL ARTICLES"). Là encore, c'est le chiffre imprimé, PAS le nombre de lignes que tu as extraites.
+- Si l'un de ces deux chiffres n'est pas imprimé, ou est illisible : mets null. NE LE CALCULE PAS, NE LE DEVINE PAS. Ces deux champs servent à vérifier ta propre lecture : une valeur inventée à partir des lignes rendrait le contrôle inutile, et un ticket mal lu passerait pour bon.
+- "total_remises" (nombre) : le TOTAL DES REMISES tel qu'il est IMPRIMÉ sur le ticket (ligne "TOTAL REMISES", "REMISES", "AVANTAGES", "ECONOMIES REALISEES", "TOTAL AVANTAGES"). Les prix des lignes article sont AVANT remise, alors que "total_ticket" est APRÈS remise : sans ce chiffre, la vérification est faussée sur tout ticket en promotion.
+  - Si le ticket ne comporte AUCUNE remise ni promotion : mets 0.
+  - Si un total de remises est imprimé : recopie-le.
+  - Si des remises apparaissent (lignes "2+1", "REMISE 50%", "OFFRE") mais QU'AUCUN total de remises n'est imprimé : mets null. NE LES ADDITIONNE PAS toi-même — un total calculé serait une donnée inventée, et mieux vaut renoncer à vérifier que vérifier faux.
+  - Les remises ne sont JAMAIS des lignes de "products". Elles ne figurent que dans ce champ.
+DATE — même exigence : "date" doit être la date IMPRIMÉE du passage en caisse. Ne la déduis JAMAIS d'un autre nombre du ticket : un numéro de téléphone, un numéro de caisse, un code TVA ou un numéro de ticket ne sont PAS des dates. Si aucune date de passage en caisse n'est lisible, mets null plutôt qu'une date reconstituée.
 Pour chaque ligne article, retourne aussi libelle_ticket : le texte tel qu'il est imprimé sur le ticket, recopié au plus proche, sans correction, sans reformulation, sans interprétation produit. Si le texte exact est partiellement illisible, conserve ce qui est visible et n'invente pas.
 CONFIANCE (champ "confiance", obligatoire, valeur "haute" ou "faible") :
 - Mets "haute" UNIQUEMENT quand le rattachement du "name" est franc : le libellé du ticket correspond clairement à un produit (idéalement une entrée du catalogue de référence), sans ambiguïté.
@@ -149,6 +162,9 @@ RÈGLE ABSOLUE : extraire CHAQUE article du ticket sans exception.
     // étaient tracés, un 200 avec 0 produit était invisible dans les logs.
     console.log("[scan-ticket] ok", JSON.stringify({
       produits: Array.isArray(parsed?.products) ? parsed.products.length : null,
+      total_ticket: parsed?.total_ticket ?? null,
+      nombre_articles: parsed?.nombre_articles ?? null,
+      total_remises: parsed?.total_remises ?? null,
       images: images.length,
       finish_reason: data.choices?.[0]?.finish_reason ?? null,
     }));
