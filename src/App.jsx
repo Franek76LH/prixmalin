@@ -39,6 +39,10 @@ import { EcranLectureRefusee, BandeauLectureIncomplete, ConfirmationDateTicket }
 // Chantier 109 — lire la réponse de enregistrer_ticket_core au lieu de la jeter.
 import { interpreterResultatCore, NIVEAU_ECHEC, NIVEAU_INFO } from "./lib/resultatEcritureCore";
 import AlerteEcritureCore from "./components/AlerteEcritureCore";
+// Chantier 110 — correction d'association : remise à zéro entre deux lignes,
+// relecture avant d'appliquer, garde-fou de mots communs sur le texte BRUT.
+import { construireRecapitulatif } from "./lib/coherenceAssociation";
+import RecapitulatifAssociation from "./components/RecapitulatifAssociation";
 import AValiderSheet from "./components/dev/AValiderSheet";
 // Chantier "Scan code-barres", bout 3B — console de validation admin
 import ValidationScanSheet from "./components/admin/ValidationScanSheet";
@@ -6911,6 +6915,11 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
   // RPC de recherche. null si non résolue (recherche non filtrée/triée par
   // enseigne dans ce cas, jamais bloquante).
   const [enseigneCourante, setEnseigneCourante] = useState(null);
+  // Chantier 110 — libellé BRUT de la ligne actuellement corrigée. Remis à null
+  // à CHAQUE changement de cible, avant toute requête : un libellé resté de la
+  // ligne précédente ferait relire à l'utilisateur le texte d'une autre ligne,
+  // ce qui est précisément l'erreur que ce chantier corrige.
+  const [libelleTicketCible, setLibelleTicketCible] = useState(null);
   const [pendingDeleteArc, setPendingDeleteArc] = useState(null);
   const [added, setAdded] = useState(new Set());
   const [sort, setSort] = useState("produit");
@@ -6934,7 +6943,10 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
     const jour = new Date(arc.date).toISOString().slice(0, 10);
     const { data: lignes, error } = await supabase
       .from('lignes_ticket')
-      .select('id, libelle_brut, tickets!inner(date_ticket, magasin_id)')
+      // Chantier 110 — libelle_ticket (texte BRUT imprimé) est ramené en plus :
+      // c'est lui, et jamais libelle_brut (normalisé par l'OCR), que la
+      // relecture affiche et que le garde-fou compare.
+      .select('id, libelle_brut, libelle_ticket, tickets!inner(date_ticket, magasin_id)')
       .eq('tickets.date_ticket', jour);
     if (error) return { candidats: [], error };
     const cible = normName(item.product);
@@ -6986,10 +6998,20 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
   // retrouvé, enseigneCourante reste null et la recherche n'est simplement
   // pas triée par enseigne (jamais bloquant).
   useEffect(() => {
-    if (!correctionCible) { setEnseigneCourante(null); return; }
+    // Chantier 110 — on VIDE avant de recharger. Sans ça, pendant le temps de la
+    // requête, l'écran de la ligne B affichait encore l'enseigne et le libellé
+    // brut de la ligne A. Une donnée de la ligne précédente ne doit jamais
+    // survivre au changement de ligne, même une fraction de seconde.
+    setEnseigneCourante(null);
+    setLibelleTicketCible(null);
+    if (!correctionCible) return;
     let annule = false;
     (async () => {
       const { candidats } = await trouverLignesTicket(correctionCible.arc, correctionCible.item);
+      // Chantier 110 — le texte brut imprimé de la ligne visée, pour la
+      // relecture. Absent (anciennes lignes) : reste null, le récapitulatif
+      // s'affiche quand même et le garde-fou se tait.
+      if (!annule) setLibelleTicketCible(candidats[0]?.libelle_ticket ?? null);
       const magasinId = candidats[0]?.tickets?.magasin_id;
       if (!magasinId) { if (!annule) setEnseigneCourante(null); return; }
       const { data } = await supabase.from('magasins').select('enseigne_id').eq('id', magasinId).maybeSingle();
@@ -7270,7 +7292,7 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
                   <div style={{ padding:"10px 16px 14px", display:"flex", flexWrap:"wrap", gap:6 }}>
                     {arc.items.map((item,j)=>(
                       <span key={j} style={{ background:C.grayLight, borderRadius:99, padding:"4px 8px 4px 12px", fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:700, color:C.textLight, display:"inline-flex", alignItems:"center", gap:6 }}>
-                        <span onClick={()=>setCorrectionCible({arc,item})} style={{ cursor:"pointer" }} title="Corriger le produit rattaché">
+                        <span onClick={()=>setCorrectionCible({arc,item,cleLigne:`${arc.id}_${j}`})} style={{ cursor:"pointer" }} title="Corriger le produit rattaché">
                           {(()=>{ const up=item.unit_price??item.price??null; const qty=item.qty||1; const tot=up!=null?up*qty:null; return `${item.brand?item.brand+' · ':""}${nomAffiche(item)} ${item.format} | ×${qty} | ${up!=null?Number(up).toFixed(2).replace('.',','):"—"} € | = ${tot!=null?Number(tot).toFixed(2).replace('.',','):"—"} €`; })()}
                         </span>
                         {(()=>{ const key=`${arc.id}_${j}`; const done=added.has(key); return (
@@ -7289,8 +7311,16 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
       {showImport && <ImportTicketSheet onClose={()=>setShowImport(false)} onImport={onImport} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))} onManualEntry={()=>setShowEntry(true)} estFrancois={estFrancois}/>}
       {showEntry  && <PriceEntrySheet  onClose={()=>setShowEntry(false)} onSave={onSavePrice}/>}
       {correctionCible && (
+        /* Chantier 110 — `key` liée à la ligne. C'EST LA CORRECTION DU DÉFAUT :
+           sans elle, React garde le même composant monté quand on passe d'une
+           ligne à l'autre (même type, même position), et la sélection de la
+           ligne précédente survit. Avec elle, changer de ligne démonte et
+           remonte : aucun état interne ne peut franchir la frontière.
+           Ne pas retirer cette clé — un test de non-régression la verrouille. */
         <CorrigerProduitSheet
+          key={correctionCible.cleLigne}
           item={correctionCible.item}
+          libelleTicket={libelleTicketCible}
           enseigne={enseigneCourante}
           estFrancois={estFrancois}
           onClose={()=>setCorrectionCible(null)}
@@ -7310,7 +7340,7 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
 // par code-barres : marque + libellé + quantité, tel que demandé (distinct de
 // libelleVariante ci-dessus, qui ne sert qu'au sélecteur "plusieurs variantes"
 // de la recherche par nom).
-function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onClose, onChoisir }) {
+function CorrigerProduitSheet({ item, libelleTicket = null, enseigne = null, estFrancois = false, onClose, onChoisir }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -7348,6 +7378,33 @@ function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onCl
   // réellement décodé + le déroulé de la recherche, pour ne jamais avoir d'écran
   // muet : { brut, format, normalise, rechercheLancee, resultat }.
   const [scanDiag, setScanDiag] = useState(null);
+  // Chantier 110 — relecture avant d'appeler la RPC. Tant que ce n'est pas
+  // null, l'écran montre le récapitulatif et RIEN n'a encore été écrit.
+  const [recapitulatif, setRecapitulatif] = useState(null);
+
+  // Chantier 110 — LA REMISE À ZÉRO ENTRE DEUX LIGNES.
+  //
+  // Le défaut d'origine : `{correctionCible && <CorrigerProduitSheet .../>}`
+  // garde le MÊME composant monté quand on passe d'une ligne à une autre (même
+  // type, même position dans l'arbre). Seule la prop `item` changeait ; le
+  // produit choisi, la variante, le terme cherché et les résultats affichés
+  // restaient ceux de la ligne précédente. D'où « Tendres perles à
+  // l'italienne » envoyé pour une glace puis pour un ketchup à neuf minutes
+  // d'écart, les 16 et 17/08.
+  //
+  // La remise à zéro est STRUCTURELLE : la feuille est montée avec
+  // `key={cleLigne}` (voir ArchiveTab), donc changer de ligne démonte le
+  // composant et en remonte un neuf. Tous les états ci-dessus sont
+  // redéclarés à leur valeur vide, et la recherche en vol de la ligne
+  // précédente est annulée par le nettoyage de son propre effet.
+  //
+  // Un effet de réinitialisation a été essayé puis retiré : il est strictement
+  // plus faible, puisqu'il ne s'exécute qu'APRÈS un premier rendu — il existe
+  // donc une image où la sélection de la ligne précédente est encore à l'écran
+  // sous le libellé de la nouvelle. Le démontage, lui, ne laisse pas cette
+  // fenêtre. La liste des états concernés vit dans lib/coherenceAssociation.js
+  // et un test vérifie qu'aucun d'eux n'est déclaré avec autre chose qu'une
+  // valeur vide.
 
   useEffect(() => {
     if (query.trim().length < 2) { setResults([]); setError(null); return; }
@@ -7374,6 +7431,41 @@ function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onCl
     if (!res.ok) { setError(res.message); return; }
     setConfirmation(texteConfirmation ?? `✓ Rattaché à « ${produit.nom_reference} »`);
     setTimeout(onClose, 900);
+  };
+
+  // Chantier 110 — ON N'ÉCRIT PLUS DIRECTEMENT. Un tap sur un résultat de
+  // recherche ouvre la relecture ; la RPC n'est appelée que depuis
+  // « Confirmer l'association ».
+  //
+  // Ne concerne QUE la correction manuelle (methode 'humaine'), celle qui
+  // appelle corriger_association_ligne_ticket. Le chemin code-barres garde son
+  // propre écran de confirmation (« Relier ce produit »), inchangé : il n'a
+  // jamais produit de mauvais couple, et lui ajouter une deuxième confirmation
+  // ne ferait qu'alourdir un parcours sain.
+  const demanderRelecture = (produit, varianteId, variante = null) => {
+    setError(null);
+    setRecapitulatif(construireRecapitulatif({
+      libelleTicket,
+      libelleAffiche: `${item?.product ?? ''}${item?.format ? ` ${item.format}` : ''}`.trim() || null,
+      produit,
+      varianteId,
+      variante,
+    }));
+  };
+
+  const confirmerAssociation = () => {
+    if (!recapitulatif || saving) return;
+    finaliser(recapitulatif.produit, recapitulatif.varianteId);
+  };
+
+  // « Annuler » revient à la recherche de CETTE ligne (la sélection du produit
+  // est relâchée, le terme cherché est conservé : on annule un choix, on ne
+  // recommence pas la recherche). Rien n'a été écrit.
+  const annulerRelecture = () => {
+    setRecapitulatif(null);
+    setProduitEnAttente(null);
+    setVariantesAChoisir(null);
+    setVarianteChoisie(null);
   };
 
   // Chantier "Scan code-barres" bout 1 — recherche par code_barres exact
@@ -7508,7 +7600,8 @@ function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onCl
     if (liste.length <= 1) {
       const varianteId = liste[0]?.id ?? null;
       if (codeBarresEnAttente) await procederApprentissage(produit, varianteId);
-      else await finaliser(produit, varianteId);
+      // Chantier 110 — relecture obligatoire avant d'appliquer.
+      else demanderRelecture(produit, varianteId, liste[0] ?? null);
       return;
     }
 
@@ -7526,7 +7619,12 @@ function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onCl
   const validerVariante = () => {
     if (!varianteChoisie || !produitEnAttente) return;
     if (codeBarresEnAttente) procederApprentissage(produitEnAttente, varianteChoisie);
-    else finaliser(produitEnAttente, varianteChoisie);
+    // Chantier 110 — relecture obligatoire, avec la variante réellement cochée.
+    else demanderRelecture(
+      produitEnAttente,
+      varianteChoisie,
+      (variantesAChoisir || []).find(v => v.id === varianteChoisie) ?? null
+    );
   };
 
   return (
@@ -7535,14 +7633,14 @@ function CorrigerProduitSheet({ item, enseigne = null, estFrancois = false, onCl
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
           <div>
             <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.text }}>
-              {conflitCodeBarres ? "Code déjà utilisé ?" : barcodeConfirmation || barcodeCandidats ? "Code-barres" : variantesAChoisir ? "Quelle quantité ?" : "Choisir le bon produit"}
+              {recapitulatif ? "Vérifie avant de valider" : conflitCodeBarres ? "Code déjà utilisé ?" : barcodeConfirmation || barcodeCandidats ? "Code-barres" : variantesAChoisir ? "Quelle quantité ?" : "Choisir le bon produit"}
             </div>
             <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, marginTop:2 }}>
-              {variantesAChoisir && !codeBarresEnAttente ? produitEnAttente?.nom_reference : `Actuellement : ${item.product}${item.format?` ${item.format}`:""}`}
+              {recapitulatif ? "Cette ligne sera rattachée à ce produit" : variantesAChoisir && !codeBarresEnAttente ? produitEnAttente?.nom_reference : `Actuellement : ${item.product}${item.format?` ${item.format}`:""}`}
             </div>
           </div>
-          <button onClick={conflitCodeBarres ? ()=>setConflitCodeBarres(null) : barcodeConfirmation || barcodeCandidats ? annulerBarcode : variantesAChoisir ? annulerChoixVariante : onClose} style={{ background:C.grayLight, border:"none", borderRadius:99, width:28, height:28, color:C.textLight, fontSize:14, cursor:"pointer" }}>
-            {conflitCodeBarres || barcodeConfirmation || barcodeCandidats || variantesAChoisir ? "←" : "✕"}
+          <button onClick={recapitulatif ? annulerRelecture : conflitCodeBarres ? ()=>setConflitCodeBarres(null) : barcodeConfirmation || barcodeCandidats ? annulerBarcode : variantesAChoisir ? annulerChoixVariante : onClose} style={{ background:C.grayLight, border:"none", borderRadius:99, width:28, height:28, color:C.textLight, fontSize:14, cursor:"pointer" }}>
+            {recapitulatif || conflitCodeBarres || barcodeConfirmation || barcodeCandidats || variantesAChoisir ? "←" : "✕"}
           </button>
         </div>
 
@@ -7563,6 +7661,19 @@ Résultat : ${scanDiag.resultat}`}
           <div style={{ textAlign:"center", padding:"24px 0", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.green }}>
             {confirmation}
           </div>
+        ) : recapitulatif ? (
+          /* Chantier 110 — la relecture. Tant que cet écran est affiché, la RPC
+             n'a PAS été appelée : rien n'est écrit, aucune correspondance n'est
+             créée, aucun alias n'est proposé. */
+          <>
+            {error && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:"#CC0000", marginBottom:8 }}>⚠️ {error}</div>}
+            <RecapitulatifAssociation
+              recapitulatif={recapitulatif}
+              enCours={saving}
+              onConfirmer={confirmerAssociation}
+              onAnnuler={annulerRelecture}
+            />
+          </>
         ) : conflitCodeBarres ? (
           <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
             {error && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:"#CC0000" }}>⚠️ {error}</div>}
