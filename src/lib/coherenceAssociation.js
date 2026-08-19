@@ -85,8 +85,56 @@ export const ETATS_SELECTION = Object.freeze(Object.keys(selectionVide()));
 // exclu de la comparaison : « 435 g » contre « 435GR » ferait apparaître un mot
 // commun purement numérique entre deux produits sans aucun rapport, et le
 // garde-fou se tairait sur le cas même qu'il doit attraper.
-export function divergenceAssociation({ libelleTicket = null, nomProduit = null, marque = null } = {}) {
-  const texteProduit = [nomProduit, marque].filter(Boolean).join(' ');
+//
+// (Le côté produit a été élargi au chantier 111b — voir juste en dessous. Le
+// côté ticket, lui, n'a pas bougé et ne doit pas bouger.)
+
+// ── 2 bis. Chantier 111b — LE VOCABULAIRE DU PRODUIT.
+//
+// Constat mesuré sur les 6 suggestions du ticket Carrefour : le bandeau se
+// déclenchait 3 fois, dont 2 à tort. Un signal juste une fois sur trois cesse
+// d'être lu — et un garde-fou qu'on n'écoute plus ne protège de rien.
+//
+// Les deux fausses alertes avaient la même cause : on ne comparait qu'à
+// produits.nom_reference, alors que l'app SAIT déjà autre chose du produit.
+//   « 4*BANANES » contre la fiche « Banane » : la fiche porte l'alias actif
+//   « Bananes ». Le « s » suffisait à faire crier.
+//   « 4*35,5 CL RED BULL R » contre « Boisson énergisante » : une variante
+//   active de cette fiche porte la marque « Red Bull ». Le ticket nomme la
+//   marque, la fiche nomme la catégorie — aucun mot commun, et pourtant le
+//   rapprochement est juste.
+//
+// On élargit donc le vocabulaire du côté PRODUIT :
+//   1. nom_reference (comme avant) ;
+//   2. les libellés des alias ACTIFS de ce produit ;
+//   3. les noms des marques de ses variantes ACTIVES ;
+//   4. la marque de la variante suggérée ou choisie.
+// Le côté TICKET ne change pas : toujours le texte de caisse brut.
+//
+// ⚠️ La mécanique de comparaison (motsSignifiants / motsCommuns) n'est PAS
+// touchée : elle est partagée avec les chantiers 105 et 107. On lui donne plus
+// de mots à lire, on ne change pas sa façon de lire. Les 105 et 107 profitent
+// du même élargissement là où ils décrivent un produit — c'est voulu.
+//
+// ⚠️ Le format et la quantité restent EXCLUS (règle du 110) : « 435GR » contre
+// « 435 g » fabriquerait un faux mot commun entre deux produits sans rapport,
+// et ferait taire le garde-fou sur le cas même qu'il doit attraper.
+//
+// Listes absentes ou vides : on retombe exactement sur le comportement d'avant
+// (nom + marque). Un garde-fou dégradé vaut mieux qu'un écran cassé.
+export function vocabulaireProduit({ nomProduit = null, marque = null, alias = [], marquesVariantes = [] } = {}) {
+  const morceaux = [nomProduit, marque];
+  for (const liste of [alias, marquesVariantes]) {
+    if (Array.isArray(liste)) morceaux.push(...liste);
+  }
+  return morceaux
+    .filter(m => typeof m === 'string' && m.trim())
+    .map(m => m.trim())
+    .join(' ');
+}
+
+export function divergenceAssociation({ libelleTicket = null, nomProduit = null, marque = null, alias = [], marquesVariantes = [] } = {}) {
+  const texteProduit = vocabulaireProduit({ nomProduit, marque, alias, marquesVariantes });
 
   // Fallback du point 4 : pas de texte brut (anciennes lignes), ou pas de nom de
   // produit -> on ne crie pas faute de données. Une absence n'est pas un
@@ -112,6 +160,11 @@ export function construireRecapitulatif({
   produit = null,
   varianteId = null,
   variante = null,
+  // Chantier 111b — vocabulaire élargi du produit. Non fourni (appelant qui ne
+  // l'a pas chargé, lecture en base en échec) : comportement d'avant, à
+  // l'identique.
+  alias = [],
+  marquesVariantes = [],
 } = {}) {
   const brut = typeof libelleTicket === 'string' ? libelleTicket.trim() : '';
   const disponible = brut.length > 0;
@@ -132,6 +185,8 @@ export function construireRecapitulatif({
       libelleTicket: brut,
       nomProduit: produit?.nom_reference ?? null,
       marque,
+      alias,
+      marquesVariantes,
     }),
   };
 }

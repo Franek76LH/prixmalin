@@ -7458,6 +7458,10 @@ function CorrigerProduitSheet({ item, libelleTicket = null, suggestion = null, e
   // désigne aucun produit), il n'a donc pas sa place dans ETATS_SELECTION ; le
   // remontage par `key` le remet à false d'une ligne à l'autre.
   const [suggestionRefusee, setSuggestionRefusee] = useState(false);
+  // Chantier 111b — lecture du vocabulaire du produit en cours. Comme
+  // suggestionRefusee, ce n'est pas un état de SÉLECTION : il ne désigne aucun
+  // produit, il dit seulement qu'une requête est en vol.
+  const [chargementVocabulaire, setChargementVocabulaire] = useState(false);
 
   // Chantier 110 — LA REMISE À ZÉRO ENTRE DEUX LIGNES.
   //
@@ -7510,6 +7514,44 @@ function CorrigerProduitSheet({ item, libelleTicket = null, suggestion = null, e
     setTimeout(onClose, 900);
   };
 
+  // Chantier 111b — le vocabulaire du produit, lu en base : ses alias ACTIFS et
+  // les marques de ses variantes ACTIVES. Sert au seul garde-fou de mots
+  // communs ; rien de ce qui est lu ici n'est écrit ni affiché comme un choix.
+  //
+  // Le filtre statut='actif' est posé EXPLICITEMENT alors que la policy RLS le
+  // pose déjà : elle ne le pose que pour les non-administrateurs
+  // (`statut = 'actif' OR est_administrateur()`). Sans ce filtre, François
+  // verrait aussi les alias INACTIFS et le garde-fou ne jugerait pas comme pour
+  // les autres utilisateurs — un garde-fou dont le verdict dépend de qui
+  // regarde ne vaut rien.
+  //
+  // TOUTE défaillance renvoie des listes vides : la comparaison retombe alors
+  // sur le nom de la fiche seul, exactement comme avant le 111b. Dégradé, mais
+  // jamais cassé.
+  const chargerVocabulaireProduit = async (produitId) => {
+    const vide = { alias: [], marquesVariantes: [] };
+    if (!produitId) return vide;
+    try {
+      const [reponseAlias, reponseVariantes] = await Promise.all([
+        supabase.from('alias_produits').select('libelle_alias')
+          .eq('produit_id', produitId).eq('statut', 'actif'),
+        supabase.from('variantes_produit').select('marques(nom)')
+          .eq('produit_id', produitId).eq('actif', true),
+      ]);
+      if (reponseAlias.error || reponseVariantes.error) {
+        console.error('[C111b] vocabulaire produit', reponseAlias.error || reponseVariantes.error);
+        return vide;
+      }
+      return {
+        alias: (reponseAlias.data || []).map(a => a?.libelle_alias).filter(Boolean),
+        marquesVariantes: (reponseVariantes.data || []).map(v => v?.marques?.nom).filter(Boolean),
+      };
+    } catch (e) {
+      console.error('[C111b] vocabulaire produit', e);
+      return vide;
+    }
+  };
+
   // Chantier 110 — ON N'ÉCRIT PLUS DIRECTEMENT. Un tap sur un résultat de
   // recherche ouvre la relecture ; la RPC n'est appelée que depuis
   // « Confirmer l'association ».
@@ -7519,14 +7561,23 @@ function CorrigerProduitSheet({ item, libelleTicket = null, suggestion = null, e
   // propre écran de confirmation (« Relier ce produit »), inchangé : il n'a
   // jamais produit de mauvais couple, et lui ajouter une deuxième confirmation
   // ne ferait qu'alourdir un parcours sain.
-  const demanderRelecture = (produit, varianteId, variante = null) => {
+  // Chantier 111b — le vocabulaire est chargé AVANT d'ouvrir le récapitulatif,
+  // pas après. Un bandeau qui s'afficherait puis disparaîtrait une fraction de
+  // seconde plus tard serait pire que pas de bandeau : on ne saurait plus s'il
+  // a crié.
+  const demanderRelecture = async (produit, varianteId, variante = null) => {
     setError(null);
+    setChargementVocabulaire(true);
+    const { alias, marquesVariantes } = await chargerVocabulaireProduit(produit?.produit_id ?? null);
+    setChargementVocabulaire(false);
     setRecapitulatif(construireRecapitulatif({
       libelleTicket,
       libelleAffiche: `${item?.product ?? ''}${item?.format ? ` ${item.format}` : ''}`.trim() || null,
       produit,
       varianteId,
       variante,
+      alias,
+      marquesVariantes,
     }));
   };
 
@@ -7683,7 +7734,7 @@ function CorrigerProduitSheet({ item, libelleTicket = null, suggestion = null, e
   // Sur un produit tapé : 0 variante active -> NULL légitime (vrac/frais) ;
   // 1 -> automatique ; plusieurs -> écran de choix explicite, jamais de repli.
   const choisir = async (produit) => {
-    if (saving || resolvingVariante) return;
+    if (saving || resolvingVariante || chargementVocabulaire) return;
     setError(null);
     setResolvingVariante(true);
     const { data, error: errVar } = await supabase
@@ -7879,14 +7930,14 @@ Résultat : ${scanDiag.resultat}`}
               {query.trim().length < 2 && (
                 <div style={{ textAlign:"center", padding:"20px 0", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>Tape au moins 2 caractères pour chercher</div>
               )}
-              {(searching || resolvingVariante) && <div style={{ textAlign:"center", padding:"12px 0", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>{resolvingVariante ? "Vérification..." : "Recherche..."}</div>}
+              {(searching || resolvingVariante || chargementVocabulaire) && <div style={{ textAlign:"center", padding:"12px 0", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>{(resolvingVariante || chargementVocabulaire) ? "Vérification..." : "Recherche..."}</div>}
               {!searching && query.trim().length >= 2 && results.length === 0 && !error && (
                 <div style={{ textAlign:"center", padding:"20px 0", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>
                   {codeBarresEnAttente ? "Produit introuvable — création gérée au prochain lot." : "Aucun produit trouvé"}
                 </div>
               )}
               {results.map(p => (
-                <div key={p.produit_id} onClick={()=>choisir(p)} style={{ padding:"12px 10px", borderBottom:`1px solid ${C.grayLight}`, display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, cursor:(saving||resolvingVariante)?"default":"pointer", opacity:(saving||resolvingVariante)?0.6:1 }}>
+                <div key={p.produit_id} onClick={()=>choisir(p)} style={{ padding:"12px 10px", borderBottom:`1px solid ${C.grayLight}`, display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, cursor:(saving||resolvingVariante||chargementVocabulaire)?"default":"pointer", opacity:(saving||resolvingVariante||chargementVocabulaire)?0.6:1 }}>
                   <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text }}>{p.nom_reference}</span>
                   {p.dernier_prix != null && (
                     <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:700, color:C.textLight, flexShrink:0 }}>

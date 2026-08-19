@@ -100,8 +100,8 @@ describe('relecture avant d\'appliquer', () => {
     // ...et transmis à la feuille.
     expect(app).toMatch(/libelleTicket=\{libelleTicketCible\}/);
     // Le récapitulatif est construit avec, jamais avec le libellé normalisé.
-    const demander = app.slice(app.indexOf('const demanderRelecture = ('));
-    expect(demander.slice(0, 600)).toContain('libelleTicket,');
+    const demander = app.slice(app.indexOf('const demanderRelecture = async ('));
+    expect(demander.slice(0, 1100)).toContain('libelleTicket,');
   });
 });
 
@@ -133,5 +133,61 @@ describe('l\'écran de relecture lui-même', () => {
   it('ne plante pas sur une donnée manquante', () => {
     expect(ecran).toContain('if (!recapitulatif) return null;');
     expect(ecran).toContain("nomProduit || '(produit sans nom)'");
+  });
+});
+
+// ── Chantier 111b — le vocabulaire élargi, côté branchement ─────────────────
+describe('vocabulaire du produit chargé avant la relecture', () => {
+  const chargeur = app.slice(app.indexOf('const chargerVocabulaireProduit = async ('));
+
+  it('lit les alias ACTIFS et les marques des variantes ACTIVES', () => {
+    const corps = chargeur.slice(0, 1400);
+    expect(corps).toContain("from('alias_produits')");
+    expect(corps).toContain(".eq('statut', 'actif')");
+    expect(corps).toContain("from('variantes_produit')");
+    expect(corps).toContain(".eq('actif', true)");
+    expect(corps).toContain('marques(nom)');
+  });
+
+  // Le filtre statut='actif' n'est PAS redondant avec la RLS : la policy dit
+  // « statut = 'actif' OR est_administrateur() ». Sans ce filtre explicite,
+  // François (administrateur) verrait aussi les alias inactifs et le garde-fou
+  // rendrait un verdict différent du sien pour tous les autres utilisateurs.
+  it('le filtre actif est explicite, pas laissé à la RLS', () => {
+    expect(chargeur.slice(0, 1400)).toMatch(/alias_produits'\)[\s\S]{0,200}statut', 'actif'/);
+  });
+
+  it('toute défaillance retombe sur des listes vides (repli du 111b)', () => {
+    const corps = chargeur.slice(0, 1600);
+    expect(corps).toContain('const vide = { alias: [], marquesVariantes: [] };');
+    expect(corps).toContain('if (!produitId) return vide;');
+    expect(corps).toContain('return vide;');
+    expect(corps).toContain('} catch (e) {');
+  });
+
+  it('le vocabulaire est chargé AVANT l\'ouverture du récapitulatif', () => {
+    // Un bandeau qui s'affiche puis disparaît serait pire que pas de bandeau :
+    // on ne saurait plus s'il a crié.
+    const demander = app.slice(app.indexOf('const demanderRelecture = async ('));
+    const corps = demander.slice(0, 1100);
+    const posCharge = corps.indexOf('await chargerVocabulaireProduit(');
+    const posRecap = corps.indexOf('setRecapitulatif(');
+    expect(posCharge).toBeGreaterThanOrEqual(0);
+    expect(posRecap).toBeGreaterThanOrEqual(0);
+    expect(posCharge).toBeLessThan(posRecap);
+  });
+
+  it('et il est bien transmis au calcul de divergence', () => {
+    const demander = app.slice(app.indexOf('const demanderRelecture = async ('));
+    const corps = demander.slice(0, 1100);
+    expect(corps).toContain('alias,');
+    expect(corps).toContain('marquesVariantes,');
+  });
+
+  it('le côté TICKET n\'a pas bougé : toujours le texte de caisse brut', () => {
+    const demander = app.slice(app.indexOf('const demanderRelecture = async ('));
+    expect(demander.slice(0, 1100)).toContain('libelleTicket,');
+    // Et surtout PAS le libellé normalisé par l'OCR.
+    expect(demander.slice(0, 1100)).not.toContain('libelle_brut');
   });
 });
