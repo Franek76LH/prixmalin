@@ -59,19 +59,54 @@ export async function chargerMagasinsCoreActifs() {
 // Fréquences d'usage par magasin Core : tickets + sessions de courses de
 // l'utilisateur (RLS restreint déjà à ses propres lignes), les plus récents
 // d'abord, plafonnés pour rester léger.
-export async function chargerFrequencesMagasins() {
+export async function chargerFrequencesMagasins({ utilisateurId = null } = {}) {
   const compte = new Map();
   try {
-    const [tickets, sessions] = await Promise.all([
+    // Chantier 108b — les PRIX RELEVÉS comptent au même titre que les tickets
+    // et les sessions. Constat : le Netto de François porte 39 prix relevés et
+    // zéro ticket, donc il n'apparaissait pas dans ses magasins habituels et il
+    // devait le chercher dans la liste complète au moment du scan. Un magasin
+    // où l'on relève des prix est un magasin où l'on va.
+    //
+    // Scopé à l'utilisateur EXPRÈS : la RLS de `prix` laisse lire tous les prix
+    // validés de la communauté, donc sans ce filtre les magasins les plus
+    // relevés de France deviendraient « habituels » pour tout le monde.
+    // tickets et sessions_courses, eux, sont déjà scopés par leur propre RLS.
+    // L'identifiant est résolu ici quand l'appelant ne le passe pas (getSession
+    // est local, pas un aller-retour réseau). Introuvable ou erreur : on ne
+    // compte que les deux sources d'avant, comportement strictement inchangé.
+    let idUtilisateur = utilisateurId;
+    if (!idUtilisateur) {
+      try {
+        const { data } = await supabase.auth.getSession();
+        idUtilisateur = data?.session?.user?.id ?? null;
+      } catch (e) {
+        console.error('[C108b] identifiant utilisateur indisponible', e);
+        idUtilisateur = null;
+      }
+    }
+
+    const requetes = [
       supabase.from('tickets').select('magasin_id')
         .not('magasin_id', 'is', null)
         .order('cree_le', { ascending: false }).limit(200),
       supabase.from('sessions_courses').select('magasin_id')
         .not('magasin_id', 'is', null)
         .order('cree_le', { ascending: false }).limit(200),
-    ]);
-    for (const r of [...(tickets.data || []), ...(sessions.data || [])]) {
-      if (r?.magasin_id) compte.set(r.magasin_id, (compte.get(r.magasin_id) || 0) + 1);
+    ];
+    if (idUtilisateur) {
+      requetes.push(
+        supabase.from('prix').select('magasin_id')
+          .eq('utilisateur_id', idUtilisateur)
+          .not('magasin_id', 'is', null)
+          .order('observe_le', { ascending: false }).limit(200)
+      );
+    }
+    const reponses = await Promise.all(requetes);
+    for (const reponse of reponses) {
+      for (const r of (reponse?.data || [])) {
+        if (r?.magasin_id) compte.set(r.magasin_id, (compte.get(r.magasin_id) || 0) + 1);
+      }
     }
   } catch (e) {
     console.error('[C97] fréquences magasins', e);

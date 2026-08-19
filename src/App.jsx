@@ -1738,6 +1738,10 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     try {
       const [tous, frequences, positionGps] = await Promise.all([
         chargerMagasinsCoreActifs(),
+        // Chantier 108b — compte AUSSI les prix que l'utilisateur a relevés
+        // lui-même (un magasin où l'on relève des prix est un magasin où l'on
+        // va). L'identifiant est résolu par la fonction elle-même : cette
+        // feuille ne le reçoit pas en prop.
         chargerFrequencesMagasins(),
         obtenirPositionAppareil({ timeoutMs: 2500 }),
       ]);

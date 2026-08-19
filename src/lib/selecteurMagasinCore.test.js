@@ -174,3 +174,82 @@ describe('accès Supabase — indisponibilité = valeur neutre, jamais de throw'
     expect(freq.size).toBe(0);
   });
 });
+
+// ── Chantier 108b — les prix relevés comptent comme fréquentation ────────────
+describe('chargerFrequencesMagasins — les prix relevés comptent (108b)', () => {
+  // Chaque table renvoie ce qu'on lui a préparé. Le mock rend un objet
+  // « then-able » pour être awaité comme une requête PostgREST.
+  const brancherTables = (parTable) => {
+    supabase.from.mockImplementation((table) => {
+      const reponse = parTable[table] ?? { data: [] };
+      const c = {};
+      for (const m of ['select', 'eq', 'not', 'order']) c[m] = vi.fn(() => c);
+      c.limit = vi.fn(() => Promise.resolve(reponse));
+      return c;
+    });
+  };
+
+  beforeEach(() => {
+    supabase.auth = { getSession: vi.fn(async () => ({ data: { session: { user: { id: 'moi' } } } })) };
+  });
+
+  // LE cas du chantier : le Netto de François porte 39 prix relevés et zéro
+  // ticket. Avant le 108b il n'apparaissait pas dans « tes magasins » et il
+  // fallait le chercher dans la liste complète au moment du scan.
+  it('un magasin qui n\'a QUE des prix relevés devient habituel', async () => {
+    brancherTables({
+      tickets: { data: [] },
+      sessions_courses: { data: [] },
+      prix: { data: [{ magasin_id: 'netto' }, { magasin_id: 'netto' }, { magasin_id: 'netto' }] },
+    });
+    const freq = await chargerFrequencesMagasins();
+    expect(freq.get('netto')).toBe(3);
+
+    const NETTO = { id: 'netto', nom: 'Netto Marseille' };
+    const { habituels } = classerMagasins({ magasins: [NETTO, MAZARGUES], frequences: freq });
+    expect(habituels.map(m => m.id)).toEqual(['netto']);
+  });
+
+  it('les trois sources s\'additionnent, et le tri par fréquence tient', async () => {
+    brancherTables({
+      tickets: { data: [{ magasin_id: 'maz' }, { magasin_id: 'maz' }] },
+      sessions_courses: { data: [{ magasin_id: 'maz' }] },
+      prix: { data: [{ magasin_id: 'netto' }, { magasin_id: 'netto' }, { magasin_id: 'netto' }, { magasin_id: 'netto' }] },
+    });
+    const freq = await chargerFrequencesMagasins();
+    expect(freq.get('maz')).toBe(3);
+    expect(freq.get('netto')).toBe(4);
+
+    const NETTO = { id: 'netto', nom: 'Netto Marseille' };
+    const { habituels } = classerMagasins({ magasins: [MAZARGUES, NETTO], frequences: freq });
+    expect(habituels.map(m => m.id)).toEqual(['netto', 'maz']); // le plus fréquenté d'abord
+  });
+
+  it('sans utilisateur identifiable, on ne compte que tickets et sessions', async () => {
+    supabase.auth = { getSession: vi.fn(async () => ({ data: { session: null } })) };
+    const vues = [];
+    supabase.from.mockImplementation((table) => {
+      vues.push(table);
+      const c = {};
+      for (const m of ['select', 'eq', 'not', 'order']) c[m] = vi.fn(() => c);
+      c.limit = vi.fn(() => Promise.resolve({ data: [] }));
+      return c;
+    });
+    await chargerFrequencesMagasins();
+    expect(vues).toEqual(['tickets', 'sessions_courses']);
+    expect(vues).not.toContain('prix'); // aucune requête non scopée
+  });
+
+  it('les prix sont TOUJOURS filtrés sur l\'utilisateur (la RLS laisse lire ceux des autres)', async () => {
+    const eqParTable = {};
+    supabase.from.mockImplementation((table) => {
+      const c = {};
+      for (const m of ['select', 'not', 'order']) c[m] = vi.fn(() => c);
+      c.eq = vi.fn((colonne, valeur) => { eqParTable[table] = [colonne, valeur]; return c; });
+      c.limit = vi.fn(() => Promise.resolve({ data: [] }));
+      return c;
+    });
+    await chargerFrequencesMagasins({ utilisateurId: 'moi' });
+    expect(eqParTable.prix).toEqual(['utilisateur_id', 'moi']);
+  });
+});
