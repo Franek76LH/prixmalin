@@ -36,6 +36,9 @@ import BarcodeScannerSheet from "./components/BarcodeScannerSheet";
 // Chantier 108 — contrôle de cohérence de la lecture d'un ticket.
 import { controlerCoherenceTicket, controlerDateTicket, NIVEAU_BLOCAGE, NIVEAU_AVERTISSEMENT } from "./lib/coherenceTicket";
 import { EcranLectureRefusee, BandeauLectureIncomplete, ConfirmationDateTicket } from "./components/ControleLectureTicket";
+// Chantier 109 — lire la réponse de enregistrer_ticket_core au lieu de la jeter.
+import { interpreterResultatCore, NIVEAU_ECHEC, NIVEAU_INFO } from "./lib/resultatEcritureCore";
+import AlerteEcritureCore from "./components/AlerteEcritureCore";
 import AValiderSheet from "./components/dev/AValiderSheet";
 // Chantier "Scan code-barres", bout 3B — console de validation admin
 import ValidationScanSheet from "./components/admin/ValidationScanSheet";
@@ -5420,7 +5423,7 @@ function EconomiesTab({ priceDB, archives, items, setTab }) {
 }
 
 // ── PRICES TAB ────────────────────────────────────────────────────────────────
-function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValidated, onCreateArchive, userId, produitsRef = [], autoOpenCamera = false, onAutoOpenConsumed, autoResumeScan = false, onAutoResumeConsumed, initialScanResult = null, onInitialScanConsumed, hideActions = false, coreActifGlobal = false, estFrancois = false, magasinSession = null, onImportSession, onScanSessionFerme, onVoirTicketExistant = null, notifierPoints = false }) {
+function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValidated, onCreateArchive, userId, produitsRef = [], autoOpenCamera = false, onAutoOpenConsumed, autoResumeScan = false, onAutoResumeConsumed, initialScanResult = null, onInitialScanConsumed, hideActions = false, coreActifGlobal = false, estFrancois = false, magasinSession = null, onImportSession, onScanSessionFerme, onVoirTicketExistant = null, notifierPoints = false, onEchecEcritureCore = null }) {
   const [showImport,    setShowImport]    = useState(false);
   const [capturedResult] = useState(initialScanResult);
   // Chantier 79 — brouillon de scan reprenable. scanDraft : détecté au montage
@@ -5472,6 +5475,20 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
     // l'import à la racine avec la promesse d'écriture Core, pour rattacher
     // le ticket créé à la session (best effort, jamais bloquant pour ce flux).
     onImportSession?.(ecritureCorePromise);
+    // Chantier 109 — on LIT la réponse de la RPC, toujours, quel que soit le
+    // reste du flux. Avant, elle n'était consultée que dans la branche
+    // « une archive ouverte existe ET core_actif » : un scan simple passait à
+    // côté, et l'app annonçait « partagé » sur un rejet complet (18/08, 15h41).
+    //
+    // L'interprétation ne bloque JAMAIS le circuit legacy plus bas : celui-ci
+    // a bien écrit, on ne va pas le renier.
+    let bilanCore = null;
+    try {
+      bilanCore = interpreterResultatCore(await ecritureCorePromise, { lignesEnvoyees: entries.length });
+    } catch (e) {
+      console.error('[C109] interprétation du résultat Core', e);
+      bilanCore = null;
+    }
     // Trouve la dernière archive sans ticket scanné
     const openArchive = [...archives].reverse().find(a => !a.ticket_scanned);
 
@@ -5491,7 +5508,9 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
         // legacy (priceDB/partage) inchangé plus bas.
         const resultatCoreEcriture = await ecritureCorePromise;
         if (!doitRattacherTicketSession(resultatCoreEcriture)) {
-          showToast("⚠️ Ticket non enregistré (lecture ou magasin non résolus) — l'archive reste à scanner.", false);
+          // Chantier 109 — le message détaillé est désormais porté par
+          // bilanCore (écran dédié en fin de fonction) : ici on se contente de
+          // ne pas marquer l'archive, sans doubler l'alerte d'un toast.
           realizedSaving = null; // sentinelle : pas de marquage plus bas
         } else {
           const resultatCore = await calculerRealizedSavingTicket({ utilisateurId: userId });
@@ -5569,10 +5588,22 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
         .then(({ error }) => { if (error) { console.error("Erreur community_prices :", error); showToast("⚠️ Partage communauté échoué", false); } });
     }
 
+    // Chantier 109 — l'écran ne doit plus laisser croire que le comparateur a
+    // reçu les prix quand ce n'est pas le cas. Échec : écran dédié, pas un
+    // toast de deux secondes. Information (lignes à rattacher, réussite
+    // partielle) : ton neutre, jamais alarmiste.
+    if (bilanCore?.niveau === NIVEAU_ECHEC) {
+      onEchecEcritureCore?.(bilanCore);
+      return;
+    }
+
     const savingMsg = realizedSaving !== null
       ? ` · Économies : ${realizedSaving >= 0 ? '+' : ''}${realizedSaving.toFixed(2)} €`
       : '';
     showToast(`✓ ${entries.length} prix importé${entries.length > 1 ? "s" : ""}${savingMsg}`);
+    if (bilanCore?.niveau === NIVEAU_INFO && bilanCore.detail) {
+      setTimeout(() => showToast(`ℹ️ ${bilanCore.detail}`), 2600);
+    }
   };
   const deletePrice = async (entry) => {
     const previous = priceDB;
@@ -10073,6 +10104,9 @@ export default function App() {
   // flottant même quand la console n'est pas ouverte.
   const [showValidationScan, setShowValidationScan] = useState(false);
   const [pendingScanCount, setPendingScanCount] = useState(0);
+  // Chantier 109 — bilan d'écriture Core en ÉCHEC : écran dédié, jamais un
+  // toast fugace. Null tant qu'il n'y a rien à signaler.
+  const [echecEcritureCore, setEchecEcritureCore] = useState(null);
   // Chantier 106 Lot A — parcours de contribution (utilisateur) et file de
   // validation des codes-barres proposés (admin), deux écrans distincts.
   const [showContributionCodeBarres, setShowContributionCodeBarres] = useState(false);
@@ -11351,6 +11385,15 @@ export default function App() {
   };
 
   const handleImportPrices = async (entries, ecritureCorePromise) => {
+    // Chantier 109 — même lecture de la réponse Core que dans PricesTab : elle
+    // ne doit dépendre d'aucune branche du flux legacy.
+    let bilanCore = null;
+    try {
+      bilanCore = interpreterResultatCore(await ecritureCorePromise, { lignesEnvoyees: entries.length });
+    } catch (e) {
+      console.error('[C109] interprétation du résultat Core', e);
+      bilanCore = null;
+    }
     const openArchive = [...archives].reverse().find(a => !a.ticket_scanned);
     let realizedSaving = null;
     if (openArchive) {
@@ -11363,7 +11406,7 @@ export default function App() {
         // vieux ticket.
         const resultatCoreEcriture = await ecritureCorePromise;
         if (!doitRattacherTicketSession(resultatCoreEcriture)) {
-          showAppToast("⚠️ Ticket non enregistré (lecture ou magasin non résolus) — l'archive reste à scanner.", false);
+          // Chantier 109 — l'alerte détaillée est portée par bilanCore.
           realizedSaving = null; // sentinelle : pas de marquage plus bas
         } else {
           const resultatCore = await calculerRealizedSavingTicket({ utilisateurId: session?.user?.id });
@@ -11441,10 +11484,20 @@ export default function App() {
       supabase.from('community_prices').insert(communityEntries)
         .then(({ error }) => { if (error) { console.error("Erreur community_prices :",error); showAppToast("⚠️ Partage communauté échoué",false); } });
     }
+    // Chantier 109 — même règle qu'en haut : pas de succès annoncé quand la
+    // base a refusé.
+    if (bilanCore?.niveau === NIVEAU_ECHEC) {
+      setEchecEcritureCore(bilanCore);
+      return;
+    }
+
     const savingMsg = realizedSaving !== null
       ? ` · Économies : ${realizedSaving >= 0 ? '+' : ''}${realizedSaving.toFixed(2)} €`
       : '';
     showAppToast(`✓ ${entries.length} prix importé${entries.length > 1 ? "s" : ""}${savingMsg}`);
+    if (bilanCore?.niveau === NIVEAU_INFO && bilanCore.detail) {
+      setTimeout(() => showAppToast(`ℹ️ ${bilanCore.detail}`), 2600);
+    }
   };
 
   const handleSavePrice = entry => {
@@ -11539,7 +11592,7 @@ export default function App() {
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab}/>}
           {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix} sessionCoursesAccessible={sessionCoursesAccessible}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
-          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} estFrancois={estFrancois} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} magasinSession={scanCaisse?.magasin ?? null} onImportSession={rattacherTicketScanSession} onScanSessionFerme={()=>definirScanCaisse(null)} onVoirTicketExistant={()=>setTab("archive")} notifierPoints={profilVisible} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
+          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} estFrancois={estFrancois} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} magasinSession={scanCaisse?.magasin ?? null} onImportSession={rattacherTicketScanSession} onScanSessionFerme={()=>definirScanCaisse(null)} onVoirTicketExistant={()=>setTab("archive")} notifierPoints={profilVisible} onEchecEcritureCore={setEchecEcritureCore} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;
             const {data,error}=await supabase.from('archives').insert({...rest,user_id:session?.user?.id}).select('id').single();
             if(error){ console.error("Erreur création archive ticket :",error); showAppToast("⚠️ Archive non sauvegardée, vérifie ta connexion",false); }
@@ -11628,6 +11681,12 @@ export default function App() {
             proposition part en file au lieu d'écrire quoi que ce soit. */}
         {showContributionCodeBarres && (contributionCodesBarresActive || isAdmin) && (
           <ContributionCodeBarresSheet estAdmin={isAdmin} onClose={()=>setShowContributionCodeBarres(false)}/>
+        )}
+        {/* Chantier 109 — l'échec d'écriture Core passe par un écran, pas par
+            un toast : remplacer un échec silencieux par un message qu'on peut
+            rater ne ferait que le rendre plus discret. */}
+        {echecEcritureCore && (
+          <AlerteEcritureCore resultat={echecEcritureCore} onFermer={()=>setEchecEcritureCore(null)} />
         )}
         {appToast && <Toast msg={appToast.msg} ok={appToast.ok}/>}
         {showCircleSheet  && <CircleSheet  circles={circles} userId={session.user.id} userEmail={session.user.email} profileMap={profileMap} pseudo={pseudo} archives={archives} onClose={()=>setShowCircleSheet(false)} onInvite={inviteByPseudo} onUpdateStatus={updateCircleStatus}/>}

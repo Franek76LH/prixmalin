@@ -45,6 +45,16 @@ export async function envoyerTicketCore(toImport, { magasinId, storeLegacyId, ma
       console.error('[Core#56.5.A] Erreur RPC enregistrer_ticket_core', error);
       return null;
     }
+    // Chantier 109 — on TRACE la réponse complète, toujours, y compris quand
+    // tout va bien. Le 18/08 la RPC a répondu 200 avec {"statut":"rejet"} et
+    // il a fallu aller lire rejets_ecriture_core en base pour le découvrir :
+    // un diagnostic ne doit pas dépendre d'un accès à la base.
+    console.log('[C109] enregistrer_ticket_core →', JSON.stringify({
+      statut: data?.statut ?? null,
+      prix_ecrits: data?.prix_ecrits ?? null,
+      lignes_envoyees: lignes.length,
+      rejets: data?.rejets ?? null,
+    }));
     // #56.6 — le résultat ({statut, prix_ecrits, rejets}) est maintenant
     // renvoyé pour permettre à l'appelant de calculer un realized_saving Core
     // scopé à ce ticket quand core_actif=true. N'importe rien pour un appelant
