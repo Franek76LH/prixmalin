@@ -19,6 +19,18 @@
 //                             exception technique)
 //   prix_ecrits : entier ; rejets : [{motif, message?, libelle?}]
 //
+// Chantier 111 — la RPC a changé en base le 19/08 : elle n'applique plus les
+// rattachements incertains. Seuls le code-barres scanné et la mémoire
+// d'enseigne EXACTE s'appliquent seuls ; la ressemblance floue et les alias
+// écrivent une SUGGESTION sans rattacher et sans écrire de prix. Le compte de
+// ces lignes arrive dans un nouveau champ, lignes_a_confirmer.
+//
+// ⚠️ Une ligne à confirmer N'EST PAS UN REJET, et ne doit jamais alimenter le
+// chemin d'échec ci-dessous. C'est l'état normal du nouveau fonctionnement :
+// crier à chaque ticket rendrait le message invisible en trois jours, et le
+// vrai échec du 18/08 repasserait inaperçu — soit exactement le défaut que le
+// chantier 109 vient de réparer.
+//
 // Règle qui gouverne le fichier : DANS LE DOUTE, ON ANNONCE L'ÉCHEC. Une
 // réponse absente, illisible ou d'un statut inconnu ne devient jamais un
 // succès — c'est exactement l'erreur qu'on répare.
@@ -84,6 +96,8 @@ export function interpreterResultatCore(resultat, { lignesEnvoyees = null } = {}
     prixEcrits: null,
     lignesEnvoyees: attendues,
     aRattacher: 0,
+    // Chantier 111 — lignes devinées, en attente d'une confirmation humaine.
+    aConfirmer: 0,
     motifs: [],
   };
 
@@ -100,7 +114,10 @@ export function interpreterResultatCore(resultat, { lignesEnvoyees = null } = {}
   const motifs = [...new Set(rejets.map(r => r?.motif).filter(Boolean))];
   const aRattacher = rejets.filter(r => r?.motif === MOTIF_ALIAS_NON_TROUVE).length;
   const prixEcrits = entier(resultat.prix_ecrits);
-  const base = { ...socle, motifs, aRattacher, prixEcrits };
+  // Chantier 111 — champ absent (ancienne réponse) ou illisible : 0, donc tout
+  // se comporte exactement comme avant.
+  const aConfirmer = entier(resultat.lignes_a_confirmer) ?? 0;
+  const base = { ...socle, motifs, aRattacher, aConfirmer, prixEcrits };
 
   if (resultat.statut === 'rejet') {
     const { detail, messageTechnique } = expliquerRejetGlobal(rejets);
@@ -114,11 +131,25 @@ export function interpreterResultatCore(resultat, { lignesEnvoyees = null } = {}
     const manquants = (attendues != null && prixEcrits != null) ? attendues - prixEcrits : null;
 
     const morceaux = [];
-    if (attendues != null && prixEcrits != null && prixEcrits < attendues) {
-      morceaux.push(`${prixEcrits} prix enregistré${prixEcrits > 1 ? 's' : ''} sur ${attendues}`);
-    }
-    if (aRattacher > 0) {
-      morceaux.push(`${aRattacher} ligne${aRattacher > 1 ? 's' : ''} à rattacher`);
+    if (aConfirmer > 0) {
+      // Chantier 111 — état d'ATTENTE. On compte ce qui s'est appliqué tout
+      // seul, ce que l'app a deviné et qui attend un avis, et ce qu'elle n'a
+      // pas su rapprocher. Trois nombres, aucun jugement : « 0 ligne reconnue,
+      // 6 à confirmer, 35 à rattacher » décrit un travail à faire, pas une
+      // panne.
+      const reconnues = prixEcrits ?? 0;
+      const compte = [`${reconnues} ligne${reconnues > 1 ? 's' : ''} reconnue${reconnues > 1 ? 's' : ''}`, `${aConfirmer} à confirmer`];
+      if (aRattacher > 0) compte.push(`${aRattacher} à rattacher`);
+      // Virgules et non « · » : les trois nombres forment UNE phrase qui se lit
+      // d'un trait, pas trois informations séparées.
+      morceaux.push(compte.join(', '));
+    } else {
+      if (attendues != null && prixEcrits != null && prixEcrits < attendues) {
+        morceaux.push(`${prixEcrits} prix enregistré${prixEcrits > 1 ? 's' : ''} sur ${attendues}`);
+      }
+      if (aRattacher > 0) {
+        morceaux.push(`${aRattacher} ligne${aRattacher > 1 ? 's' : ''} à rattacher`);
+      }
     }
 
     if (technique) {

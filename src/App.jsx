@@ -43,6 +43,10 @@ import AlerteEcritureCore from "./components/AlerteEcritureCore";
 // relecture avant d'appliquer, garde-fou de mots communs sur le texte BRUT.
 import { construireRecapitulatif } from "./lib/coherenceAssociation";
 import RecapitulatifAssociation from "./components/RecapitulatifAssociation";
+// Chantier 111 — la base n'applique plus les rattachements incertains : elle
+// SUGGÈRE. On affiche la devinette, on ne la pré-remplit jamais.
+import { construireCarteSuggestion, compterAConfirmerParJour, jourArchive } from "./lib/suggestionsRattachement";
+import CarteSuggestion from "./components/CarteSuggestion";
 import AValiderSheet from "./components/dev/AValiderSheet";
 // Chantier "Scan code-barres", bout 3B — console de validation admin
 import ValidationScanSheet from "./components/admin/ValidationScanSheet";
@@ -6920,6 +6924,13 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
   // ligne précédente ferait relire à l'utilisateur le texte d'une autre ligne,
   // ce qui est précisément l'erreur que ce chantier corrige.
   const [libelleTicketCible, setLibelleTicketCible] = useState(null);
+  // Chantier 111 — suggestion de la ligne visée : { produit, variante, confiance }.
+  // Vidée comme le libellé brut à chaque changement de cible.
+  const [suggestionCible, setSuggestionCible] = useState(null);
+  // Chantier 111 — nombre de lignes en attente de confirmation, par jour de
+  // ticket. Les archives n'ayant pas de ticket_id, la date est la seule clé
+  // disponible (même correspondance que trouverLignesTicket).
+  const [comptesAConfirmer, setComptesAConfirmer] = useState(() => new Map());
   const [pendingDeleteArc, setPendingDeleteArc] = useState(null);
   const [added, setAdded] = useState(new Set());
   const [sort, setSort] = useState("produit");
@@ -6946,7 +6957,10 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
       // Chantier 110 — libelle_ticket (texte BRUT imprimé) est ramené en plus :
       // c'est lui, et jamais libelle_brut (normalisé par l'OCR), que la
       // relecture affiche et que le garde-fou compare.
-      .select('id, libelle_brut, libelle_ticket, tickets!inner(date_ticket, magasin_id)')
+      // Chantier 111 — la devinette de la base, quand il y en a une. produit_id
+      // reste NULL tant que François n'a pas confirmé : ces colonnes ne
+      // rattachent rien par elles-mêmes.
+      .select('id, libelle_brut, libelle_ticket, produit_suggere_ia_id, variante_suggeree_ia_id, confiance_produit_ia, tickets!inner(date_ticket, magasin_id)')
       .eq('tickets.date_ticket', jour);
     if (error) return { candidats: [], error };
     const cible = normName(item.product);
@@ -6989,6 +7003,10 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
     if (succes === 0) return { ok: false, message: "Le rattachement a échoué, réessaie." };
 
     onLibelleResolu?.(normName(item.product), produit.nom_reference);
+    // Chantier 111 — la ligne vient de quitter la file : le compte affiché sur
+    // la carte du ticket doit le refléter au retour à la liste. Best effort,
+    // jamais bloquant pour le rattachement qui, lui, a réussi.
+    rechargerComptesAConfirmer();
     return { ok: true };
   };
 
@@ -6997,6 +7015,29 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
   // RPC de recherche. Best-effort : si le ticket/magasin n'est pas
   // retrouvé, enseigneCourante reste null et la recherche n'est simplement
   // pas triée par enseigne (jamais bloquant).
+  // Chantier 111 — combien de lignes attendent une confirmation, par jour de
+  // ticket. UNE seule requête pour tout l'écran : la RLS restreint déjà
+  // lignes_ticket à l'utilisateur.
+  //
+  // Une ligne compte tant qu'elle porte une suggestion ET n'est pas rattachée.
+  // Dès que François confirme, produit_id cesse d'être NULL et la ligne quitte
+  // le compte — c'est exactement ce qu'on veut voir bouger après chaque
+  // confirmation, et c'est pourquoi cette fonction est rappelée à ce
+  // moment-là.
+  const rechargerComptesAConfirmer = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('lignes_ticket')
+      .select('id, tickets!inner(date_ticket)')
+      .not('produit_suggere_ia_id', 'is', null)
+      .is('produit_id', null);
+    // Erreur : on garde le compte précédent plutôt que d'afficher un faux zéro.
+    // « 0 à confirmer » serait un mensonge, pas une absence d'information.
+    if (error) { console.error('[C111] comptes à confirmer', error); return; }
+    setComptesAConfirmer(compterAConfirmerParJour(data));
+  }, []);
+
+  useEffect(() => { rechargerComptesAConfirmer(); }, [rechargerComptesAConfirmer]);
+
   useEffect(() => {
     // Chantier 110 — on VIDE avant de recharger. Sans ça, pendant le temps de la
     // requête, l'écran de la ligne B affichait encore l'enseigne et le libellé
@@ -7004,6 +7045,7 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
     // survivre au changement de ligne, même une fraction de seconde.
     setEnseigneCourante(null);
     setLibelleTicketCible(null);
+    setSuggestionCible(null);
     if (!correctionCible) return;
     let annule = false;
     (async () => {
@@ -7012,6 +7054,28 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
       // relecture. Absent (anciennes lignes) : reste null, le récapitulatif
       // s'affiche quand même et le garde-fou se tait.
       if (!annule) setLibelleTicketCible(candidats[0]?.libelle_ticket ?? null);
+      // Chantier 111 — la suggestion de la base, résolue en noms lisibles.
+      // Best effort de bout en bout : la moindre absence laisse
+      // suggestionCible à null et l'écran retombe sur la recherche habituelle,
+      // strictement comme avant ce chantier.
+      const ligne = candidats[0];
+      if (ligne?.produit_suggere_ia_id) {
+        const [{ data: produitSuggere }, { data: varianteSuggeree }] = await Promise.all([
+          supabase.from('produits').select('id, nom_reference').eq('id', ligne.produit_suggere_ia_id).maybeSingle(),
+          ligne.variante_suggeree_ia_id
+            ? supabase.from('variantes_produit')
+                .select('id, quantite_nette, unite_quantite, nombre_unites, marques(nom)')
+                .eq('id', ligne.variante_suggeree_ia_id).eq('actif', true).maybeSingle()
+            : Promise.resolve({ data: null }),
+        ]);
+        if (!annule && produitSuggere?.id) {
+          setSuggestionCible({
+            produit: produitSuggere,
+            variante: varianteSuggeree ?? null,
+            confiance: ligne.confiance_produit_ia ?? null,
+          });
+        }
+      }
       const magasinId = candidats[0]?.tickets?.magasin_id;
       if (!magasinId) { if (!annule) setEnseigneCourante(null); return; }
       const { data } = await supabase.from('magasins').select('enseigne_id').eq('id', magasinId).maybeSingle();
@@ -7278,6 +7342,13 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
                       <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, marginTop:1 }}>{new Date(arc.date).toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}</div>
                     </div>
                     <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                      {/* Chantier 111 — combien de lignes de CE ticket attendent
+                          une confirmation. Ton neutre, jamais alarmiste : c'est
+                          un travail à faire, pas une panne. Absent quand il n'y
+                          a rien à confirmer. */}
+                      {(()=>{ const n = comptesAConfirmer.get(jourArchive(arc.date)) || 0; return n > 0 ? (
+                        <div style={{ background:"#F0F6FC", border:"1px solid #CFE0F0", borderRadius:99, padding:"4px 10px", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:11, color:"#3A6EA5", whiteSpace:"nowrap" }}>{n} à confirmer</div>
+                      ) : null; })()}
                       <div style={{ background:C.blue, borderRadius:10, padding:"6px 14px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:18, color:C.white }}>{(arc.items?.reduce((s,i)=>{ const up=i.unit_price??i.price??0; return s+(up*(i.qty||1)); },0)||arc.total||0).toFixed(2)} €</div>
                       {pendingDeleteArc === arc.id ? (
                         <div style={{ display:"flex", gap:4 }}>
@@ -7321,6 +7392,7 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
           key={correctionCible.cleLigne}
           item={correctionCible.item}
           libelleTicket={libelleTicketCible}
+          suggestion={suggestionCible}
           enseigne={enseigneCourante}
           estFrancois={estFrancois}
           onClose={()=>setCorrectionCible(null)}
@@ -7340,7 +7412,7 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
 // par code-barres : marque + libellé + quantité, tel que demandé (distinct de
 // libelleVariante ci-dessus, qui ne sert qu'au sélecteur "plusieurs variantes"
 // de la recherche par nom).
-function CorrigerProduitSheet({ item, libelleTicket = null, enseigne = null, estFrancois = false, onClose, onChoisir }) {
+function CorrigerProduitSheet({ item, libelleTicket = null, suggestion = null, enseigne = null, estFrancois = false, onClose, onChoisir }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -7381,6 +7453,11 @@ function CorrigerProduitSheet({ item, libelleTicket = null, enseigne = null, est
   // Chantier 110 — relecture avant d'appeler la RPC. Tant que ce n'est pas
   // null, l'écran montre le récapitulatif et RIEN n'a encore été écrit.
   const [recapitulatif, setRecapitulatif] = useState(null);
+  // Chantier 111 — « Non, chercher autre chose » : la carte disparaît, l'écran
+  // redevient la recherche habituelle. Ce n'est PAS un état de sélection (il ne
+  // désigne aucun produit), il n'a donc pas sa place dans ETATS_SELECTION ; le
+  // remontage par `key` le remet à false d'une ligne à l'autre.
+  const [suggestionRefusee, setSuggestionRefusee] = useState(false);
 
   // Chantier 110 — LA REMISE À ZÉRO ENTRE DEUX LIGNES.
   //
@@ -7466,6 +7543,28 @@ function CorrigerProduitSheet({ item, libelleTicket = null, enseigne = null, est
     setProduitEnAttente(null);
     setVariantesAChoisir(null);
     setVarianteChoisie(null);
+  };
+
+  // Chantier 111 — la carte de suggestion. Elle est DÉRIVÉE de la prop à chaque
+  // rendu : elle ne vit dans aucun état, donc elle ne peut rien pré-remplir.
+  // Tant que « Oui, c'est ça » n'a pas été tapé, l'écran est exactement dans
+  // l'état d'une ligne sans suggestion — champ de recherche vide, aucun produit
+  // retenu.
+  const carteSuggestion = suggestionRefusee
+    ? null
+    : construireCarteSuggestion({ libelleTicket, suggestion });
+
+  // « Oui, c'est ça » n'applique RIEN : il ouvre le récapitulatif du 110, celui
+  // qui met le texte de caisse face au produit et porte le garde-fou de mots
+  // communs. Une suggestion ne saute jamais cette étape — c'est tout l'intérêt
+  // de ne pas l'avoir pré-remplie.
+  const accepterSuggestion = () => {
+    if (!suggestion?.produit?.id) return;
+    demanderRelecture(
+      { produit_id: suggestion.produit.id, nom_reference: suggestion.produit.nom_reference },
+      suggestion.variante?.id ?? null,
+      suggestion.variante ?? null
+    );
   };
 
   // Chantier "Scan code-barres" bout 1 — recherche par code_barres exact
@@ -7743,6 +7842,14 @@ Résultat : ${scanDiag.resultat}`}
           </>
         ) : (
           <>
+            {/* Chantier 111 — ce que la base a deviné, en haut de l'écran. Elle
+                s'affiche, elle ne remplit rien : le champ ci-dessous reste vide
+                tant que « Oui, c'est ça » n'a pas été tapé. */}
+            <CarteSuggestion
+              carte={carteSuggestion}
+              onAccepter={accepterSuggestion}
+              onRefuser={()=>setSuggestionRefusee(true)}
+            />
             <div style={{ position:"relative", marginBottom:12 }}>
               <input ref={champRechercheRef} autoFocus value={query} onChange={e=>setQuery(e.target.value)}
                 placeholder="🔍 Chercher un produit du catalogue..."

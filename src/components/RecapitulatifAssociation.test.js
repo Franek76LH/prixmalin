@@ -96,7 +96,7 @@ describe('relecture avant d\'appliquer', () => {
 
   it('la relecture compare et affiche le texte BRUT du ticket', () => {
     // libelle_ticket est bien ramené de la base...
-    expect(app).toContain("libelle_brut, libelle_ticket, tickets!inner");
+    expect(app).toContain("libelle_brut, libelle_ticket");
     // ...et transmis à la feuille.
     expect(app).toMatch(/libelleTicket=\{libelleTicketCible\}/);
     // Le récapitulatif est construit avec, jamais avec le libellé normalisé.

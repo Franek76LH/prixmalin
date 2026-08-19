@@ -127,3 +127,72 @@ describe('dans le doute, l\'échec', () => {
     expect(r.niveau).toBe(NIVEAU_SUCCES);
   });
 });
+
+// ── Chantier 111 — les lignes à confirmer ───────────────────────────────────
+//
+// La RPC n'applique plus les rattachements incertains : elle suggère, et
+// annonce le compte dans lignes_a_confirmer. Ce compte décrit un travail à
+// faire, PAS une panne.
+describe('lignes_a_confirmer (chantier 111)', () => {
+  // Le ticket Carrefour a9ad412b : 41 lignes, 0 prix, 6 suggestions, 35 sans rien.
+  const carrefour = {
+    statut: 'ok',
+    prix_ecrits: 0,
+    lignes_a_confirmer: 6,
+    rejets: Array.from({ length: 35 }, () => ({ motif: 'alias_non_trouve' })),
+  };
+
+  it('annonce un état d\'attente, avec les trois nombres', () => {
+    const r = interpreterResultatCore(carrefour, { lignesEnvoyees: 41 });
+    expect(r.detail).toBe('0 ligne reconnue, 6 à confirmer, 35 à rattacher');
+    expect(r.aConfirmer).toBe(6);
+  });
+
+  // LE test demandé : ce compte ne doit JAMAIS alimenter le chemin d'échec du
+  // chantier 109. Un message d'échec à chaque ticket ne serait plus lu au bout
+  // de trois jours, et le vrai rejet du 18/08 repasserait inaperçu.
+  it('n\'est JAMAIS un échec, quel que soit le nombre', () => {
+    for (const n of [1, 6, 41, 500]) {
+      const r = interpreterResultatCore({ statut: 'ok', prix_ecrits: 0, lignes_a_confirmer: n, rejets: [] },
+        { lignesEnvoyees: 41 });
+      expect(r.niveau).not.toBe(NIVEAU_ECHEC);
+      expect(r.niveau).toBe(NIVEAU_INFO);
+      expect(r.titre).toBeNull();
+      expect(r.detail).not.toMatch(/échec|erreur|problème|refus/i);
+    }
+  });
+
+  it('ne se confond pas avec les rejets : les deux comptes restent distincts', () => {
+    const r = interpreterResultatCore(carrefour, { lignesEnvoyees: 41 });
+    expect(r.aConfirmer).toBe(6);
+    expect(r.aRattacher).toBe(35);
+  });
+
+  it('un VRAI rejet reste un échec, même avec des lignes à confirmer', () => {
+    const r = interpreterResultatCore(
+      { statut: 'rejet', prix_ecrits: 0, lignes_a_confirmer: 6, rejets: [{ motif: 'magasin_non_resolu' }] },
+      { lignesEnvoyees: 41 });
+    expect(r.niveau).toBe(NIVEAU_ECHEC);
+  });
+
+  it('champ absent (ancienne réponse) : comportement strictement inchangé', () => {
+    const avant = interpreterResultatCore({ statut: 'ok', prix_ecrits: 20, rejets: [] }, { lignesEnvoyees: 20 });
+    expect(avant.niveau).toBe(NIVEAU_SUCCES);
+    expect(avant.aConfirmer).toBe(0);
+  });
+
+  it('valeur illisible : traitée comme zéro, jamais comme une alerte', () => {
+    for (const valeur of [null, 'bof', -3, undefined]) {
+      const r = interpreterResultatCore({ statut: 'ok', prix_ecrits: 20, lignes_a_confirmer: valeur, rejets: [] },
+        { lignesEnvoyees: 20 });
+      expect(r.aConfirmer).toBe(0);
+      expect(r.niveau).toBe(NIVEAU_SUCCES);
+    }
+  });
+
+  it('accorde le pluriel sur les lignes reconnues', () => {
+    const r = interpreterResultatCore({ statut: 'ok', prix_ecrits: 3, lignes_a_confirmer: 2, rejets: [] },
+      { lignesEnvoyees: 10 });
+    expect(r.detail).toBe('3 lignes reconnues, 2 à confirmer');
+  });
+});
