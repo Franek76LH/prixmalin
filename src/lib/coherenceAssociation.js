@@ -45,6 +45,12 @@ export function selectionVide() {
     // Recherche par nom
     query: '',                    // terme tapé
     results: [],                  // résultats affichés
+    // Chantier 114 — les fiches trouvées à partir du texte de caisse de LA
+    // ligne en cours. Ce n'est pas une sélection, mais c'est bien « ce qui a
+    // été cherché », au même titre que results : une liste de la ligne A
+    // laissée en tête de l'écran de la ligne B serait la même erreur, en pire
+    // (elle a l'air d'un verdict de l'app).
+    candidatsTicket: [],          // bloc « D'après le ticket »
     // Choix du produit et de sa variante
     produitEnAttente: null,       // produit tapé, en attente du choix de variante
     variantesAChoisir: null,      // liste de variantes proposée

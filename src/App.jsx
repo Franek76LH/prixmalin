@@ -43,6 +43,11 @@ import AlerteEcritureCore from "./components/AlerteEcritureCore";
 // relecture avant d'appliquer, garde-fou de mots communs sur le texte BRUT.
 import { construireRecapitulatif } from "./lib/coherenceAssociation";
 import RecapitulatifAssociation from "./components/RecapitulatifAssociation";
+// Chantier 114 — chercher les fiches sur le TEXTE DE CAISSE (libelle_ticket) et
+// non sur la reformulation OCR (libelle_brut, dont le nom ment). Voir le
+// fichier : c'est lui qui verrouille le choix de la colonne.
+import { RPC_CANDIDATS_TICKET, texteDeCaisse, argumentsCandidatsTicket, normaliserCandidatsTicket, fusionnerListesCandidats } from "./lib/candidatsTicket";
+import BlocCandidatsTicket from "./components/BlocCandidatsTicket";
 // Chantier 111 — la base n'applique plus les rattachements incertains : elle
 // SUGGÈRE. On affiche la devinette, on ne la pré-remplit jamais.
 import { construireCarteSuggestion, compterAConfirmerParJour, jourArchive } from "./lib/suggestionsRattachement";
@@ -6957,6 +6962,13 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
   // RPC de recherche. null si non résolue (recherche non filtrée/triée par
   // enseigne dans ce cas, jamais bloquante).
   const [enseigneCourante, setEnseigneCourante] = useState(null);
+  // Chantier 114b — « sait-on OÙ on est ? ». Indispensable parce que
+  // enseigneCourante === null est ambigu : il dit à la fois « pas encore
+  // chargée » et « ce ticket n'a pas de magasin ». Le bloc « D'après le
+  // ticket » n'a le droit de chercher que dans le second cas — sinon il
+  // affiche un classement faux le temps d'un aller-retour réseau, et un doigt
+  // posé à ce moment-là grave une fausse correspondance d'enseigne.
+  const [enseigneResolue, setEnseigneResolue] = useState(false);
   // Chantier 110 — libellé BRUT de la ligne actuellement corrigée. Remis à null
   // à CHAQUE changement de cible, avant toute requête : un libellé resté de la
   // ligne précédente ferait relire à l'utilisateur le texte d'une autre ligne,
@@ -7084,6 +7096,7 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
     setEnseigneCourante(null);
     setLibelleTicketCible(null);
     setSuggestionCible(null);
+    setEnseigneResolue(false);
     if (!correctionCible) return;
     let annule = false;
     (async () => {
@@ -7091,7 +7104,9 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
       // Chantier 110 — le texte brut imprimé de la ligne visée, pour la
       // relecture. Absent (anciennes lignes) : reste null, le récapitulatif
       // s'affiche quand même et le garde-fou se tait.
-      if (!annule) setLibelleTicketCible(candidats[0]?.libelle_ticket ?? null);
+      // Chantier 114 — la lecture passe par texteDeCaisse : c'est elle qui
+      // garantit qu'on lit libelle_ticket et jamais libelle_brut.
+      if (!annule) setLibelleTicketCible(texteDeCaisse(candidats[0]));
       // Chantier 111 — la suggestion de la base, résolue en noms lisibles.
       // Best effort de bout en bout : la moindre absence laisse
       // suggestionCible à null et l'écran retombe sur la recherche habituelle,
@@ -7115,9 +7130,20 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
         }
       }
       const magasinId = candidats[0]?.tickets?.magasin_id;
-      if (!magasinId) { if (!annule) setEnseigneCourante(null); return; }
-      const { data } = await supabase.from('magasins').select('enseigne_id').eq('id', magasinId).maybeSingle();
-      if (!annule) setEnseigneCourante(data?.enseigne_id ?? null);
+      // Chantier 114b — pas de magasin sur ce ticket : c'est une réponse, pas
+      // une attente. L'enseigne vaut « aucune », et le bloc peut chercher (une
+      // seule fois, avec p_enseigne null).
+      if (!magasinId) { if (!annule) { setEnseigneCourante(null); setEnseigneResolue(true); } return; }
+      const { data, error: errEnseigne } = await supabase.from('magasins').select('enseigne_id').eq('id', magasinId).maybeSingle();
+      if (annule) return;
+      // Chantier 114b — une requête EN ÉCHEC n'est pas une enseigne résolue :
+      // on ne sait toujours pas. Le bloc du haut se tait plutôt que de
+      // proposer un classement dont on sait qu'il est faux. La recherche
+      // habituelle, elle, continue exactement comme avant (elle reçoit null,
+      // comme depuis le chantier 2b).
+      setEnseigneCourante(data?.enseigne_id ?? null);
+      if (!errEnseigne) setEnseigneResolue(true);
+      else console.error('[C114b] enseigne du ticket', errEnseigne);
     })();
     return () => { annule = true; };
   }, [correctionCible]);
@@ -7432,6 +7458,7 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
           libelleTicket={libelleTicketCible}
           suggestion={suggestionCible}
           enseigne={enseigneCourante}
+          enseigneResolue={enseigneResolue}
           estFrancois={estFrancois}
           onClose={()=>setCorrectionCible(null)}
           onChoisir={(produit,varianteId,methode)=>rattacherProduit(correctionCible.arc, correctionCible.item, produit, varianteId, methode)}
@@ -7450,7 +7477,7 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
 // par code-barres : marque + libellé + quantité, tel que demandé (distinct de
 // libelleVariante ci-dessus, qui ne sert qu'au sélecteur "plusieurs variantes"
 // de la recherche par nom).
-function CorrigerProduitSheet({ item, libelleTicket = null, suggestion = null, enseigne = null, estFrancois = false, onClose, onChoisir }) {
+function CorrigerProduitSheet({ item, libelleTicket = null, suggestion = null, enseigne = null, enseigneResolue = false, estFrancois = false, onClose, onChoisir }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -7500,6 +7527,12 @@ function CorrigerProduitSheet({ item, libelleTicket = null, suggestion = null, e
   // suggestionRefusee, ce n'est pas un état de SÉLECTION : il ne désigne aucun
   // produit, il dit seulement qu'une requête est en vol.
   const [chargementVocabulaire, setChargementVocabulaire] = useState(false);
+  // Chantier 114 — les fiches trouvées à partir du VRAI texte de caisse.
+  // Toujours un tableau : vide = pas de bloc, jamais d'écran cassé. Comme
+  // suggestionRefusee, ce n'est PAS un état de SÉLECTION (il ne désigne aucun
+  // produit choisi) — c'est le résultat d'une recherche, au même titre que
+  // `results`, et il est remis à vide par le remontage `key` du 110.
+  const [candidatsTicket, setCandidatsTicket] = useState([]);
 
   // Chantier 110 — LA REMISE À ZÉRO ENTRE DEUX LIGNES.
   //
@@ -7524,6 +7557,58 @@ function CorrigerProduitSheet({ item, libelleTicket = null, suggestion = null, e
   // fenêtre. La liste des états concernés vit dans lib/coherenceAssociation.js
   // et un test vérifie qu'aucun d'eux n'est déclaré avec autre chose qu'une
   // valeur vide.
+
+  // Chantier 114 — LE BLOC « D'APRÈS LE TICKET ».
+  //
+  // On interroge rechercher_candidats_ticket avec `libelleTicket`, c'est-à-dire
+  // libelle_ticket, le texte imprimé par la caisse — PAS libelle_brut, que
+  // l'OCR a réduit à « Pâtes » et qui fait proposer Coquillettes pour un
+  // paquet de Penne rigate. La construction des arguments est déléguée à
+  // argumentsCandidatsTicket pour que ce choix de colonne soit testable.
+  //
+  // Cette recherche est INDÉPENDANTE du champ de saisie : elle ne dépend pas
+  // de `query`, ne le remplit pas, et n'efface jamais `results`. La recherche
+  // habituelle continue exactement comme avant.
+  //
+  // Tout échec — RPC absente, erreur SQL, réseau coupé, réponse inattendue —
+  // se termine par une liste vide, donc par l'absence du bloc. Aucun message
+  // d'erreur : ce bloc est un bonus, pas une promesse faite à l'utilisateur.
+  //
+  // Chantier 114b — L'APPEL N'EST PAS LANCÉ AVANT QUE L'ENSEIGNE SOIT RÉSOLUE.
+  //
+  // `libelleTicket` et `enseigne` arrivent l'un après l'autre : l'effet se
+  // rejoue donc plusieurs fois par ligne. Sans le drapeau, la première passe
+  // partait SANS enseigne — et sur « 4x1KG PENNE RIGATE B » cet appel-là met
+  // « Penne protéinées » en tête, là où l'appel trié Carrefour met « Penne
+  // rigate ». La bonne fiche n'était pas seulement mal placée : la MAUVAISE
+  // était en première position, offerte au pouce, le temps d'un aller-retour.
+  //
+  // argumentsCandidatsTicket rend null tant que enseigneResolue n'est pas
+  // true : les passes intermédiaires ne déclenchent aucune requête, et le cas
+  // normal ne fait qu'UN appel par ligne. Le nettoyage (`annule`) reste, pour
+  // la ligne qu'on quitte pendant que sa réponse est en vol.
+  useEffect(() => {
+    const args = argumentsCandidatsTicket({ libelleTicket, enseigne, enseigneResolue });
+    let annule = false;
+    (async () => {
+      // Pas de texte de caisse -> pas d'appel, et la liste repart vide : une
+      // liste de la ligne précédente ne doit jamais survivre au changement de
+      // ligne (leçon du 110). Le vidage vit dans le bloc asynchrone, pas en
+      // sortie sèche de l'effet, pour ne pas déclencher un rendu en cascade.
+      if (!args) { if (!annule) setCandidatsTicket([]); return; }
+      try {
+        const { data, error: err } = await supabase.rpc(RPC_CANDIDATS_TICKET, args);
+        if (annule) return;
+        if (err) { console.error('[C114] candidats ticket', err); setCandidatsTicket([]); return; }
+        setCandidatsTicket(normaliserCandidatsTicket(data));
+      } catch (e) {
+        if (annule) return;
+        console.error('[C114] candidats ticket', e);
+        setCandidatsTicket([]);
+      }
+    })();
+    return () => { annule = true; };
+  }, [libelleTicket, enseigne, enseigneResolue]);
 
   useEffect(() => {
     if (query.trim().length < 2) { setResults([]); setError(null); return; }
@@ -7642,6 +7727,15 @@ function CorrigerProduitSheet({ item, libelleTicket = null, suggestion = null, e
   const carteSuggestion = suggestionRefusee
     ? null
     : construireCarteSuggestion({ libelleTicket, suggestion });
+
+  // Chantier 114 — les deux listes, dédoublonnées. Une fiche présente des deux
+  // côtés n'apparaît qu'en haut : la voir deux fois donnerait à croire à deux
+  // fiches différentes. DÉRIVÉ à chaque rendu, comme carteSuggestion : rien
+  // n'est mémorisé, donc rien ne peut pré-remplir quoi que ce soit.
+  const { hautDeListe, resteRecherche } = fusionnerListesCandidats({
+    candidatsTicket,
+    resultatsRecherche: results,
+  });
 
   // « Oui, c'est ça » n'applique RIEN : il ouvre le récapitulatif du 110, celui
   // qui met le texte de caisse face au produit et porte le garde-fou de mots
@@ -7965,6 +8059,17 @@ Résultat : ${scanDiag.resultat}`}
             )}
             {error && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:"#CC0000", marginBottom:8 }}>⚠️ {error}</div>}
             <div style={{ overflowY:"auto", WebkitOverflowScrolling:"touch", flex:1, minHeight:0, paddingBottom:24 }}>
+              {/* Chantier 114 — ce que la base trouve à partir du VRAI texte de
+                  caisse, au-dessus de la recherche habituelle. Un tap ici passe
+                  par le même `choisir` que la liste du bas : résolution de
+                  variante puis récapitulatif du 110. Aucun raccourci, aucune
+                  présélection. Zéro candidat -> le composant ne rend rien. */}
+              <BlocCandidatsTicket
+                candidats={hautDeListe}
+                libelleTicket={libelleTicket}
+                desactive={saving || resolvingVariante || chargementVocabulaire}
+                onChoisir={choisir}
+              />
               {query.trim().length < 2 && (
                 <div style={{ textAlign:"center", padding:"20px 0", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>Tape au moins 2 caractères pour chercher</div>
               )}
@@ -7974,7 +8079,9 @@ Résultat : ${scanDiag.resultat}`}
                   {codeBarresEnAttente ? "Produit introuvable — création gérée au prochain lot." : "Aucun produit trouvé"}
                 </div>
               )}
-              {results.map(p => (
+              {/* Chantier 114 — `resteRecherche`, pas `results` : les fiches
+                  déjà présentes dans le bloc du haut en sont retirées. */}
+              {resteRecherche.map(p => (
                 <div key={p.produit_id} onClick={()=>choisir(p)} style={{ padding:"12px 10px", borderBottom:`1px solid ${C.grayLight}`, display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, cursor:(saving||resolvingVariante||chargementVocabulaire)?"default":"pointer", opacity:(saving||resolvingVariante||chargementVocabulaire)?0.6:1 }}>
                   <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text }}>{p.nom_reference}</span>
                   {p.dernier_prix != null && (
