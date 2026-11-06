@@ -2,6 +2,10 @@ import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback, Com
 import { imageFileToJpegBase64, scanMultipleTicketsWithClaude, filtrerProduitsExploitables, scanTicketRobuste, MESSAGES_SCAN, badgeProduit } from "./scanTicket";
 import { STORES, STALE_DAYS, JOURS_MOYENNE } from "./constants";
 import { supabase } from "./lib/supabase";
+// Chantier 115 — enseignes lues dans la table (liste en dur en secours) et
+// carte « Nouveau magasin détecté » à l'étape magasin du scan.
+import { storeIdFromName as storeIdFromNameEnseignes, chargerEnseignes, enseignesEnCache, trouverEnseigneDansNom } from "./lib/enseignesMagasin";
+import { doitProposerNouveauMagasin } from "./lib/nouveauMagasinTicket";
 import { mapperLigneListeCourses, chargerVariantes, getCategoryPresentation, formatFormatStructure, calculerPrixUnitaire, prixEstFiable, offresPrioritaires, MENTION_PRIX_A_VERIFIER } from "./lib/catalogueCore";
 import { calculerPrixReferenceParUnite } from "./lib/unitesCore";
 import { urlPhotoVariante, offLargeSource, offFullUrl, cloudinaryAgrandi } from "./lib/photosProduits";
@@ -170,24 +174,11 @@ function LightboxPhoto({ offLarge, onClose }) {
 
 function isStale(d){ return d && (Date.now()-new Date(d))/86400000 > STALE_DAYS; }
 function daysAgo(d){ return d ? Math.floor((Date.now()-new Date(d))/86400000) : null; }
+// Chantier 115 — l'enseigne se lit désormais dans la table `enseignes`
+// (la plus longue l'emporte), avec la liste en dur historique en SECOURS
+// (déplacée telle quelle dans lib/enseignesMagasin.js : storeIdFromNameSecours).
 function storeIdFromName(n){
-  if(!n) return "autre";
-  const s=n.toLowerCase();
-  if(s.includes("leclerc"))   return "leclerc";
-  if(s.includes("carrefour")) return "carrefour";
-  if(s.includes("auchan"))    return "auchan";
-  if(s.includes("lidl"))      return "lidl";
-  if(s.includes("intermarché")||s.includes("intermarche")) return "intermarche";
-  if(s.includes("monoprix"))  return "monoprix";
-  if(s.includes("vival"))     return "vival";
-  if(s.includes("spar"))      return "spar";
-  if(s.includes("netto"))     return "netto";
-  if(s.includes("franprix"))  return "franprix";
-  if(s.includes("casino"))   return "casino";
-  if(s.includes("super u")||s.includes("superu")) return "superu";
-  if(s.includes("simply"))   return "simply";
-  if(s.includes("bio c"))    return "biocbon";
-  return "autre";
+  return storeIdFromNameEnseignes(n);
 }
 
 // Normalise un nom de produit ou marque : minuscules + sans accents
@@ -1542,7 +1533,10 @@ function etapeLisibleScan(status) {
 }
 
 // ── IMPORT TICKET SHEET ───────────────────────────────────────────────────────
-function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera = false, autoOpenGallery = false, onManualEntry, initialResult = null, resumeDraft = null, estFrancois = false, magasinSession = null, onVoirTicketExistant = null, onDoublonTardif = null, onPointsCredites = null }) {
+function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera = false, autoOpenGallery = false, onManualEntry, initialResult = null, resumeDraft = null, magasinSession = null, onVoirTicketExistant = null, onDoublonTardif = null, onPointsCredites = null }) {
+  // Chantier 115 — la prop estFrancois n'est plus lue ici (l'adresse du ticket
+  // n'est plus effacée pour François). Les appelants peuvent continuer à la
+  // passer : elle est simplement ignorée.
   const [jsonText, setJsonText] = useState("");
   const [status,   setStatus]   = useState(directCamera ? "camera" : "idle");
   const [error,    setError]    = useState("");
@@ -1603,6 +1597,10 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   const [rechercheMagasin,    setRechercheMagasin]    = useState('');
   const [modeAjoutMagasin,    setModeAjoutMagasin]    = useState(false);
   const ambiguResolverRef = useRef(null);
+  // Chantier 115 — carte « Nouveau magasin détecté » : masquée par « Choisir
+  // un autre magasin » ; édition du nom/adresse lus avant validation.
+  const [carteNouveauMagasinMasquee, setCarteNouveauMagasinMasquee] = useState(false);
+  const [carteNouveauMagasinEdition, setCarteNouveauMagasinEdition] = useState(false);
   const fileInputRef    = useRef(null);
   const galleryInputRef = useRef(null);
 
@@ -1613,6 +1611,10 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     if (!autoOpenGallery) return;
     galleryInputRef.current?.click();
   }, []);
+
+  // Chantier 115 — préchargement de la table `enseignes` pendant que l'OCR
+  // travaille. Jamais bloquant : en cas d'échec, la liste en dur sert.
+  useEffect(() => { chargerEnseignes(); }, []);
 
   // Chantier 108 — LE portillon. Appelé par tous les chemins d'arrivée d'une
   // lecture (caméra, galerie, autre-options, résultat déjà scanné en amont).
@@ -1681,7 +1683,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
       return;
     }
     setStoreNameEdit(initialResult.store || "");
-    setStoreLocation(estFrancois ? "" : (initialResult.address || ""));
+    setStoreLocation(initialResult.address || "");
     arriverEtapeMagasin(enseigne, initialResult.address || null, initialResult.store || null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1797,8 +1799,63 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   // (fetchKnownStores) continue pour la cohérence du circuit legacy.
   const arriverEtapeMagasin = async (enseigne, adresse, nomOcr = null) => {
     setStatus("store"); // l'étape s'affiche tout de suite, chaque chargement a son propre état
+    setCarteNouveauMagasinMasquee(false); // Chantier 115 — chaque ticket repart carte visible
     chargerSelecteurMagasins(nomOcr);
-    await fetchKnownStores(enseigne, adresse || null);
+    // Chantier 115 — si l'enseigne a été calculée avec la liste en dur (table
+    // pas encore chargée) ou n'a rien donné, on la recalcule une fois la table
+    // `enseignes` disponible. chargerEnseignes ne throw jamais (délai borné) :
+    // en cas d'échec, on garde la valeur d'avant.
+    let enseigneRetenue = enseigne;
+    if (nomOcr) {
+      try {
+        const avaitLaTable = enseignesEnCache() !== null;
+        await chargerEnseignes();
+        if (!avaitLaTable || enseigne === 'autre') {
+          const recalculee = storeIdFromName(nomOcr);
+          if (recalculee && recalculee !== 'autre' && recalculee !== enseigne) {
+            enseigneRetenue = recalculee;
+            setSelectedStore(recalculee);
+          }
+        }
+      } catch (e) { console.error('[C115] recalcul enseigne', e); }
+    }
+    await fetchKnownStores(enseigneRetenue, adresse || null);
+  };
+
+  // Chantier 115 — « Oui, c'est là » sur la carte « Nouveau magasin détecté » :
+  // même chemin que « Créer et valider » avec l'adresse du ticket (géocodage
+  // best effort, puis resoudreOuCreerStore -> RPC Core qui rattache, demande
+  // en zone grise, ou crée). En cas d'échec, le gate reste fermé et le
+  // sélecteur reste disponible en dessous.
+  const validerNouveauMagasinTicket = async () => {
+    setError("");
+    const nom = storeNameEdit.trim();
+    const adresse = storeLocation.trim();
+    if (!nom || !adresse) {
+      setError("Indique le nom et l'adresse du magasin, ou choisis-le dans la liste");
+      return;
+    }
+    setManualGeocoding(true);
+    try {
+      const coords = await geocodeAddress(adresse); // peut échouer : on continue
+      const creation = await resoudreOuCreerStore(selectedStore, adresse, coords?.lat ?? null, coords?.lng ?? null, nom);
+      if (creation?.magasinCoreId) {
+        if (creation.legacyId) setResolvedStoreId(creation.legacyId);
+        const nomFinal = creation.magasinCoreNom || nom || 'Magasin';
+        setStoreNameEdit(nomFinal);
+        setStoreLocation(adresse);
+        definirMagasinCore({ id: creation.magasinCoreId, nom: nomFinal, adresse, code_postal: '', ville: '' });
+        setCarteNouveauMagasinMasquee(true);
+        goToShare();
+      } else {
+        setError("Magasin non enregistré — réessaie, ou choisis-le dans la liste");
+      }
+    } catch (e) {
+      console.error('[C115] création magasin depuis le ticket', e);
+      setError("Magasin non enregistré — réessaie, ou choisis-le dans la liste");
+    } finally {
+      setManualGeocoding(false);
+    }
   };
 
   // LOT 1 « reconnaissance magasin au scan » — heuristique de catégorie :
@@ -1895,7 +1952,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
       setSelectedStore(enseigne);
       setEditableProducts(parsed.products.map((p,i)=>({...p,id:i,keep:true,share:true})));
       setStoreNameEdit(parsed.store||"");
-      setStoreLocation(estFrancois ? "" : (parsed.address||""));
+      setStoreLocation(parsed.address || "");
       setError("");
       await arriverEtapeMagasin(enseigne, parsed.address || null, parsed.store || null);
     } catch(e) { setError("JSON invalide : "+e.message); }
@@ -2289,7 +2346,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                     await arriverAvecMagasinSession(parsed, prods);
                   } else {
                     setStoreNameEdit(parsed.store||"");
-                    setStoreLocation(estFrancois ? "" : (parsed.address||""));
+                    setStoreLocation(parsed.address || "");
                     await arriverEtapeMagasin(enseigne, parsed.address || null, parsed.store || null);
                   }
                 } catch(e) { setError("Erreur scan : " + e.message); }
@@ -2324,7 +2381,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                     await arriverAvecMagasinSession(parsed, prods);
                   } else {
                     setStoreNameEdit(parsed.store || "");
-                    setStoreLocation(estFrancois ? "" : (parsed.address || ""));
+                    setStoreLocation(parsed.address || "");
                     await arriverEtapeMagasin(enseigne, parsed.address || null, parsed.store || null);
                   }
                 } catch(e) { setError("Erreur scan : " + e.message); }
@@ -2372,7 +2429,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                     await arriverAvecMagasinSession(parsed, prods);
                   } else {
                     setStoreNameEdit(parsed.store||"");
-                    setStoreLocation(estFrancois ? "" : (parsed.address||""));
+                    setStoreLocation(parsed.address || "");
                     await arriverEtapeMagasin(enseigne, parsed.address || null, parsed.store || null);
                   }
                 } catch(e) { setError("Erreur scan : " + e.message); }
@@ -2448,6 +2505,56 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
               ) : !modeAjoutMagasin ? (
                 /* ── Sélecteur intelligent de magasins CORE ── */
                 <>
+                  {/* Chantier 115 — carte « Nouveau magasin détecté » : le ticket
+                      donne un nom ET une adresse qu'aucun magasin connu n'approche
+                      (même règle que la RPC). Sinon rien ne s'affiche et l'écran
+                      est exactement celui d'avant. Le sélecteur reste en dessous. */}
+                  {!carteNouveauMagasinMasquee && magasinsCore && !magasinsCoreLoading
+                    && doitProposerNouveauMagasin({ nom: result?.store, adresse: result?.address, enseigneId: selectedStore, magasins: magasinsCore.tous }) && (()=>{
+                    const enseigneLue = trouverEnseigneDansNom(result?.store, enseignesEnCache());
+                    const peutValider = storeNameEdit.trim() && storeLocation.trim() && !manualGeocoding;
+                    const champ = (valeur, onChange, placeholder) => (
+                      <input value={valeur} onChange={e=>onChange(e.target.value)} placeholder={placeholder}
+                        style={{ width:"100%", padding:"10px 12px", borderRadius:10, border:`2px solid ${valeur.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:14, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:8, background:C.white }} />
+                    );
+                    return (
+                      <div style={{ background:"#FFF6F0", border:`1.5px solid ${C.orange}`, borderRadius:14, padding:"14px 16px", marginBottom:18 }}>
+                        <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.orange, marginBottom:8 }}>
+                          🏪 Nouveau magasin détecté
+                        </div>
+                        {carteNouveauMagasinEdition ? (
+                          <>
+                            {champ(storeNameEdit, setStoreNameEdit, "Nom du magasin")}
+                            {champ(storeLocation, setStoreLocation, "Adresse, code postal et ville")}
+                          </>
+                        ) : (
+                          <div style={{ marginBottom:8 }}>
+                            <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.text }}>{storeNameEdit.trim() || result?.store}</div>
+                            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight, marginTop:2 }}>{storeLocation.trim() || result?.address}</div>
+                          </div>
+                        )}
+                        {enseigneLue && (
+                          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:800, color:C.blue, marginBottom:8 }}>Enseigne : {enseigneLue.nom}</div>
+                        )}
+                        <button onClick={()=>setCarteNouveauMagasinEdition(v=>!v)}
+                          style={{ background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.blue, fontWeight:800, cursor:"pointer", padding:0, marginBottom:12, textDecoration:"underline" }}>
+                          {carteNouveauMagasinEdition ? "✓ Terminer la correction" : "✏️ Corriger le nom ou l'adresse"}
+                        </button>
+                        {/* Un éventuel message d'erreur s'affiche juste sous la carte, à
+                            l'emplacement habituel du sélecteur (pas de doublon). */}
+                        <div style={{ display:"flex", gap:8 }}>
+                          <button disabled={!peutValider} onClick={validerNouveauMagasinTicket}
+                            style={{ flex:1, padding:"13px 8px", border:"none", borderRadius:12, background:peutValider?C.orange:C.grayLight, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:peutValider?C.white:C.gray, cursor:peutValider?"pointer":"default" }}>
+                            {manualGeocoding ? "⏳ Validation..." : "Oui, c'est là"}
+                          </button>
+                          <button disabled={manualGeocoding} onClick={()=>{ setCarteNouveauMagasinMasquee(true); setCarteNouveauMagasinEdition(false); setError(""); }}
+                            style={{ flex:1, padding:"13px 8px", border:`2px solid ${C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, cursor:manualGeocoding?"default":"pointer" }}>
+                            Choisir un autre magasin
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
                   <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.text, marginBottom:10 }}>
                     🏪 Dans quel magasin as-tu fait ce ticket ?
                   </div>
@@ -10192,6 +10299,11 @@ export default function App() {
   // d'autres comptes admin existent un jour). Dérivé de la session à chaque
   // rendu, jamais mis en cache localement.
   const estFrancois = session?.user?.email === 'francois.pimor@gmail.com';
+  // Chantier 115 — table `enseignes` chargée dès la connexion (lecture réservée
+  // aux comptes authentifiés) pour que storeIdFromName la connaisse partout.
+  // Jamais bloquant : échec = liste en dur.
+  const idUtilisateurConnecte = session?.user?.id || null;
+  useEffect(() => { if (idUtilisateurConnecte) chargerEnseignes(); }, [idUtilisateurConnecte]);
   // #56.6 — modeCoreActif devient tri-état : null = suivre coreActifGlobal
   // (comportement par défaut, pour tout le monde) ; true/false = override
   // explicite de l'admin pour comparer ponctuellement l'autre moteur. Jamais
