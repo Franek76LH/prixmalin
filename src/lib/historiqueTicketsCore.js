@@ -36,15 +36,21 @@ export async function chargerTicketsUtilisateur(userId) {
 }
 
 // Lignes NON validées de tous les tickets de l'utilisateur (pour les compteurs).
+// Chantier 119 — les lignes « sans code-barres » en sont exclues. Le filtre est
+// `IS NOT TRUE` (et pas `= false`) pour ne jamais perdre une ligne à NULL ;
+// si la colonne n'existait pas encore, on retombe sur la requête d'avant.
 export async function chargerLignesAIdentifier(userId) {
   try {
     if (!userId) return { data: [], error: null };
-    const { data, error } = await supabase
+    const base = (colonnes) => supabase
       .from('lignes_ticket')
-      .select('id, ticket_id, statut_validation_produit, produit_suggere_ia_id, tickets!inner(utilisateur_id)')
+      .select(colonnes)
       .eq('tickets.utilisateur_id', userId)
       .eq('type_ligne', 'produit')
       .neq('statut_validation_produit', 'valide');
+    let { data, error } = await base('id, ticket_id, statut_validation_produit, produit_suggere_ia_id, sans_code_barres, tickets!inner(utilisateur_id)')
+      .not('sans_code_barres', 'is', true);
+    if (error) ({ data, error } = await base('id, ticket_id, statut_validation_produit, produit_suggere_ia_id, tickets!inner(utilisateur_id)'));
     return { data: Array.isArray(data) ? data : [], error };
   } catch (error) {
     return { data: [], error };
@@ -75,12 +81,16 @@ export async function chargerDernierTicketAIdentifier(userId) {
       .maybeSingle();
     if (error) return null;
     if (!ticket) return { ticket: null, n: 0 };
-    const { count, error: e2 } = await supabase
+    const compter = () => supabase
       .from('lignes_ticket')
       .select('id', { count: 'exact', head: true })
       .eq('ticket_id', ticket.id)
       .eq('type_ligne', 'produit')
       .neq('statut_validation_produit', 'valide');
+    // Chantier 119 — les lignes « sans code-barres » ne comptent pas : un
+    // ticket dont il ne reste que du vrac est complet, la pastille s'éteint.
+    let { count, error: e2 } = await compter().not('sans_code_barres', 'is', true);
+    if (e2) ({ count, error: e2 } = await compter());
     if (e2 || count == null) return null;
     return { ticket, n: count };
   } catch {
@@ -99,8 +109,10 @@ export async function chargerDetailTicket(ticketId) {
       .eq('ticket_id', ticketId)
       .eq('type_ligne', 'produit')
       .order('cree_le', { ascending: true });
-    // numero_ligne donne l'ordre du ticket ; s'il est refusé, on fait sans.
-    let { data, error } = await requete(`${COLONNES_LIGNE}, numero_ligne`);
+    // numero_ligne donne l'ordre du ticket, sans_code_barres (chantier 119) le
+    // marquage « Pas de code-barres » ; si l'une est refusée, on fait sans.
+    let { data, error } = await requete(`${COLONNES_LIGNE}, numero_ligne, sans_code_barres`);
+    if (error) ({ data, error } = await requete(`${COLONNES_LIGNE}, numero_ligne`));
     if (error) ({ data, error } = await requete(COLONNES_LIGNE));
     if (error) return { lignes: [], produits: {}, variantes: {}, error };
     const lignes = Array.isArray(data) ? data : [];
@@ -158,6 +170,11 @@ export async function chargerVarianteAffichage(varianteId) {
 // Filet « ↩ Annuler » — RPC dédiée (base), injectée dans annulerScanLigne.
 export function annulerScanLigneRpc(ligneId) {
   return supabase.rpc('annuler_scan_ligne_ticket', { p_ligne_ticket_id: ligneId });
+}
+
+// Chantier 119 — « Pas de code-barres » / « Finalement j'ai un code ».
+export function marquerLigneSansCodeBarresRpc(ligneId, valeur = true) {
+  return supabase.rpc('marquer_ligne_sans_code_barres', { p_ligne_ticket_id: ligneId, p_valeur: valeur });
 }
 
 // Accès injectés dans traiterScanLigne (src/lib/scanDepuisHistorique.js).

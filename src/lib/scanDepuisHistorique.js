@@ -30,10 +30,23 @@ export function etatLigne(ligne) {
   return ETAT_INCONNU;
 }
 
-// « À identifier » = tout ce qui n'est pas validé (même définition que le
-// compteur demandé : statut_validation_produit <> 'valide').
+// Chantier 119 — ligne marquée « Pas de code-barres » (vrac, boucherie…) :
+// elle n'aura JAMAIS de code à scanner. Elle reste visible dans le détail du
+// ticket mais sort de TOUS les compteurs, sinon la pastille du dernier ticket
+// resterait allumée à vie (constat du test iPhone : banane, chou-fleur,
+// rumsteck). Réversible (« Finalement j'ai un code »).
+export function estSansCodeBarres(ligne) {
+  return ligne?.sans_code_barres === true;
+}
+
+// « À identifier » = pas validée ET pas marquée sans code-barres.
 export function estAIdentifier(ligne) {
-  return etatLigne(ligne) !== ETAT_RECONNU;
+  return etatLigne(ligne) !== ETAT_RECONNU && !estSansCodeBarres(ligne);
+}
+
+// Ticket complet = plus rien à identifier (lignes reconnues ou sans code-barres).
+export function ticketComplet(lignes) {
+  return compterAIdentifier(lignes) === 0;
 }
 
 export function compterAIdentifier(lignes) {
@@ -146,15 +159,18 @@ export function codePourCreation(code) {
 // ── Open Food Facts ────────────────────────────────────────────────────────
 export const DELAI_OFF_MS = 4000;
 export const champsOffCreation = 'product_name,brands,quantity,product_quantity,product_quantity_unit,image_front_small_url';
-export const urlOffCreation = (ean) =>
-  `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(ean)}.json?fields=${champsOffCreation}`;
+export const urlOffCreation = (ean, champs = champsOffCreation) =>
+  `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(ean)}.json?fields=${champs}`;
+// Chantier 119 — l'écran de vérification veut AUSSI le nom français et la
+// grande photo (montrée en plein écran).
+export const champsOffIdentification = 'product_name,product_name_fr,brands,quantity,product_quantity,product_quantity_unit,image_front_url,image_front_small_url';
 
 // Ne garde que les champs demandés, non vides. {} quand OFF ne sait rien.
-export function extraireOff(json) {
+export function extraireOff(json, champs = champsOffCreation) {
   const p = json && json.status === 1 ? json.product : null;
   if (!p || typeof p !== 'object') return {};
   const out = {};
-  for (const k of champsOffCreation.split(',')) {
+  for (const k of champs.split(',')) {
     const v = p[k];
     if (v == null) continue;
     if (typeof v === 'string' && !v.trim()) continue;
@@ -165,22 +181,27 @@ export function extraireOff(json) {
 
 // OFF hors ligne, lent (> 4 s), code inconnu, JSON illisible : {} — jamais
 // d'exception. La création se fera alors « à compléter ».
-export async function chercherOffPourCreation(ean, { fetchImpl = globalThis.fetch, delaiMax = DELAI_OFF_MS } = {}) {
+export async function chercherOffPourCreation(ean, { fetchImpl = globalThis.fetch, delaiMax = DELAI_OFF_MS, champs = champsOffCreation } = {}) {
   if (!ean || typeof fetchImpl !== 'function') return {};
   try {
     const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
     const minuterie = ctrl ? setTimeout(() => ctrl.abort(), delaiMax) : null;
     let r;
     try {
-      r = await fetchImpl(urlOffCreation(ean), ctrl ? { signal: ctrl.signal } : undefined);
+      r = await fetchImpl(urlOffCreation(ean, champs), ctrl ? { signal: ctrl.signal } : undefined);
     } finally {
       if (minuterie) clearTimeout(minuterie);
     }
     if (!r || !r.ok) return {};
-    return extraireOff(await r.json());
+    return extraireOff(await r.json(), champs);
   } catch {
     return {};
   }
+}
+
+// Chantier 119 — même appel, champs élargis, 4 s maximum.
+export function chercherOffIdentification(ean, options = {}) {
+  return chercherOffPourCreation(ean, { ...options, champs: champsOffIdentification });
 }
 
 // ── Erreurs RPC ────────────────────────────────────────────────────────────
@@ -225,7 +246,68 @@ export const CHEMIN_CREE_A_COMPLETER = 'cree_a_completer'; // créé sans OFF, f
 export const MESSAGE_POIDS_VARIABLE = 'Code poids variable, non réutilisable — rien n\'a été enregistré.';
 export const MESSAGE_ARCHIVE = 'Produit archivé — ce code n\'est plus utilisable. Scanne un autre code de l\'emballage.';
 
-export async function traiterScanLigne({ ligne, codeBrut, deps }) {
+// ── Chantier 119 — le scan en DEUX TEMPS ──────────────────────────────────
+// 118 : scan -> écriture immédiate -> « ↩ Annuler » 8 s.
+// 119 : scan -> RECHERCHE SEULE (aucune écriture) -> l'utilisateur voit la
+// fiche et confirme -> ÉCRITURE. Les deux temps sont séparés ici ;
+// traiterScanLigne (118) les enchaîne sans pause et garde son comportement.
+export const RECHERCHE_CONNU = 'connu';
+export const RECHERCHE_INCONNU = 'inconnu';
+export const SOURCE_BASE = 'base';
+export const SOURCE_OFF = 'off';
+export const SOURCE_AUCUNE = 'aucune';
+
+// Format lisible depuis OFF : « quantity » d'abord, sinon product_quantity +
+// unité. null si OFF n'en dit rien.
+function formatOff(off) {
+  if (off?.quantity) return String(off.quantity).trim() || null;
+  if (off?.product_quantity != null && off?.product_quantity_unit) return `${off.product_quantity} ${off.product_quantity_unit}`;
+  return null;
+}
+
+// Nom OFF affiché ET envoyé à la création : le français d'abord.
+export function nomOff(off) {
+  return String(off?.product_name_fr || off?.product_name || '').trim() || null;
+}
+
+// Ce que l'écran de vérification montre. `photoOff` = URL OFF brute (grande
+// de préférence), à passer par Cloudinary ; null = cadre gris.
+export function ficheVerification({ statut, variante = null, off = {}, ligne = null }) {
+  const photoOff = off?.image_front_url || off?.image_front_small_url || null;
+  if (statut === RECHERCHE_CONNU) {
+    return {
+      nom: variante?.produits?.nom_reference || titreLigneInconnue(ligne),
+      marque: variante?.marques?.nom || null,
+      format: formatVariante(variante) || null,
+      photoOff,
+      source: SOURCE_BASE,
+    };
+  }
+  const offParle = !!(nomOff(off) || off?.brands || formatOff(off) || photoOff);
+  return {
+    nom: nomOff(off) || titreLigneInconnue(ligne),
+    marque: off?.brands || null,
+    format: formatOff(off),
+    photoOff,
+    source: offParle ? SOURCE_OFF : SOURCE_AUCUNE,
+  };
+}
+
+// JSON envoyé à creer_produit_depuis_code_barres : celui d'OFF, avec
+// product_name = le nom AFFICHÉ (français d'abord) — la fiche créée porte
+// exactement le nom que l'utilisateur a confirmé. {} si OFF est muet.
+export function offPourCreation(off) {
+  if (!off || typeof off !== 'object' || Object.keys(off).length === 0) return {};
+  const out = { ...off };
+  const nom = nomOff(off);
+  if (nom) out.product_name = nom;
+  return out;
+}
+
+// TEMPS 1 — recherche seule. deps : chercherVarianteParCode, chercherOff.
+// photoPourConnu : interroger aussi OFF (pour la photo) quand le code est
+// connu — le 118 ne le faisait pas, le 119 le fait. N'écrit JAMAIS.
+export async function rechercherScanLigne({ ligne, codeBrut, deps, photoPourConnu = false }) {
   const code = normaliserCode(codeBrut);
   if (!ligne?.id) return { statut: SCAN_ERREUR, message: 'Ligne introuvable, rouvre le ticket.', ecrit: false };
   if (!code) return { statut: SCAN_CODE_VIDE, message: 'Code illisible, réessaie.', ecrit: false };
@@ -238,8 +320,6 @@ export async function traiterScanLigne({ ligne, codeBrut, deps }) {
     return { statut: SCAN_POIDS_VARIABLE, message: MESSAGE_POIDS_VARIABLE, ecrit: false, code };
   }
 
-  const libelleAlias = String(ligne.libelle_ticket || '').trim() || null;
-
   let lecture;
   try {
     lecture = await deps.chercherVarianteParCode(candidatsCode(code));
@@ -250,12 +330,35 @@ export async function traiterScanLigne({ ligne, codeBrut, deps }) {
     return { statut: SCAN_ERREUR, message: 'Recherche du code-barres impossible, vérifie ta connexion.', ecrit: false, code };
   }
 
-  // Code connu de la base.
   if (lecture?.connu) {
     const v = lecture.variante;
     if (!v || v.actif === false || !v.produit_id) {
       return { statut: SCAN_ARCHIVE, message: MESSAGE_ARCHIVE, ecrit: false, code };
     }
+    let off = {};
+    if (photoPourConnu) {
+      try { off = (await deps.chercherOff(codePourCreation(code))) || {}; } catch { off = {}; }
+    }
+    return { statut: RECHERCHE_CONNU, ecrit: false, code, variante: v, off, fiche: ficheVerification({ statut: RECHERCHE_CONNU, variante: v, off, ligne }) };
+  }
+
+  let off = {};
+  try { off = (await deps.chercherOff(codePourCreation(code))) || {}; } catch { off = {}; }
+  return { statut: RECHERCHE_INCONNU, ecrit: false, code, off, fiche: ficheVerification({ statut: RECHERCHE_INCONNU, off, ligne }) };
+}
+
+// TEMPS 2 — écriture, uniquement sur une recherche RÉUSSIE (connu/inconnu).
+// deps : relier, creerDepuisCode. Toute autre recherche -> rien n'est écrit.
+export async function ecrireScanLigne({ ligne, recherche, deps }) {
+  const r = recherche || {};
+  const code = r.code;
+  if (!ligne?.id || (r.statut !== RECHERCHE_CONNU && r.statut !== RECHERCHE_INCONNU)) {
+    return { statut: SCAN_ERREUR, message: 'Rien à enregistrer, rescanne le code.', ecrit: false, code };
+  }
+  const libelleAlias = String(ligne.libelle_ticket || '').trim() || null;
+
+  if (r.statut === RECHERCHE_CONNU) {
+    const v = r.variante;
     let rep;
     try {
       rep = await deps.relier({ ligneId: ligne.id, produitId: v.produit_id, varianteId: v.id, libelleAlias });
@@ -276,13 +379,10 @@ export async function traiterScanLigne({ ligne, codeBrut, deps }) {
     return { statut: SCAN_RECONNU, chemin: CHEMIN_CODE_CONNU, message: 'Reconnu', ecrit: true, code, variante: v };
   }
 
-  // Code inconnu : Open Food Facts (jamais bloquant), puis création côté base.
-  let off = {};
-  try { off = (await deps.chercherOff(codePourCreation(code))) || {}; } catch { off = {}; }
-
+  const off = r.off || {};
   let rep;
   try {
-    rep = await deps.creerDepuisCode({ ligneId: ligne.id, code: codePourCreation(code), off });
+    rep = await deps.creerDepuisCode({ ligneId: ligne.id, code: codePourCreation(code), off: offPourCreation(off) });
   } catch (e) {
     rep = { error: e || true };
   }
@@ -311,6 +411,13 @@ export async function traiterScanLigne({ ligne, codeBrut, deps }) {
     varianteId: d.variante_produit_id ?? null,
     aCompleter: d.a_completer === true,
   };
+}
+
+// 118 — scan ET écriture d'un seul tenant (recherche puis écriture, sans pause).
+export async function traiterScanLigne({ ligne, codeBrut, deps }) {
+  const recherche = await rechercherScanLigne({ ligne, codeBrut, deps });
+  if (recherche.statut !== RECHERCHE_CONNU && recherche.statut !== RECHERCHE_INCONNU) return recherche;
+  return ecrireScanLigne({ ligne, recherche, deps });
 }
 
 // « Créé : <nom> · <marque> · <format> » à partir de ce que la base a écrit,
@@ -344,6 +451,25 @@ export function resumeDernierTicket(ticket, n) {
     titre: `${nb} produit${nb > 1 ? 's' : ''} à scanner`,
     sousTitre: `Dernier ticket : ${[magasin, quand].filter(Boolean).join(' · ')}`,
   };
+}
+
+// ── « Pas de code-barres » (RPC marquer_ligne_sans_code_barres) ───────────
+// deps.marquer(ligneId, valeur) -> { data: { succes, sans_code_barres, message }, error }.
+// La base refuse de marquer une ligne déjà rattachée à un produit. Ne throw jamais.
+export async function marquerSansCodeBarres({ ligneId, valeur = true, deps }) {
+  if (!ligneId || typeof deps?.marquer !== 'function') return { ok: false, message: MESSAGE_INDISPONIBLE };
+  let rep;
+  try {
+    rep = await deps.marquer(ligneId, valeur);
+  } catch (e) {
+    rep = { error: e || true };
+  }
+  if (rep?.error) {
+    return { ok: false, message: estFonctionAbsente(rep.error) ? MESSAGE_INDISPONIBLE : 'Impossible de marquer la ligne pour le moment.' };
+  }
+  const d = rep?.data && typeof rep.data === 'object' ? rep.data : {};
+  if (d.succes !== true) return { ok: false, message: String(d.message || '').trim() || 'Marquage refusé par la base.' };
+  return { ok: true, sansCodeBarres: d.sans_code_barres ?? valeur };
 }
 
 // ── Filet « ↩ Annuler » après un scan ──────────────────────────────────────

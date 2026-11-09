@@ -13,7 +13,26 @@ import { useEffect, useRef, useState } from 'react';
 import { BrowserMultiFormatReader } from '@zxing/browser';
 import { BarcodeFormat, DecodeHintType } from '@zxing/library';
 
-export default function BarcodeScannerSheet({ onDetected, onClose }) {
+// Chantier 119 — trois ajouts OPTIONNELS, sans effet sur les appelants
+// existants (qui ne les passent pas) :
+//   - entete : contenu affiché à la place du titre « 📷 Scanner le code-barres » ;
+//   - onDetected reçoit en 3e argument l'image FIGÉE au moment de la lecture
+//     (data URL JPEG, ou null) : la caméra « se fige » pendant la recherche ;
+//   - onErreurCamera(message) : prévenu quand la caméra ne s'ouvre pas.
+function figerImage(video) {
+  try {
+    if (!video || !video.videoWidth) return null;
+    const c = document.createElement('canvas');
+    c.width = video.videoWidth;
+    c.height = video.videoHeight;
+    c.getContext('2d').drawImage(video, 0, 0);
+    return c.toDataURL('image/jpeg', 0.7);
+  } catch {
+    return null;
+  }
+}
+
+export default function BarcodeScannerSheet({ onDetected, onClose, entete = null, onErreurCamera = null }) {
   const videoRef = useRef(null);
   const [erreur, setErreur] = useState(null);
   const [pret, setPret] = useState(false);
@@ -38,29 +57,33 @@ export default function BarcodeScannerSheet({ onDetected, onClose }) {
           videoRef.current,
           (result) => {
             if (annule || !result) return;
+            const imageFigee = figerImage(videoRef.current);
             controls?.stop();
             // Remonte le texte ET le format détecté (nom lisible via BarcodeFormat).
-            onDetected(result.getText(), BarcodeFormat[result.getBarcodeFormat()]);
+            onDetected(result.getText(), BarcodeFormat[result.getBarcodeFormat()], imageFigee);
           }
         );
         if (!annule) setPret(true);
       } catch (e) {
         if (annule) return;
         console.error('[BarcodeScannerSheet] ouverture caméra :', e);
-        setErreur(
-          e?.name === 'NotAllowedError'
-            ? "Accès à la caméra refusé — autorise-le dans Réglages > Safari > Caméra, puis réessaie."
-            : "Impossible d'ouvrir la caméra sur cet appareil."
-        );
+        const message = e?.name === 'NotAllowedError'
+          ? "Accès à la caméra refusé — autorise-le dans Réglages > Safari > Caméra, puis réessaie."
+          : "Impossible d'ouvrir la caméra sur cet appareil.";
+        setErreur(message);
+        try { onErreurCamera?.(message); } catch { /* jamais bloquant */ }
       }
     })();
     return () => { annule = true; controls?.stop(); };
+    // onErreurCamera volontairement hors dépendances : une nouvelle identité ne
+    // doit jamais rouvrir la caméra.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onDetected]);
 
   return (
     <div style={{ position:"fixed", inset:0, background:"#000", zIndex:600, display:"flex", flexDirection:"column" }}>
       <div style={{ padding:"14px 16px calc(14px + env(safe-area-inset-top, 0px))", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0 }}>
-        <span style={{ color:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14 }}>📷 Scanner le code-barres</span>
+        {entete ?? <span style={{ color:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14 }}>📷 Scanner le code-barres</span>}
         <button onClick={onClose} style={{ background:"rgba(255,255,255,0.2)", border:"none", borderRadius:99, width:30, height:30, color:"#fff", fontSize:15, cursor:"pointer" }}>✕</button>
       </div>
       <div style={{ flex:1, position:"relative", display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden" }}>

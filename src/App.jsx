@@ -12296,7 +12296,8 @@ export default function App() {
             garde-fou 105 — pour tout autre utilisateur il n'existe pas, et sa
             proposition part en file au lieu d'écrire quoi que ce soit. */}
         {showHistoriqueTickets && estFrancois && (
-          <HistoriqueTicketsSheet userId={session?.user?.id} ticketInitial={historiqueTicketInitial} onClose={()=>{ setShowHistoriqueTickets(false); setHistoriqueTicketInitial(null); }}/>
+          <HistoriqueTicketsSheet userId={session?.user?.id} ticketInitial={historiqueTicketInitial} onClose={()=>{ setShowHistoriqueTickets(false); setHistoriqueTicketInitial(null); }}
+            onRetourAccueil={()=>{ setShowHistoriqueTickets(false); setHistoriqueTicketInitial(null); setTab("home"); }}/>
         )}
         {showContributionCodeBarres && (contributionCodesBarresActive || isAdmin) && (
           <ContributionCodeBarresSheet estAdmin={isAdmin} onClose={()=>setShowContributionCodeBarres(false)}/>

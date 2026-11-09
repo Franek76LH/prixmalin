@@ -13,9 +13,12 @@
 // « inconnu » sans gêner. Toute erreur = message court, état inchangé.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import BarcodeScannerSheet from './BarcodeScannerSheet';
+// Chantier 119 — écran plein « Identifier ce produit » (validation consciente).
+import IdentifierProduitPlein from './IdentifierProduitPlein';
+import { chercherOffIdentification } from '../lib/scanDepuisHistorique';
 import { formaterAdresseMagasin } from '../lib/selecteurMagasinCore';
 import {
-  etatLigne, ETAT_RECONNU, ETAT_SUGGERE,
+  etatLigne, ETAT_RECONNU, ETAT_SUGGERE, estAIdentifier, estSansCodeBarres, marquerSansCodeBarres,
   compterAIdentifierParTicket, trierLignesTicket, ligneSuivanteAIdentifier,
   titreLigneInconnue, pisteLigneInconnue, formatVariante, prixArticle,
   traiterScanLigne, estFonctionAbsente, MESSAGE_INDISPONIBLE,
@@ -25,7 +28,7 @@ import {
 import {
   chargerTicketsUtilisateur, chargerLignesAIdentifier, chargerDetailTicket,
   confirmerSuggestion, chargerVarianteAffichage, depsScanLigne, chargerProduitsACompleter,
-  annulerScanLigneRpc,
+  annulerScanLigneRpc, marquerLigneSansCodeBarresRpc,
 } from '../lib/historiqueTicketsCore';
 
 const F = "'Nunito',sans-serif";
@@ -64,7 +67,22 @@ function BoutonScanner({ onClick, gros = false, desactive = false }) {
 
 // ticketInitial : ticket à ouvrir directement (pastille « dernier ticket » de
 // l'accueil) ; « ← » ramène alors à la liste complète.
-export default function HistoriqueTicketsSheet({ userId, onClose, onCompteChange, ticketInitial = null }) {
+// Chantier 119 — le 📷 d'une ligne ouvre l'écran plein (recherche -> fiche ->
+// « ✓ C'est bien ça » -> écriture). À false, on retrouve EXACTEMENT le
+// comportement du 118 (écriture dès la lecture + « ↩ Annuler » 8 s), dont le
+// code est conservé tel quel ci-dessous.
+const IDENTIFICATION_PLEIN_ECRAN = true;
+
+// Accès de l'écran plein : ceux du 118, OFF élargi (nom français, grande
+// photo), et la RPC d'annulation.
+const depsIdentification = {
+  ...depsScanLigne,
+  chercherOff: (ean) => chercherOffIdentification(ean),
+  annuler: (ligneId) => annulerScanLigneRpc(ligneId),
+  marquer: (ligneId, valeur) => marquerLigneSansCodeBarresRpc(ligneId, valeur),
+};
+
+export default function HistoriqueTicketsSheet({ userId, onClose, onCompteChange, ticketInitial = null, onRetourAccueil = null }) {
   const [vue, setVue] = useState(ticketInitial ? 'detail' : 'liste');
   const [tickets, setTickets] = useState(null);
   const [comptes, setComptes] = useState(() => new Map());
@@ -224,8 +242,47 @@ export default function HistoriqueTicketsSheet({ userId, onClose, onCompteChange
     </div>
   ) : null);
 
+  // Chantier 119 — { ligneDepartId } quand l'écran plein est ouvert.
+  const [identification, setIdentification] = useState(null);
+  // Chantier 119 — rubrique « Sans code-barres (N) », repliée par défaut.
+  const [sansCodeOuvert, setSansCodeOuvert] = useState(false);
+
+  // « Finalement j'ai un code » : la ligne revient dans les compteurs, puis
+  // l'écran plein de scan s'ouvre dessus. Échec -> message, rien ne bouge.
+  const finalementUnCode = async (ligne) => {
+    if (!ticketOuvert) return;
+    setRetour(null);
+    setEnCours('Un instant…');
+    try {
+      const r = await marquerSansCodeBarres({ ligneId: ligne.id, valeur: false, deps: depsIdentification });
+      if (!r.ok) { setRetour({ ton: 'erreur', titre: r.message }); return; }
+      const d = await rechargerDetail(ticketOuvert.id);
+      chargerLignesAIdentifier(userId).then(l => { if (!l.error) { setComptes(compterAIdentifierParTicket(l.data)); onCompteChange?.(l.data.length); } });
+      if (d) setIdentification({ ligneDepartId: ligne.id });
+    } finally {
+      setEnCours(null);
+    }
+  };
+
+  // Retour de l'écran plein : relecture du ticket et des compteurs EN BASE
+  // (qui fait foi), ligne suivante à identifier mise en évidence.
+  const finIdentification = async () => {
+    setIdentification(null);
+    setRetour(null);
+    if (!ticketOuvert) return;
+    const d = await rechargerDetail(ticketOuvert.id);
+    const suivante = d?.lignes?.find(estAIdentifier)?.id ?? null;
+    setEnEvidence(suivante);
+    chargerLignesAIdentifier(userId).then(l => { if (!l.error) { setComptes(compterAIdentifierParTicket(l.data)); onCompteChange?.(l.data.length); } });
+  };
+
   const scanner = (ligne) => {
     fermerAnnulation(); // le scan suivant clôt la fenêtre d'annulation
+    if (IDENTIFICATION_PLEIN_ECRAN) {
+      setRetour(null);
+      setIdentification({ ligneDepartId: ligne.id });
+      return;
+    }
     scanCibleRef.current = ligne;
     setRetour(null);
     setScanOuvert(true);
@@ -331,8 +388,12 @@ export default function HistoriqueTicketsSheet({ userId, onClose, onCompteChange
       </>
     );
   } else if (vue === 'detail' && ticketOuvert) {
-    const lignes = detail?.lignes || [];
-    const nb = lignes.filter(l => etatLigne(l) !== ETAT_RECONNU).length;
+    const toutes = detail?.lignes || [];
+    // Chantier 119 — les lignes « sans code-barres » quittent la liste
+    // principale et les compteurs ; elles restent visibles plus bas.
+    const lignes = toutes.filter(l => !estSansCodeBarres(l));
+    const sansCode = toutes.filter(estSansCodeBarres);
+    const nb = toutes.filter(estAIdentifier).length;
     contenu = (
       <>
         {entete(ticketOuvert.magasins?.nom || 'Ticket', retourListe)}
@@ -340,7 +401,7 @@ export default function HistoriqueTicketsSheet({ userId, onClose, onCompteChange
           <div style={{ fontSize: 12, color: GRIS }}>{dateFr(ticketOuvert.date_ticket)} · total {euros(ticketOuvert.montant_total)}</div>
           {detail && (
             <div style={{ marginTop: 6 }}>
-              {nb > 0 ? <Pastille n={nb} /> : <span style={{ fontSize: 12, fontWeight: 900, color: VERT }}>✓ Tout est identifié</span>}
+              {nb > 0 ? <Pastille n={nb} /> : <span style={{ fontSize: 12, fontWeight: 900, color: VERT }}>{sansCode.length > 0 ? '✓ Ticket complet 🎉' : '✓ Tout est identifié'}</span>}
             </div>
           )}
         </div>
@@ -422,6 +483,26 @@ export default function HistoriqueTicketsSheet({ userId, onClose, onCompteChange
               </div>
             );
           })}
+          {sansCode.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <button onClick={() => setSansCodeOuvert(o => !o)}
+                style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', borderTop: '1px solid #e4e4e4', padding: '12px 2px', fontFamily: F, fontWeight: 800, fontSize: 13, color: '#555', cursor: 'pointer' }}>
+                {sansCodeOuvert ? '▾' : '▸'} Sans code-barres ({sansCode.length})
+              </button>
+              {sansCodeOuvert && sansCode.map(l => (
+                <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', marginBottom: 6, background: '#fff', border: '1px solid #eee', borderRadius: 10, opacity: 0.85 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontFamily: F, fontWeight: 800, fontSize: 13, color: TEXTE }}>{titreLigneInconnue(l)}</div>
+                    <button onClick={() => finalementUnCode(l)} disabled={!!enCours}
+                      style={{ background: 'none', border: 'none', padding: 0, marginTop: 2, fontFamily: F, fontWeight: 800, fontSize: 11, color: BLEU, textDecoration: 'underline', cursor: 'pointer' }}>
+                      Finalement j'ai un code
+                    </button>
+                  </div>
+                  <div style={{ fontFamily: F, fontWeight: 900, fontSize: 13, color: GRIS, whiteSpace: 'nowrap' }}>{euros(prixArticle(l))}{Number(l.quantite) > 1 ? ` × ${Number(l.quantite)}` : ''}</div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </>
     );
@@ -473,6 +554,15 @@ export default function HistoriqueTicketsSheet({ userId, onClose, onCompteChange
         {contenu}
       </div>
       {scanOuvert && <BarcodeScannerSheet onDetected={onCodeDetecte} onClose={fermerScanner} />}
+      {identification && detail && (
+        <IdentifierProduitPlein
+          lignes={detail.lignes}
+          ligneDepartId={identification.ligneDepartId}
+          deps={depsIdentification}
+          onFermer={finIdentification}
+          onRetourAccueil={() => { setIdentification(null); (onRetourAccueil || onClose)?.(); }}
+        />
+      )}
       {enCours && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 605, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: '#fff', borderRadius: 12, padding: '16px 22px', fontFamily: F, fontSize: 13, fontWeight: 800, color: TEXTE, maxWidth: '80%', textAlign: 'center' }}>{enCours}</div>
