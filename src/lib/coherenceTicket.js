@@ -18,6 +18,14 @@
 // remises non lues vivent là, et crier à chaque ticket rendrait l'alerte
 // invisible le jour où elle compte.
 export const SEUIL_AVERTISSEMENT = 0.02;
+// Chantier 118 — pour le MONTANT, le seuil d'avertissement n'est plus relatif
+// mais ABSOLU : un total de caisse tombe au centime, donc plus de 0,10 €
+// d'écart entre le total imprimé et la somme des lignes (remises déduites,
+// règle du 108c inchangée) est une vraie anomalie. Cas du 09/11 : 59,43 €
+// imprimés contre 60,49 € lus = 1,06 € (1,78 %), passé sous les 2 % sans un
+// mot. SEUIL_AVERTISSEMENT (relatif) ne sert plus qu'au nombre d'articles ; le
+// REFUS reste relatif (SEUIL_BLOCAGE) pour le montant comme pour les articles.
+export const SEUIL_ECART_ABSOLU_MONTANT = 0.10;
 // Au-delà de 10 %, on REFUSE au lieu d'avertir. Choix assumé : importer trente
 // lignes fausses ne rend service à personne, et reprendre une photo coûte peu.
 export const SEUIL_BLOCAGE = 0.10;
@@ -88,6 +96,14 @@ const niveauPourEcart = (ecart) => {
   return NIVEAU_OK;
 };
 
+// Chantier 118 — comparaison en CENTIMES entiers : 60,49 − 59,43 ne vaut pas
+// exactement 1,06 en virgule flottante, et un écart de 0,10 € pile ne doit pas
+// basculer d'un côté ou de l'autre selon l'arrondi machine.
+const niveauPourMontant = (ecartEuros, ecartRelatif) => {
+  if (ecartRelatif > SEUIL_BLOCAGE) return NIVEAU_BLOCAGE;
+  return Math.round(ecartEuros * 100) > Math.round(SEUIL_ECART_ABSOLU_MONTANT * 100) ? NIVEAU_AVERTISSEMENT : NIVEAU_OK;
+};
+
 const PIRE = { [NIVEAU_OK]: 0, [NIVEAU_AVERTISSEMENT]: 1, [NIVEAU_BLOCAGE]: 2 };
 
 // LE point d'entrée. Compare ce que l'OCR a lu à ce que le ticket annonce.
@@ -123,6 +139,7 @@ export function controlerCoherenceTicket({ products = [], total_ticket = null, n
     articlesTicket: articlesTicket != null && articlesTicket > 0 ? articlesTicket : null,
     nbLignes: (products || []).length,
     ecartMontant: null,
+    ecartMontantEuros: null,
     ecartArticles: null,
     motifs: [],
   };
@@ -147,8 +164,10 @@ export function controlerCoherenceTicket({ products = [], total_ticket = null, n
   } else if (remises == null) {
     detail.montantNonMesure = MONTANT_REMISES_INCONNUES;
   } else {
-    detail.ecartMontant = Math.abs(sommeApresRemises - detail.totalTicket) / detail.totalTicket;
-    retenir(niveauPourEcart(detail.ecartMontant), MOTIF_MONTANT);
+    const ecartEuros = Math.abs(sommeApresRemises - detail.totalTicket);
+    detail.ecartMontant = ecartEuros / detail.totalTicket;
+    detail.ecartMontantEuros = Math.round(ecartEuros * 100) / 100;
+    retenir(niveauPourMontant(ecartEuros, detail.ecartMontant), MOTIF_MONTANT);
   }
 
   // Nombre d'articles. On ne regarde QUE le sur-comptage : lire PLUS d'articles

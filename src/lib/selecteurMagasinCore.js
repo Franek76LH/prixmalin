@@ -36,9 +36,25 @@ export function formaterDistance(km) {
 }
 
 // "adresse, CP ville" en sautant proprement les morceaux absents.
+// Chantier 118 — un magasin créé au scan porte souvent déjà « 13100 AIX EN
+// PROVENCE » dans `adresse` : le CP et la ville ne sont ajoutés que s'ils n'y
+// figurent pas déjà (comparaison sans casse, accents ni ponctuation), sinon on
+// affichait « …, 13100 AIX EN PROVENCE, 13100 AIX EN PROVENCE ».
+const pourComparerAdresse = (t) => ` ${String(t || '')
+  .toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  .replace(/[^A-Z0-9]+/g, ' ').trim()} `;
+
 export function formaterAdresseMagasin(m) {
-  const cpVille = [m?.code_postal, m?.ville].filter(Boolean).join(' ');
-  return [m?.adresse, cpVille].filter(Boolean).join(', ');
+  const adresse = String(m?.adresse || '').trim();
+  const dans = pourComparerAdresse(adresse);
+  const dejaLa = (morceau) => {
+    const c = pourComparerAdresse(morceau);
+    return c.trim() !== '' && dans.includes(c);
+  };
+  const cp = m?.code_postal && !dejaLa(m.code_postal) ? m.code_postal : null;
+  const ville = m?.ville && !dejaLa(m.ville) ? m.ville : null;
+  const cpVille = [cp, ville].filter(Boolean).join(' ');
+  return [adresse, cpVille].filter(Boolean).join(', ');
 }
 
 export async function chargerMagasinsCoreActifs() {

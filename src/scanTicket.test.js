@@ -50,29 +50,41 @@ describe('filtrerProduitsExploitables', () => {
   });
 });
 
-// Chantier 100 — badge « ✓ reconnu » (base) vs « ⚠ à vérifier » (confiance IA).
+// Chantier 100 / 118 — badge de l'écran de partage. Depuis le 118, la map
+// porte { methode } (réponse de previsualiser_reconnaissance_ticket) et SEULE
+// l'égalité exacte donne « reconnu ».
 describe('badgeProduit', () => {
-  it('reconnu par la base -> "reconnu", même avec confiance IA "faible"', () => {
-    expect(badgeProduit({ id: 3, confiance: 'faible' }, { 3: true })).toBe('reconnu');
+  it('memoire_exacte -> "reconnu", même avec confiance IA "faible"', () => {
+    expect(badgeProduit({ id: 3, confiance: 'faible' }, { 3: { methode: 'memoire_exacte' } })).toBe('reconnu');
+  });
+
+  it('suggestion -> "suggere", JAMAIS "reconnu", même avec confiance IA haute', () => {
+    expect(badgeProduit({ id: 3, confiance: 'haute' }, { 3: { methode: 'suggestion' } })).toBe('suggere');
+    expect(badgeProduit({ id: 3 }, { 3: { methode: 'suggestion', reconnu: true } })).toBe('suggere');
+  });
+
+  it('base a répondu sans méthode -> "a_verifier", même avec confiance haute', () => {
+    expect(badgeProduit({ id: 4, confiance: 'haute' }, { 4: { methode: null } })).toBe('a_verifier');
+  });
+
+  it('un ancien booléen true sans méthode n\'est plus une preuve de reconnaissance', () => {
+    expect(badgeProduit({ id: 3, confiance: 'faible' }, { 3: true })).toBe('a_verifier');
+    expect(badgeProduit({ id: 3, confiance: 'haute' }, { 3: true })).toBeNull();
   });
 
   it('absent de la map + confiance "faible" -> "a_verifier"', () => {
-    expect(badgeProduit({ id: 4, confiance: 'faible' }, { 3: true })).toBe('a_verifier');
+    expect(badgeProduit({ id: 4, confiance: 'faible' }, { 3: { methode: 'memoire_exacte' } })).toBe('a_verifier');
   });
 
-  it('non reconnu (false dans la map) + confiance "faible" -> "a_verifier"', () => {
-    expect(badgeProduit({ id: 5, confiance: 'faible' }, { 5: false })).toBe('a_verifier');
-  });
-
-  it('ni reconnu ni confiance faible -> null (aucun badge)', () => {
+  it('absent de la map, confiance non faible -> null (aucun badge, comportement d\'avant)', () => {
     expect(badgeProduit({ id: 6, confiance: 'haute' }, {})).toBeNull();
     expect(badgeProduit({ id: 7 }, {})).toBeNull();
   });
 
-  it('robuste : map absente/nulle ou produit nul -> jamais d\'exception, fallback comportement actuel', () => {
+  it('robuste : map absente/nulle ou produit nul -> jamais d\'exception', () => {
     expect(badgeProduit({ id: 8, confiance: 'faible' })).toBe('a_verifier');
     expect(badgeProduit({ id: 8, confiance: 'faible' }, null)).toBe('a_verifier');
-    expect(badgeProduit(null, { 1: true })).toBeNull();
+    expect(badgeProduit(null, { 1: { methode: 'memoire_exacte' } })).toBeNull();
   });
 });
 

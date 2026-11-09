@@ -51,10 +51,46 @@ describe('controlerCoherenceTicket — montant', () => {
     expect(r.motifs).toEqual([]);
   });
 
-  it('écart de 1 % : encore le silence (arrondis, consignes, remises)', () => {
+  // Chantier 118 — seuil ABSOLU de 0,10 € pour le montant (il était de 2 %).
+  it('écart de 1 % (0,45 €) : désormais un avertissement — un total de caisse tombe au centime', () => {
     const r = controlerCoherenceTicket({ products: [ligne(45.78)], total_ticket: 45.33, total_remises: 0 });
     expect(r.ecartMontant).toBeLessThan(0.02);
+    expect(r.ecartMontantEuros).toBe(0.45);
+    expect(r.niveau).toBe(NIVEAU_AVERTISSEMENT);
+    expect(r.motifs).toContain(MOTIF_MONTANT);
+  });
+
+  it('Intermarché Aix du 09/11 : 59,43 € imprimés / 60,49 € lus -> bandeau', () => {
+    const r = controlerCoherenceTicket({ products: [ligne(60.49)], total_ticket: 59.43, total_remises: 0 });
+    expect(r.ecartMontantEuros).toBe(1.06);
+    expect(r.niveau).toBe(NIVEAU_AVERTISSEMENT);
+  });
+
+  it('59,43 € imprimés / 59,48 € lus (0,05 €) -> pas de bandeau', () => {
+    const r = controlerCoherenceTicket({ products: [ligne(59.48)], total_ticket: 59.43, total_remises: 0 });
     expect(r.niveau).toBe(NIVEAU_OK);
+    expect(r.motifs).toEqual([]);
+  });
+
+  it('frontière : 0,10 € pile toléré, 0,11 € signalé (comparaison au centime)', () => {
+    expect(controlerCoherenceTicket({ products: [ligne(59.53)], total_ticket: 59.43, total_remises: 0 }).niveau).toBe(NIVEAU_OK);
+    expect(controlerCoherenceTicket({ products: [ligne(59.54)], total_ticket: 59.43, total_remises: 0 }).niveau).toBe(NIVEAU_AVERTISSEMENT);
+    // dans l'autre sens aussi (lignes en dessous du total)
+    expect(controlerCoherenceTicket({ products: [ligne(59.32)], total_ticket: 59.43, total_remises: 0 }).niveau).toBe(NIVEAU_AVERTISSEMENT);
+  });
+
+  it('les remises du 108c sont déduites AVANT la comparaison absolue', () => {
+    // 60,49 € de lignes, 1,06 € de remises imprimées, 59,43 € payés : cohérent.
+    const r = controlerCoherenceTicket({ products: [ligne(60.49)], total_ticket: 59.43, total_remises: 1.06 });
+    expect(r.niveau).toBe(NIVEAU_OK);
+    // remises inconnues : toujours AUCUNE comparaison de montant.
+    const inconnues = controlerCoherenceTicket({ products: [ligne(60.49)], total_ticket: 59.43, total_remises: null });
+    expect(inconnues.ecartMontant).toBeNull();
+    expect(inconnues.niveau).toBe(NIVEAU_OK);
+  });
+
+  it('le refus reste relatif : au-delà de 10 % -> blocage', () => {
+    expect(controlerCoherenceTicket({ products: [ligne(66)], total_ticket: 59.43, total_remises: 0 }).niveau).toBe(NIVEAU_BLOCAGE);
   });
 
   it('écart de 5 % : avertissement, l\'import reste possible', () => {

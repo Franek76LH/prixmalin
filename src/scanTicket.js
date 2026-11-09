@@ -1,4 +1,5 @@
 import { supabase } from "./lib/supabase";
+import { badgeDepuisMethode } from "./lib/scanDepuisHistorique";
 
 // Convertit n'importe quel format image (HEIC, PNG, WEBP…) en JPEG base64
 // via canvas, avec redimensionnement si > 2000px pour limiter la taille du payload.
@@ -43,8 +44,19 @@ export function filtrerProduitsExploitables(products) {
 //                   enregistrer_ticket_core) — prime sur la confiance IA ;
 //   'a_verifier' -> pas reconnu ET confiance IA "faible" ;
 //   null         -> rien à afficher. Pure, jamais d'exception.
+//
+// Chantier 118 — TROIS états quand la base a répondu pour la ligne (la map
+// porte alors l'objet { methode } renvoyé par la RPC) :
+//   'reconnu'    -> UNIQUEMENT methode = 'memoire_exacte' (égalité exacte) ;
+//   'suggere'    -> methode = 'suggestion' ;
+//   'a_verifier' -> tout le reste (methode nulle ou inattendue).
+// Défaut constaté le 09/11 : une simple suggestion s'affichait en vert. Un
+// booléen `reconnu: true` SANS methode n'est donc plus jamais une preuve.
+// Base muette pour la ligne (RPC en échec, ligne absente de la réponse) :
+// comportement d'avant, piloté par la seule confiance IA.
 export function badgeProduit(p, reconnaissanceParId = {}) {
-  if (reconnaissanceParId?.[p?.id] === true) return 'reconnu';
+  const r = reconnaissanceParId?.[p?.id];
+  if (r && typeof r === 'object') return badgeDepuisMethode(r.methode);
   if (p?.confiance === 'faible') return 'a_verifier';
   return null;
 }

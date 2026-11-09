@@ -66,11 +66,15 @@ import ValidationScanSheet from "./components/admin/ValidationScanSheet";
 // Chantier 106 Lot A — module de contribution aux codes-barres : parcours
 // utilisateur depuis l'accueil, et file de validation côté François.
 import ContributionCodeBarresSheet from "./components/ContributionCodeBarresSheet";
+// Chantier 118 — historique des tickets + identification par code-barres (shadow François).
+import HistoriqueTicketsSheet from "./components/HistoriqueTicketsSheet";
+import { chargerDernierTicketAIdentifier } from "./lib/historiqueTicketsCore";
+import { resumeDernierTicket } from "./lib/scanDepuisHistorique";
 import PropositionsCodesBarresSheet from "./components/admin/PropositionsCodesBarresSheet";
 // #65 — bandeau de mise à jour PWA (pont vers registerSW dans main.jsx)
 import { onNeedRefresh, applyUpdate } from "./lib/swUpdate";
 // #56.5.A — double écriture Core, fire-and-forget, invisible pour l'utilisateur
-import { envoyerTicketCore, envoyerPrixManuelCore } from "./lib/doubleEcritureCore";
+import { envoyerTicketCore, envoyerPrixManuelCore, montantTotalImprime } from "./lib/doubleEcritureCore";
 // Chantier 97 — sélecteur de magasin CORE obligatoire avant l'import du ticket.
 import { chargerMagasinsCoreActifs, chargerFrequencesMagasins, classerMagasins as classerMagasinsSelecteur, filtrerMagasins, obtenirPositionAppareil, trouverStoreLegacyPourMagasin, formaterAdresseMagasin, formaterDistance } from "./lib/selecteurMagasinCore";
 // #56.6 — realized_saving Core scopé à un ticket, réutilise #56.5.B
@@ -2057,7 +2061,9 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
       });
       if (error || !Array.isArray(data)) return; // fallback silencieux = comportement actuel
       const map = {};
-      for (const r of data) { if (r && r.i != null) map[r.i] = r.reconnu === true; }
+      // Chantier 118 — on garde la METHODE (et plus seulement le booléen
+      // reconnu) : seule 'memoire_exacte' donne le badge vert.
+      for (const r of data) { if (r && r.i != null) map[r.i] = { methode: r.methode ?? null }; }
       setReconnaissanceParId(map);
     } catch { /* jamais bloquant */ }
   };
@@ -2160,6 +2166,9 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
       storeLegacyId: resolvedStoreId || null,
       magasinTexte:  magasinCoreRef.current?.nom || storeNameEdit.trim() || result?.store || null,
       dateTicket:    result?.date || null,
+      // Chantier 118 — total IMPRIMÉ lu par l'OCR (null s'il n'est pas lu),
+      // jamais la somme des lignes.
+      totalTicket:   result?.total_ticket ?? null,
     });
     // Chantier 93 — pose de l'empreinte sur le ticket créé (fire & forget,
     // filets internes) ; une course entre deux scans simultanés (23505) est
@@ -2214,8 +2223,8 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   const arriverAvecMagasinSession = async (parsed, prods) => {
     const nom = (magasinSession?.nom || parsed?.store || "").trim();
     const enseigne = storeIdFromName(magasinSession?.enseigne || nom || parsed?.store);
-    const adresse = [magasinSession?.adresse, [magasinSession?.code_postal, magasinSession?.ville].filter(Boolean).join(" ")]
-      .filter(Boolean).join(", ") || (parsed?.address || "");
+    // Chantier 118 — même formatage que la carte magasin (pas de CP/ville en double).
+    const adresse = formaterAdresseMagasin(magasinSession) || (parsed?.address || "");
     setSelectedStore(enseigne);
     setStoreNameEdit(nom);
     setStoreLocation(adresse);
@@ -2931,9 +2940,11 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                           {(formatStructureLu(p) || p.format) && (
                             <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>{formatStructureLu(p) || p.format}</span>
                           )}
-                          {/* Chantier 100 — reconnu par la base (mémoire/alias) prime sur la confiance IA */}
+                          {/* Chantier 100 / 118 — reconnu (mémoire exacte) / suggéré / à vérifier */}
                           {badgeProduit(p, reconnaissanceParId) === 'reconnu' ? (
                             <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:900, color:C.green, background:"#DFF7E8", borderRadius:99, padding:"2px 8px" }}>✓ reconnu</span>
+                          ) : badgeProduit(p, reconnaissanceParId) === 'suggere' ? (
+                            <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:900, color:C.blue, background:"#E3EEFF", borderRadius:99, padding:"2px 8px" }}>? suggéré</span>
                           ) : badgeProduit(p, reconnaissanceParId) === 'a_verifier' ? (
                             <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:900, color:"#B25900", background:"#FFE7C2", borderRadius:99, padding:"2px 8px" }}>⚠ à vérifier</span>
                           ) : null}
@@ -2958,6 +2969,14 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
 
           {status==="share" && (
             <>
+              {/* Chantier 118 — le total imprimé n'a pas été lu : le ticket sera
+                  enregistré sans montant, et aucun contrôle des prix n'a pu
+                  être fait (chantier 108). On le dit, sans bloquer. */}
+              {result && montantTotalImprime(result.total_ticket) == null && (
+                <div style={{ background:"#FFF4E0", borderRadius:12, padding:"10px 14px", marginBottom:14, border:"1.5px solid #F5A623", fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:800, color:"#7A4A00" }}>
+                  ⚠ Total non lu — vérifie les prix
+                </div>
+              )}
               <div style={{ background:"#F0FFF5", borderRadius:14, padding:"14px 16px", marginBottom:20, border:`1.5px solid ${C.green}` }}>
                 <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.green, marginBottom:4 }}>
                   👥 Partager avec ton cercle ?
@@ -3001,9 +3020,11 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                             {(formatStructureLu(p) || p.format) && (
                               <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>{formatStructureLu(p) || p.format}</span>
                             )}
-                            {/* Chantier 100 — reconnu par la base (mémoire/alias) prime sur la confiance IA */}
+                            {/* Chantier 100 / 118 — reconnu (mémoire exacte) / suggéré / à vérifier */}
                             {badgeProduit(p, reconnaissanceParId) === 'reconnu' ? (
                               <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:900, color:C.green, background:"#DFF7E8", borderRadius:99, padding:"2px 8px" }}>✓ reconnu</span>
+                            ) : badgeProduit(p, reconnaissanceParId) === 'suggere' ? (
+                              <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:900, color:C.blue, background:"#E3EEFF", borderRadius:99, padding:"2px 8px" }}>? suggéré</span>
                             ) : badgeProduit(p, reconnaissanceParId) === 'a_verifier' ? (
                               <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:900, color:"#B25900", background:"#FFE7C2", borderRadius:99, padding:"2px 8px" }}>⚠ à vérifier</span>
                             ) : null}
@@ -7054,7 +7075,7 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
 }
 
 // ── ARCHIVE TAB ───────────────────────────────────────────────────────────────
-function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceDB, onImport, onSavePrice, produitsRef = [], libelleVersNomProduit = {}, onLibelleResolu, estFrancois = false }) {
+function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceDB, onImport, onSavePrice, produitsRef = [], libelleVersNomProduit = {}, onLibelleResolu, estFrancois = false, onOuvrirHistoriqueTickets = null }) {
   // Chantier 1 — affichage seulement : si la ligne de ticket correspondante
   // est rattachée à un produit Core (résolu au chargement dans App, via
   // lignes_ticket.produit_id), on montre nom_reference à la place du libellé
@@ -7382,6 +7403,12 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
 
   return (
     <div style={{ padding:"16px 16px 110px" }}>
+      {/* Chantier 118 — accès à l'historique des tickets (shadow François). */}
+      {onOuvrirHistoriqueTickets && (
+        <button onClick={onOuvrirHistoriqueTickets} style={{ width:"100%", marginBottom:12, padding:"12px 14px", border:`2px solid ${C.blue}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.blue, cursor:"pointer", textAlign:"left" }}>
+          🧾 Mes tickets — identifier les produits <span style={{ float:"right" }}>›</span>
+        </button>
+      )}
       <div style={{ display:"flex", gap:8, marginBottom:16 }}>
         {[{id:"produit",label:"Par produit"},{id:"mois",label:"Par mois"}].map(t=>(
           <button key={t.id} onClick={()=>{ setSubTab(t.id); if(t.id==="produit") setSort("produit"); }} style={{ flex:1, padding:"10px", border:"none", borderRadius:10, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, cursor:"pointer", background:subTab===t.id?C.blue:C.grayLight, color:subTab===t.id?C.white:C.textLight }}>
@@ -9776,7 +9803,7 @@ function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, on
   );
 }
 
-function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash, onResumeScan, archives = [], pseudo, onStats, onMesPrix, onFavoris, onProfil = null, onFaq, onSignOut, pendingCagnotte, onConsumeCagnotteCelebration, pendingPotential, onConsumePotentialCelebration, estFrancois = false, sessionCourses = null, onReprendreCourses, onAbandonnerCourses, contributionCodesBarresVisible = false, onContribuerCodeBarres }) {
+function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash, onResumeScan, archives = [], pseudo, onStats, onMesPrix, onFavoris, onProfil = null, onFaq, onSignOut, pendingCagnotte, onConsumeCagnotteCelebration, pendingPotential, onConsumePotentialCelebration, estFrancois = false, sessionCourses = null, onReprendreCourses, onAbandonnerCourses, contributionCodesBarresVisible = false, onContribuerCodeBarres, dernierTicketAScanner = null, onOuvrirDernierTicket = null }) {
   const F = "'Nunito',sans-serif";
   // Chantier 79 (ajustement) — scan en cours visible dès l'accueil. HomeTab
   // n'étant monté que sur l'onglet home, la lecture au montage reflète l'état
@@ -9999,6 +10026,19 @@ function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash
           <span ref={cagnotteRealRef} style={{fontSize:'18px', fontWeight:'bold', color:'white', display:'inline-block', opacity: hideRealCagnotte ? 0 : 1}}>{displayCagnotte >= 0 ? "+" : ""}{displayCagnotte.toFixed(2)} €</span>
         </div>
       </div>
+
+      {/* Chantier 118 — produits à scanner du DERNIER ticket seulement ;
+          ouvre directement ce ticket. Masquée s'il n'y a rien à scanner. */}
+      {onOuvrirDernierTicket && dernierTicketAScanner && (
+        <button onClick={onOuvrirDernierTicket} style={{ display:'flex', alignItems:'center', gap:10, width:'calc(100% - 40px)', margin:'12px 20px 0', padding:'11px 14px', background:'#FFF4E0', border:'1.5px solid #F5A623', borderRadius:14, position:'relative', zIndex:10, boxShadow:'0 3px 12px rgba(0,0,0,0.12)', cursor:'pointer', textAlign:'left', boxSizing:'border-box' }}>
+          <span style={{ fontSize:20 }}>📷</span>
+          <span style={{ flex:1, fontFamily:F, fontWeight:900, fontSize:13, color:'#7A4A00' }}>
+            {dernierTicketAScanner.titre}
+            <span style={{ display:'block', fontWeight:700, fontSize:11, marginTop:1 }}>{dernierTicketAScanner.sousTitre}</span>
+          </span>
+          <span style={{ color:'#7A4A00', fontSize:18 }}>›</span>
+        </button>
+      )}
 
       {/* Chantier 79 (ajustement) — carte "scan en cours" visible dès l'accueil */}
       {scanDraft && (
@@ -10636,6 +10676,30 @@ export default function App() {
   // Chantier 106 Lot A — parcours de contribution (utilisateur) et file de
   // validation des codes-barres proposés (admin), deux écrans distincts.
   const [showContributionCodeBarres, setShowContributionCodeBarres] = useState(false);
+  // Chantier 118 — historique des tickets (shadow François). La pastille de
+  // l'accueil ne parle que du DERNIER ticket (retour terrain du 09/11 : « 115
+  // produits à identifier » sur tout l'historique décourage). null = rien à
+  // afficher ou inconnu : jamais un faux chiffre.
+  const [showHistoriqueTickets, setShowHistoriqueTickets] = useState(false);
+  const [historiqueTicketInitial, setHistoriqueTicketInitial] = useState(null);
+  const [dernierTicketAScanner, setDernierTicketAScanner] = useState(null);
+  // Relu à chaque retour sur l'accueil et à la fermeture de l'historique
+  // (un import de ticket ramène toujours sur l'accueil). Best effort : une
+  // erreur laisse la valeur précédente.
+  useEffect(() => {
+    if (!estFrancois || !loaded || tab !== "home" || showHistoriqueTickets) return;
+    let annule = false;
+    chargerDernierTicketAIdentifier(session?.user?.id).then(r => {
+      if (annule || r == null) return;
+      const resume = resumeDernierTicket(r.ticket, r.n);
+      setDernierTicketAScanner(resume ? { ...resume, ticket: r.ticket } : null);
+    });
+    return () => { annule = true; };
+  }, [estFrancois, loaded, tab, showHistoriqueTickets, session?.user?.id]);
+  const ouvrirHistoriqueTickets = (ticketInitial = null) => {
+    setHistoriqueTicketInitial(ticketInitial);
+    setShowHistoriqueTickets(true);
+  };
   const [showPropositionsCodesBarres, setShowPropositionsCodesBarres] = useState(false);
   const handleFlash = () => setShowScanChoix(true);
   const handleFlashConfirmed = () => { setShowScanChoix(false); setAutoOpenCamera(true); setTab("prices"); };
@@ -12127,7 +12191,7 @@ export default function App() {
             </div>
           )}
           <TabErrorBoundary key={tab}>
-          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} onResumeScan={handleResumeScan} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFavoris={()=>setShowFavorisSheet(true)} onProfil={profilVisible ? ()=>setShowProfilSheet(true) : null} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)} estFrancois={estFrancois} sessionCourses={sessionCoursesAccessible ? sessionCoursesActive : null} onReprendreCourses={()=>setTab("courses")} onAbandonnerCourses={abandonnerSessionCourses} contributionCodesBarresVisible={contributionCodesBarresActive || isAdmin} onContribuerCodeBarres={()=>setShowContributionCodeBarres(true)}/>}
+          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} onResumeScan={handleResumeScan} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFavoris={()=>setShowFavorisSheet(true)} onProfil={profilVisible ? ()=>setShowProfilSheet(true) : null} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)} estFrancois={estFrancois} sessionCourses={sessionCoursesAccessible ? sessionCoursesActive : null} onReprendreCourses={()=>setTab("courses")} onAbandonnerCourses={abandonnerSessionCourses} contributionCodesBarresVisible={contributionCodesBarresActive || isAdmin} onContribuerCodeBarres={()=>setShowContributionCodeBarres(true)} dernierTicketAScanner={dernierTicketAScanner} onOuvrirDernierTicket={estFrancois && dernierTicketAScanner ? ()=>ouvrirHistoriqueTickets(dernierTicketAScanner.ticket) : null}/>}
           {/* Chantier « Micro » Lot 1 — même mécanique shadow que rejets (#56.3b) :
               jamais rendu pour un autre utilisateur, même si tab="micro" traîne en state.
               Lot 5 : onAdd = le addItem OFFICIEL du caddie (même chemin que le Catalogue). */}
@@ -12154,7 +12218,7 @@ export default function App() {
             setShowRating({id:data.id,store:newArc.store});
             return { ok:true };
           }} userId={session?.user?.id} produitsRef={produitsRef}/>}
-          {loaded && tab==="archive"   && <ArchiveTab   archives={archives} storeRatings={storeRatings} onDelete={deleteArchive} priceDB={priceDB} onImport={handleImportPrices} onSavePrice={handleSavePrice} produitsRef={produitsRef} libelleVersNomProduit={libelleVersNomProduit} onLibelleResolu={(cle,nom)=>setLibelleVersNomProduit(prev=>({...prev,[cle]:nom}))} estFrancois={estFrancois} onAddToList={arcItem=>{
+          {loaded && tab==="archive"   && <ArchiveTab   archives={archives} storeRatings={storeRatings} onDelete={deleteArchive} priceDB={priceDB} onImport={handleImportPrices} onSavePrice={handleSavePrice} produitsRef={produitsRef} libelleVersNomProduit={libelleVersNomProduit} onLibelleResolu={(cle,nom)=>setLibelleVersNomProduit(prev=>({...prev,[cle]:nom}))} estFrancois={estFrancois} onOuvrirHistoriqueTickets={estFrancois ? ()=>ouvrirHistoriqueTickets(null) : null} onAddToList={arcItem=>{
             const newItem={id:Date.now()+Math.random(),product:arcItem.product,format:arcItem.format||"",brand:arcItem.brand||"",qty:arcItem.qty||1,checked:false};
             addItem(newItem);
             showAppToast(`✓ ${arcItem.product} ajouté à ta liste`);
@@ -12231,6 +12295,9 @@ export default function App() {
             estAdmin gouverne le seul bouton « proposer quand même » du
             garde-fou 105 — pour tout autre utilisateur il n'existe pas, et sa
             proposition part en file au lieu d'écrire quoi que ce soit. */}
+        {showHistoriqueTickets && estFrancois && (
+          <HistoriqueTicketsSheet userId={session?.user?.id} ticketInitial={historiqueTicketInitial} onClose={()=>{ setShowHistoriqueTickets(false); setHistoriqueTicketInitial(null); }}/>
+        )}
         {showContributionCodeBarres && (contributionCodesBarresActive || isAdmin) && (
           <ContributionCodeBarresSheet estAdmin={isAdmin} onClose={()=>setShowContributionCodeBarres(false)}/>
         )}
@@ -12566,7 +12633,7 @@ export default function App() {
               nom: sessionCoursesActive.magasin?.nom ?? "Magasin",
               enseigne: sessionCoursesActive.magasin?.enseigne ?? null,
               storeLegacyId: null,
-              adresse: [sessionCoursesActive.magasin?.adresse, [sessionCoursesActive.magasin?.code_postal, sessionCoursesActive.magasin?.ville].filter(Boolean).join(" ")].filter(Boolean).join(", ") || null,
+              adresse: formaterAdresseMagasin(sessionCoursesActive.magasin) || null,
             }}
           />
         )}

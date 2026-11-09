@@ -7,7 +7,8 @@
 //
 // Trois réactions, graduées, et toutes fondées sur des chiffres MESURÉS :
 //   - EcranLectureRefusee     : au-delà de 10 % d'écart, on n'importe pas.
-//   - BandeauLectureIncomplete: entre 2 % et 10 %, on prévient, on n'empêche rien.
+//   - BandeauLectureIncomplete: montant à plus de 0,10 € d'écart (chantier 118) ou
+//     articles entre 2 % et 10 % : on prévient, on n'empêche rien.
 //   - ConfirmationDateTicket  : une date future ou vieille de plus de 90 jours
 //                               ne s'enregistre jamais en silence.
 import {
@@ -95,7 +96,8 @@ export function EcranLectureRefusee({ controle, onReprendrePhoto, onSaisieManuel
   );
 }
 
-// Entre 2 % et 10 % : on prévient, l'import reste possible. Le ton est ambre et
+// Montant à plus de 0,10 € d'écart (chantier 118), ou articles entre 2 % et
+// 10 % : on prévient, l'import reste possible. Le ton est ambre et
 // non rouge, et aucun bouton ne change : à cette échelle, l'écart vient aussi
 // bien d'une remise non lue que d'une ligne manquée.
 export function BandeauLectureIncomplete({ controle }) {

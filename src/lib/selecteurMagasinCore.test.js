@@ -44,6 +44,18 @@ describe('distanceKm / formaterDistance', () => {
 });
 
 describe('formaterAdresseMagasin', () => {
+  // Chantier 118 — défaut du 09/11 : « 13100 AIX EN PROVENCE, 13100 AIX EN PROVENCE ».
+  it('ne répète pas CP + ville déjà présents dans l\'adresse', () => {
+    expect(formaterAdresseMagasin({ adresse: 'AV DES INFIRMERIES 13100 AIX EN PROVENCE', code_postal: '13100', ville: 'Aix-en-Provence' }))
+      .toBe('AV DES INFIRMERIES 13100 AIX EN PROVENCE');
+    expect(formaterAdresseMagasin({ adresse: '2 rue X, 13100 Aix', code_postal: '13100', ville: 'Aix-en-Provence' }))
+      .toBe('2 rue X, 13100 Aix, Aix-en-Provence');
+    expect(formaterAdresseMagasin({ adresse: '2 rue X 13009', code_postal: '13009', ville: 'Marseille' }))
+      .toBe('2 rue X 13009, Marseille');
+  });
+  it('un CP contenu dans un numéro plus long n\'est pas pris pour le CP', () => {
+    expect(formaterAdresseMagasin({ adresse: 'ZA 1310045', code_postal: '13100', ville: 'Aix' })).toBe('ZA 1310045, 13100 Aix');
+  });
   it('assemble adresse, CP et ville en sautant les champs absents', () => {
     expect(formaterAdresseMagasin({ adresse: '2 rue X', code_postal: '13009', ville: 'Marseille' }))
       .toBe('2 rue X, 13009 Marseille');

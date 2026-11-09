@@ -12,7 +12,20 @@ import { supabase } from './supabase';
 // en 1er argument de resoudre_magasin_core). Tant que la base ne le lit pas,
 // la clé est simplement ignorée — magasin_texte (nom exact de la fiche Core)
 // et store_legacy_id restent les filets de résolution.
-export async function envoyerTicketCore(toImport, { magasinId, storeLegacyId, magasinTexte, dateTicket } = {}) {
+// Chantier 118 (étape 11) — le montant du ticket est le TOTAL IMPRIMÉ lu par
+// l'OCR (`total_ticket` de l'Edge Function scan-ticket), jamais la somme des
+// lignes. Constat du 09/11 : le ticket Intermarché Aix a été enregistré à
+// 60,49 € (somme des lignes, remises non déduites) alors que 59,43 € est
+// imprimé. Non lu, nul, négatif ou illisible -> null : la colonne l'accepte, et
+// un « total » recalculé passerait pour une lecture. Même règle que le contrôle
+// du chantier 108 (un total n'est exploitable que s'il est > 0). Pure.
+export function montantTotalImprime(totalTicket) {
+  if (totalTicket == null || totalTicket === '') return null;
+  const n = Number(totalTicket);
+  return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null;
+}
+
+export async function envoyerTicketCore(toImport, { magasinId, storeLegacyId, magasinTexte, dateTicket, totalTicket = null } = {}) {
   try {
     if (!Array.isArray(toImport) || toImport.length === 0) return null;
 
@@ -26,10 +39,7 @@ export async function envoyerTicketCore(toImport, { magasinId, storeLegacyId, ma
       prix_unitaire: Number(p.price),
     }));
 
-    const montantTotal = toImport.reduce(
-      (somme, p) => somme + Number(p.price) * Number(p.qty || 1),
-      0
-    );
+    const montantTotal = montantTotalImprime(totalTicket);
 
     const payload = {
       magasin_id:      magasinId || null,
