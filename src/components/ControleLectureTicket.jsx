@@ -156,3 +156,115 @@ export function ConfirmationDateTicket({ controleDate, onGarder, onRemplacer }) 
     </div>
   );
 }
+
+// Correctif « scan anti-invention » (11/11) — lecture DOUTEUSE, sans être
+// assez fausse pour être refusée : la somme des lignes ne colle pas au total
+// imprimé (plus de 0,10 € d'écart, sous les 10 % du refus), ou deux lectures
+// de la même photo ne donnent pas le même nombre de produits. Cas réel : un
+// ticket Utile de 5 lignes lu 7, 21 puis 5 produits, avec des lignes
+// inventées. « Reprendre la photo » est le bouton principal ; continuer reste
+// possible, en second, puisque chaque ligne passe encore en validation.
+// Correctif orientation (11/11) — motifs ajoutés : nombre d'articles
+// introuvable sur une lecture fragile, date absurde. Chaque motif présent
+// donne sa phrase ; `motifs` vient de lib/lectureDouteuse.js (motifsDoute).
+const RAISONS_FRAGILITE = {
+  montant_non_mesurable: 'le total ou les remises n\'ont pas pu être lus',
+  date_illisible: 'la date n\'a pas été lue',
+  confiance_faible_majoritaire: 'la plupart des lignes sont incertaines',
+  ligne_sans_libelle: 'une ligne n\'a pas de texte lisible',
+};
+
+const formatDateLongue = (iso) => {
+  const d = new Date(`${iso}T12:00:00`);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+};
+
+// Correctif 9h58 — « 3 × 1,69 € » : une ligne sous forme lisible.
+const formatChiffres = (c) => (c ? `${String(c.qty).replace('.', ',')} × ${formatEuros(c.prix) ?? '?'} = ${formatEuros(c.total) ?? '?'}` : 'absente');
+const extraitLibelle = (l) => { const t = String(l || '').trim(); return t.length > 34 ? `${t.slice(0, 33)}…` : t; };
+
+export function EcranLectureDouteuse({ motifs = [], controle, controleDate, raisonsFragilite = [], comptesLectures = [], lignesIncoherentes = [], lignesDivergentes = [], onReprendrePhoto, onContinuer }) {
+  const montantFaux = motifs.includes('montant') && !!controle && controle.totalTicket != null;
+  const lecturesDivergentes = motifs.includes('lectures_divergentes');
+  const articlesIntrouvables = motifs.includes('articles_introuvables');
+  const dateAbsurde = motifs.includes('date_absurde') && !!controleDate?.dateLue;
+  const lignesLues = controle ? (controle.sommeApresRemises ?? controle.sommeLignes) : null;
+  const avecRemises = !!controle && controle.remises != null && controle.remises > 0;
+  const [a, b] = comptesLectures;
+  const raisons = raisonsFragilite.map(r => RAISONS_FRAGILITE[r]).filter(Boolean);
+  const phrases = [];
+  if (montantFaux) phrases.push('Le total des lignes lues ne correspond pas au total imprimé sur le ticket.');
+  if (motifs.includes('ligne_incoherente')) {
+    for (const l of lignesIncoherentes.slice(0, 3)) {
+      const calcul = formatEuros(Math.round(l.qty * l.prix * 100) / 100);
+      phrases.push(`Ligne « ${extraitLibelle(l.libelle)} » : ${String(l.qty).replace('.', ',')} × ${formatEuros(l.prix)} = ${calcul}, mais le total lu est ${formatEuros(l.total)}.`);
+    }
+  }
+  if (lecturesDivergentes) {
+    if (a != null && b != null && a !== b) {
+      phrases.push(`La photo a été lue deux fois et les deux lectures ne trouvent pas le même nombre de produits (${a} et ${b}).`);
+    } else if (lignesDivergentes.length > 0) {
+      for (const l of lignesDivergentes.slice(0, 3)) {
+        // Correctif 10h36 — même chiffres mais texte vraiment différent.
+        const memesChiffres = l.a && l.b && formatChiffres(l.a) === formatChiffres(l.b);
+        if (l.texteA && l.texteB && memesChiffres) {
+          phrases.push(`La photo a été lue deux fois et les deux lectures ne lisent pas le même article sur une ligne (« ${extraitLibelle(l.texteA)} » contre « ${extraitLibelle(l.texteB)} »).`);
+        } else {
+          phrases.push(`La photo a été lue deux fois et les deux lectures ne donnent pas les mêmes chiffres pour « ${extraitLibelle(l.libelle)} » (${formatChiffres(l.a)} contre ${formatChiffres(l.b)}).`);
+        }
+      }
+    } else {
+      phrases.push('La photo a été lue deux fois et les deux lectures ne donnent pas le même résultat.');
+    }
+  }
+  if (dateAbsurde) {
+    phrases.push(controleDate.raison === DATE_FUTURE
+      ? `La date lue (${formatDateLongue(controleDate.dateLue)}) est dans le futur.`
+      : `La date lue (${formatDateLongue(controleDate.dateLue)}) n'est pas vraisemblable pour un ticket qu'on vient de scanner.`);
+  }
+  if (articlesIntrouvables) {
+    phrases.push(`Le nombre d'articles imprimé sur le ticket n'a pas été trouvé${raisons.length ? `, et ${raisons.join(', ')}` : ''}.`);
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 620, display: 'flex', alignItems: 'flex-end' }}>
+      <div style={{ background: '#fff', borderRadius: '20px 20px 0 0', width: '100%', maxHeight: '92vh', overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '20px 20px calc(20px + env(safe-area-inset-bottom, 0px))', boxSizing: 'border-box' }}>
+        <div style={{ fontFamily: F, fontWeight: 900, fontSize: 18, color: '#B26A00' }}>
+          ⚠️ Cette lecture est peut-être fausse
+        </div>
+        <div style={{ fontFamily: F, fontSize: 13, color: '#666', marginTop: 6, lineHeight: 1.5 }}>
+          {phrases.map((p, i) => <div key={i} style={{ marginTop: i ? 4 : 0 }}>{p}</div>)}
+        </div>
+
+        {montantFaux && (
+          <DeuxChiffres
+            etiquetteGauche={avecRemises ? 'LIGNES LUES (REMISES DÉDUITES)' : 'LIGNES LUES'}
+            valeurGauche={formatEuros(lignesLues)}
+            etiquetteDroite="TICKET"
+            valeurDroite={formatEuros(controle.totalTicket)}
+          />
+        )}
+
+        <div style={{ marginTop: 12, padding: 12, background: '#FFF8E1', border: '1px solid #F0DFA0', borderRadius: 10, fontFamily: F, fontSize: 12, color: '#7A6000', lineHeight: 1.5 }}>
+          Le lecteur a sans doute mal vu le ticket : il a pu inventer ou oublier des lignes. Le plus sûr est de reprendre la photo, ticket entier, bien à plat et bien éclairé.
+        </div>
+
+        <button
+          onClick={onReprendrePhoto}
+          style={{ width: '100%', marginTop: 16, padding: 14, border: 'none', borderRadius: 12, background: '#00B341', color: '#fff', fontFamily: F, fontWeight: 900, fontSize: 15, cursor: 'pointer' }}
+        >
+          📷 Reprendre la photo
+        </button>
+        <button
+          onClick={onContinuer}
+          style={{ width: '100%', marginTop: 8, padding: 12, border: '1px solid #ddd', borderRadius: 12, background: 'transparent', color: '#333', fontFamily: F, fontWeight: 800, fontSize: 14, cursor: 'pointer' }}
+        >
+          Continuer quand même
+        </button>
+        <div style={{ fontFamily: F, fontSize: 11, color: '#999', marginTop: 8, textAlign: 'center', lineHeight: 1.4 }}>
+          Rien n'est encore enregistré. Si tu continues, vérifie chaque ligne avant d'importer.
+        </div>
+      </div>
+    </div>
+  );
+}

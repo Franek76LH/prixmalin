@@ -10,6 +10,7 @@
 //
 // Fonctions pures, aucune ne throw.
 import { idEnseigneDepuisSlug } from './enseignesMagasin';
+import { coeurDeRue } from './adresseMagasin';
 
 // Seuil bas de la zone grise de la RPC (0,70 <= sim < 0,85 -> 'ambigu').
 export const SEUIL_MAGASIN_PROCHE = 0.70;
@@ -92,5 +93,63 @@ export function doitProposerNouveauMagasin({ nom, adresse, enseigneId, magasins 
   } catch (e) {
     console.error('[C115] détection nouveau magasin', e);
     return false;
+  }
+}
+
+// ── Présélection du magasin reconnu (validée le 11/11, change la règle du
+//    chantier 97 « l'utilisateur choisit toujours ») ─────────────────────────
+// Constat : ticket Utile lu « UTILE AIX EN PROVENCE, 68, BD DU ROY RENE, 13100
+// AIX-EN-PROVENCE » ; le magasin existe, mais l'étape magasin attendait un
+// choix manuel et Utile n'apparaissait ni dans les habituels ni à proximité.
+//
+// On présélectionne UNIQUEMENT quand la correspondance est SÛRE :
+//   - enseigne du ticket connue (pas « autre ») et magasin de la MÊME enseigne ;
+//   - même code postal ;
+//   - adresse au-dessus du seuil de RATTACHEMENT AUTOMATIQUE de la base (0,85,
+//     et non 0,70 qui est le bas de la zone grise) ;
+//   - et UN SEUL magasin remplit tout ça.
+// Au moindre doute : null, et l'écran reste celui d'avant. Pure, ne throw pas.
+export const SEUIL_RATTACHEMENT_AUTO = 0.85;
+
+function similariteAdresseTicket(adr, cp, m) {
+  const rueTicket = adr.split(cp)[0].replace(/[,\s]+$/, '');
+  const complete = [m.adresse, [m.code_postal, m.ville].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  return Math.max(
+    similariteTrigramme(adr, m.adresse),
+    rueTicket ? similariteTrigramme(rueTicket, m.adresse) : 0,
+    similariteTrigramme(adr, complete),
+  );
+}
+
+// Correctif 10h38 — le numéro et le type de voie sont les parties les plus
+// souvent mal lues (« 68, BD » lu « ZAC RD » : ressemblance 0,73, pas de
+// présélection). On compare donc AUSSI le nom de la rue seul (« du roy
+// rene »), au même seuil de 0,85. Toutes les autres conditions restent :
+// même enseigne connue, même code postal, un seul magasin. Le nom de rue doit
+// garder au moins 4 lettres pour compter (« 13100 AIX » seul ne prouve rien).
+const LETTRES_MIN_COEUR = 4;
+function nomDeRueSemblable(adr, m) {
+  const a = coeurDeRue(adr), b = coeurDeRue(m.adresse);
+  if (a.replace(/[^a-z]/g, '').length < LETTRES_MIN_COEUR || b.replace(/[^a-z]/g, '').length < LETTRES_MIN_COEUR) return false;
+  return similariteTrigramme(a, b) >= SEUIL_RATTACHEMENT_AUTO;
+}
+
+export function magasinReconnuPourTicket({ adresse, enseigneId, magasins }) {
+  try {
+    const adr = String(adresse ?? '').trim();
+    const cp = extraireCodePostal(adr);
+    if (!adr || !cp || !Array.isArray(magasins)) return null;
+    const ens = idEnseigneDepuisSlug(enseigneId);
+    if (!ens || ens === 'autre') return null;
+    const surs = magasins.filter((m) =>
+      m && m.adresse
+      && idEnseigneDepuisSlug(m?.enseignes?.slug) === ens
+      && String(m.code_postal ?? '').trim() === cp
+      && (similariteAdresseTicket(adr, cp, m) >= SEUIL_RATTACHEMENT_AUTO || nomDeRueSemblable(adr, m)));
+    const ids = new Set(surs.map((m) => m.id));
+    return ids.size === 1 ? surs[0] : null;
+  } catch (e) {
+    console.error('[présélection magasin]', e);
+    return null;
   }
 }

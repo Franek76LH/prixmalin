@@ -165,12 +165,20 @@ const normaliserTexte = (t) => String(t || '')
   .trim();
 
 // Recherche par nom d'enseigne / nom de magasin / code postal / ville / adresse.
+// Recherche tolérante (validée le 11/11) : tirets, apostrophes et ponctuation
+// valent un espace, accents et majuscules ignorés, et CHAQUE MOT est cherché
+// séparément dans l'ensemble des champs du magasin. « UTILE AIX EN PROVENCE »
+// (ticket) trouve « UTILE Aix-en-Provence » ; avant, la phrase entière devait
+// figurer telle quelle dans un seul champ.
+const motsRecherche = (t) => normaliserTexte(t).replace(/[^a-z0-9]+/g, ' ').trim();
+
 export function filtrerMagasins(magasins = [], recherche = '') {
-  const q = normaliserTexte(recherche);
-  if (!q) return magasins;
-  return magasins.filter(m =>
-    [m.nom, m.ville, m.code_postal, m.adresse, m.enseignes?.nom]
-      .some(v => normaliserTexte(v).includes(q)));
+  const mots = motsRecherche(recherche).split(' ').filter(Boolean);
+  if (mots.length === 0) return magasins;
+  return magasins.filter(m => {
+    const texte = ` ${[m.nom, m.ville, m.code_postal, m.adresse, m.enseignes?.nom].map(motsRecherche).join(' ')} `;
+    return mots.every(mot => texte.includes(mot));
+  });
 }
 
 // Position de l'appareil SANS popup de permission surprise : on n'interroge le

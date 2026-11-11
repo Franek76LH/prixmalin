@@ -1,11 +1,13 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback, Component } from "react";
-import { imageFileToJpegBase64, scanMultipleTicketsWithClaude, filtrerProduitsExploitables, scanTicketRobuste, MESSAGES_SCAN, badgeProduit } from "./scanTicket";
+import { imageFileToJpegBase64, scanMultipleTicketsWithClaude, filtrerProduitsExploitables, scanTicketRobuste, MESSAGES_SCAN, badgeProduit, redresserPhoto } from "./scanTicket";
+import { motifsDoute } from "./lib/lectureDouteuse";
+import { nettoyerAdresseMagasin } from "./lib/adresseMagasin";
 import { STORES, STALE_DAYS, JOURS_MOYENNE } from "./constants";
 import { supabase } from "./lib/supabase";
 // Chantier 115 — enseignes lues dans la table (liste en dur en secours) et
 // carte « Nouveau magasin détecté » à l'étape magasin du scan.
 import { storeIdFromName as storeIdFromNameEnseignes, chargerEnseignes, enseignesEnCache, trouverEnseigneDansNom } from "./lib/enseignesMagasin";
-import { doitProposerNouveauMagasin } from "./lib/nouveauMagasinTicket";
+import { doitProposerNouveauMagasin, magasinReconnuPourTicket } from "./lib/nouveauMagasinTicket";
 import { mapperLigneListeCourses, chargerVariantes, getCategoryPresentation, formatFormatStructure, calculerPrixUnitaire, prixEstFiable, offresPrioritaires, MENTION_PRIX_A_VERIFIER } from "./lib/catalogueCore";
 import { calculerPrixReferenceParUnite } from "./lib/unitesCore";
 import { urlPhotoVariante, offLargeSource, offFullUrl, cloudinaryAgrandi } from "./lib/photosProduits";
@@ -39,7 +41,7 @@ import AdminRejetsCorePanel from "./components/admin/AdminRejetsCorePanel";
 import BarcodeScannerSheet from "./components/BarcodeScannerSheet";
 // Chantier 108 — contrôle de cohérence de la lecture d'un ticket.
 import { controlerCoherenceTicket, controlerDateTicket, NIVEAU_BLOCAGE, NIVEAU_AVERTISSEMENT } from "./lib/coherenceTicket";
-import { EcranLectureRefusee, BandeauLectureIncomplete, ConfirmationDateTicket } from "./components/ControleLectureTicket";
+import { EcranLectureRefusee, EcranLectureDouteuse, BandeauLectureIncomplete, ConfirmationDateTicket } from "./components/ControleLectureTicket";
 // Chantier 109 — lire la réponse de enregistrer_ticket_core au lieu de la jeter.
 import { interpreterResultatCore, NIVEAU_ECHEC, NIVEAU_INFO } from "./lib/resultatEcritureCore";
 import AlerteEcritureCore from "./components/AlerteEcritureCore";
@@ -1552,6 +1554,13 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   const [lectureRefusee, setLectureRefusee] = useState(null);
   const [avertissementLecture, setAvertissementLecture] = useState(null);
   const [dateAConfirmer, setDateAConfirmer] = useState(null);
+  // Correctif « scan anti-invention » — lecture douteuse en attente : écran
+  // « Reprendre la photo » (principal) / « Continuer quand même » (second).
+  // { parsed, controle, lecturesDivergentes, comptesLectures, options }
+  const [lectureDouteuse, setLectureDouteuse] = useState(null);
+  // Correctif orientation — étape du scan en cours, pour le message d'attente :
+  // 'sens' (« Je vérifie le sens de la photo… ») puis 'lecture'.
+  const [etapeScan, setEtapeScan] = useState(null);
   const [selectedStore, setSelectedStore] = useState("");
   const [editableProducts, setEditableProducts] = useState([]);
   const [scanning,      setScanning]      = useState(false);
@@ -1594,6 +1603,12 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   const [magasinCore,        setMagasinCoreState]  = useState(null);
   const magasinCoreRef = useRef(null);
   const definirMagasinCore = (m) => { magasinCoreRef.current = m; setMagasinCoreState(m); };
+  // Présélection du magasin reconnu (validée le 11/11) : vrai quand le magasin
+  // affiché a été choisi par l'app, pas par l'utilisateur -> carte « Magasin
+  // reconnu » avec un bouton « Changer » bien visible. Le jeton évite qu'une
+  // présélection tardive s'applique à un autre ticket.
+  const [magasinPreselectionne, setMagasinPreselectionne] = useState(false);
+  const etapeMagasinJetonRef = useRef(0);
   // Sélecteur : { tous, habituels, proches, autres } ; null = pas encore chargé.
   const [magasinsCore,        setMagasinsCore]        = useState(null);
   const [magasinsCoreLoading, setMagasinsCoreLoading] = useState(false);
@@ -1629,7 +1644,13 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   //
   // Toute défaillance du contrôle lui-même le rend MUET et laisse passer la
   // lecture : un garde-fou qui casse l'import serait pire que pas de garde-fou.
-  const controlerLecture = (parsed) => {
+  // Correctif « scan anti-invention » — `douteuse` (2e argument) : quand la
+  // somme des lignes ne colle pas au total imprimé (niveau avertissement du
+  // 108, motif montant) ou quand les deux lectures de la même photo ne donnent
+  // pas le même nombre de produits, on s'arrête AUSSI avant toute écriture,
+  // mais l'utilisateur peut continuer (écran EcranLectureDouteuse). Le refus
+  // au-delà de 10 % reste un refus, sans « continuer » (108 inchangé).
+  const controlerLecture = (parsed, douteuse = null) => {
     let controle = null;
     let controleDate = null;
     try {
@@ -1651,7 +1672,66 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     setLectureRefusee(null);
     setAvertissementLecture(controle.niveau === NIVEAU_AVERTISSEMENT ? controle : null);
     setDateAConfirmer(controleDate?.suspecte ? controleDate : null);
+
+    // Correctif orientation — garde-fous ajoutés : nombre d'articles
+    // introuvable sur une lecture fragile, date absurde (futur ou > 1 an).
+    // Logique pure dans lib/lectureDouteuse.js.
+    if (douteuse) {
+      let doute = { motifs: [], raisonsFragilite: [], lignesIncoherentes: [] };
+      try {
+        doute = motifsDoute({ parsed, controle, controleDate, lecturesDivergentes: !!douteuse.lecturesDivergentes });
+      } catch (e) {
+        console.error('[anti-invention] motifs de doute :', e);
+      }
+      if (doute.motifs.length > 0) {
+        setLectureDouteuse({
+          parsed,
+          controle,
+          controleDate,
+          motifs: doute.motifs,
+          raisonsFragilite: doute.raisonsFragilite,
+          lignesIncoherentes: doute.lignesIncoherentes || [],
+          lignesDivergentes: douteuse.lignesDivergentes || [],
+          comptesLectures: douteuse.comptesLectures || [],
+          options: douteuse.options || {},
+        });
+        return true;
+      }
+    }
     return false;
+  };
+
+  // Correctif « scan anti-invention » — la suite d'une lecture acceptée,
+  // auparavant recopiée dans chaque chemin de scan (caméra, galerie, résultat
+  // déjà scanné en amont) : extraite telle quelle pour que « Continuer quand
+  // même » reprenne exactement le même chemin. `share` : la galerie cochait
+  // déjà share:true sur chaque ligne, les autres chemins non.
+  const poursuivreLecture = async (lu, { share = false } = {}) => {
+    // Correctif 9h58 — l'adresse lue est nettoyée AVANT tout usage
+    // (comparaison aux magasins connus, carte « Nouveau magasin détecté »,
+    // géocodage, envoi à la base) : numéro, rue, code postal, ville.
+    const parsed = { ...lu, address: nettoyerAdresseMagasin(lu?.address) };
+    const enseigne = storeIdFromName(parsed.store);
+    const prods = parsed.products.map((p, i) => (share ? { ...p, id: i, keep: true, share: true } : { ...p, id: i, keep: true }));
+    setResult(parsed);
+    setSelectedStore(enseigne);
+    setEditableProducts(prods);
+    if (magasinSession) {
+      // Chantier 90 — magasin de la session confirmé : étape magasin sautée.
+      await arriverAvecMagasinSession(parsed, prods);
+    } else {
+      setStoreNameEdit(parsed.store || "");
+      setStoreLocation(parsed.address || "");
+      await arriverEtapeMagasin(enseigne, parsed.address || null, parsed.store || null);
+    }
+  };
+
+  const continuerLectureDouteuse = async () => {
+    const attente = lectureDouteuse;
+    setLectureDouteuse(null);
+    if (!attente) return;
+    try { await poursuivreLecture(attente.parsed, attente.options); }
+    catch (e) { setError("Erreur scan : " + e.message); }
   };
 
   // Chantier 108 — la date retenue par l'utilisateur remplace celle qui a été
@@ -1675,20 +1755,10 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     }
     // Chantier 108 — même portillon que les scans directs : une lecture
     // manifestement fausse n'entre pas, même arrivée d'un scan fait en amont.
-    if (controlerLecture(initialResult)) return;
-    const enseigne = storeIdFromName(initialResult.store);
-    const prods = initialResult.products.map((p, i) => ({ ...p, id: i, keep: true }));
-    setResult(initialResult);
-    setSelectedStore(enseigne);
-    setEditableProducts(prods);
-    if (magasinSession) {
-      // Chantier 90 — magasin de la session confirmé : étape magasin sautée.
-      arriverAvecMagasinSession(initialResult, prods);
-      return;
-    }
-    setStoreNameEdit(initialResult.store || "");
-    setStoreLocation(initialResult.address || "");
-    arriverEtapeMagasin(enseigne, initialResult.address || null, initialResult.store || null);
+    // Correctif anti-invention : un total qui ne colle pas arrête aussi ici
+    // (lecture faite en amont, une seule lecture -> pas de comparaison).
+    if (controlerLecture(initialResult, { lecturesDivergentes: false })) return;
+    poursuivreLecture(initialResult);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1758,9 +1828,10 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   // l'ajout. `suggestion` (nom OCR du ticket, ex. « Auchan ») pré-remplit la
   // recherche UNIQUEMENT si elle matche au moins un magasin.
   const chargerSelecteurMagasins = async (suggestion = null) => {
-    if (magasinsCoreLoadingRef.current) return;
+    if (magasinsCoreLoadingRef.current) return null;
     magasinsCoreLoadingRef.current = true;
     setMagasinsCoreLoading(true);
+    let charges = null;
     try {
       const [tous, frequences, positionGps] = await Promise.all([
         chargerMagasinsCoreActifs(),
@@ -1776,12 +1847,16 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
       if (suggestion && filtrerMagasins(tous, suggestion).length > 0) {
         setRechercheMagasin(prev => prev || suggestion);
       }
+      charges = tous;
     } catch (e) {
       console.error('[C97] chargement sélecteur magasins', e);
       setMagasinsCore({ tous: [], habituels: [], proches: [], autres: [] });
     }
     magasinsCoreLoadingRef.current = false;
     setMagasinsCoreLoading(false);
+    // Présélection (11/11) — la liste chargée est rendue à l'appelant ; null
+    // si le chargement a échoué ou était déjà en cours (pas de présélection).
+    return charges;
   };
 
   // Choix d'un magasin CORE existant : satisfait le gate, et ALIGNE le circuit
@@ -1804,7 +1879,9 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   const arriverEtapeMagasin = async (enseigne, adresse, nomOcr = null) => {
     setStatus("store"); // l'étape s'affiche tout de suite, chaque chargement a son propre état
     setCarteNouveauMagasinMasquee(false); // Chantier 115 — chaque ticket repart carte visible
-    chargerSelecteurMagasins(nomOcr);
+    const jeton = ++etapeMagasinJetonRef.current;
+    setMagasinPreselectionne(false);
+    const chargementSelecteur = chargerSelecteurMagasins(nomOcr);
     // Chantier 115 — si l'enseigne a été calculée avec la liste en dur (table
     // pas encore chargée) ou n'a rien donné, on la recalcule une fois la table
     // `enseignes` disponible. chargerEnseignes ne throw jamais (délai borné) :
@@ -1824,6 +1901,19 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
       } catch (e) { console.error('[C115] recalcul enseigne', e); }
     }
     await fetchKnownStores(enseigneRetenue, adresse || null);
+
+    // Présélection du magasin reconnu (validée le 11/11) : seulement si la
+    // correspondance est SÛRE et UNIQUE (magasinReconnuPourTicket), si rien
+    // n'a été choisi entre-temps et si c'est toujours le même ticket. Sinon
+    // rien ne change : l'utilisateur choisit comme avant.
+    try {
+      const tous = await chargementSelecteur;
+      if (jeton !== etapeMagasinJetonRef.current || magasinCoreRef.current || !Array.isArray(tous)) return;
+      const reconnu = magasinReconnuPourTicket({ adresse, enseigneId: enseigneRetenue, magasins: tous });
+      if (!reconnu) return;
+      await choisirMagasinCore(reconnu);
+      if (jeton === etapeMagasinJetonRef.current) setMagasinPreselectionne(true);
+    } catch (e) { console.error('[présélection magasin]', e); }
   };
 
   // Chantier 115 — « Oui, c'est là » sur la carte « Nouveau magasin détecté » :
@@ -1873,7 +1963,11 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
 
   // LOT 1 — appel de la RPC Core. Renvoie l'objet {statut, magasin_id?, candidat?}.
   // Fire-and-forget côté erreur technique : on n'interrompt jamais le flux legacy.
-  const appelerCreationMagasinCore = async (legacyId, enseigne, adresse, lat, lng, nom, extra = {}) => {
+  const appelerCreationMagasinCore = async (legacyId, enseigne, adresseSaisie, lat, lng, nom, extra = {}) => {
+    // Correctif 9h58 — même nettoyage juste avant la base : la fonction de
+    // création compare l'adresse brute (seuils 0,70 / 0,85), un texte en trop
+    // (« MAGASIN … N°… ») suffisait à créer un doublon.
+    const adresse = nettoyerAdresseMagasin(adresseSaisie);
     const cp = (adresse && adresse.match(/\b\d{5}\b/)) ? adresse.match(/\b\d{5}\b/)[0] : null;
     let ville = null;
     if (cp) {
@@ -2336,7 +2430,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   // Chantier 96 (garde-fou 0 produit) + Chantier 98 : lecture
                   // fiabilisée (1 réessai auto) et message HONNÊTE — un échec
                   // du service de lecture n'accuse plus la photo.
-                  const scan = await scanTicketRobuste(base64, refProducts);
+                  const scan = await scanTicketRobuste(base64, refProducts, { onEtape: setEtapeScan });
                   if (scan.statut !== 'ok') {
                     setError(MESSAGES_SCAN[scan.statut] || MESSAGES_SCAN.service_indisponible);
                     setScanning(false);
@@ -2345,19 +2439,10 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   const parsed = scan.resultat;
                   // Chantier 108 — contrôle de cohérence AVANT toute écriture
                   // d'état : au-delà de 10 % d'écart, on n'importe pas.
-                  if (controlerLecture(parsed)) { setScanning(false); return; }
-                  const enseigne = storeIdFromName(parsed.store);
-                  const prods = parsed.products.map((p,i) => ({...p, id:i, keep:true}));
-                  setResult(parsed); setSelectedStore(enseigne);
-                  setEditableProducts(prods);
-                  if (magasinSession) {
-                    // Chantier 90 — magasin de la session confirmé : étape magasin sautée.
-                    await arriverAvecMagasinSession(parsed, prods);
-                  } else {
-                    setStoreNameEdit(parsed.store||"");
-                    setStoreLocation(parsed.address || "");
-                    await arriverEtapeMagasin(enseigne, parsed.address || null, parsed.store || null);
-                  }
+                  // Correctif anti-invention : total qui ne colle pas ou
+                  // lectures divergentes -> écran « Reprendre la photo ».
+                  if (controlerLecture(parsed, { lecturesDivergentes: scan.lecturesDivergentes, comptesLectures: scan.comptesLectures, lignesDivergentes: scan.lignesDivergentes })) { setScanning(false); return; }
+                  await poursuivreLecture(parsed);
                 } catch(e) { setError("Erreur scan : " + e.message); }
                 setScanning(false);
               }} style={{ display:"none" }} />
@@ -2371,7 +2456,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   const base64 = await imageFileToJpegBase64(file);
                   // Chantier 96 + 98 — même garde-fou et même lecture fiabilisée
                   // que la caméra : réessai auto, message honnête.
-                  const scan = await scanTicketRobuste(base64, refProducts);
+                  const scan = await scanTicketRobuste(base64, refProducts, { onEtape: setEtapeScan });
                   if (scan.statut !== 'ok') {
                     setError(MESSAGES_SCAN[scan.statut] || MESSAGES_SCAN.service_indisponible);
                     setGalleryScanning(false);
@@ -2380,19 +2465,9 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   }
                   const parsed = scan.resultat;
                   // Chantier 108 — même portillon que la caméra.
-                  if (controlerLecture(parsed)) { setGalleryScanning(false); e.target.value = ""; return; }
-                  const enseigne = storeIdFromName(parsed.store);
-                  const prods = parsed.products.map((p,i) => ({...p, id:i, keep:true, share:true}));
-                  setResult(parsed); setSelectedStore(enseigne);
-                  setEditableProducts(prods);
-                  if (magasinSession) {
-                    // Chantier 90 — magasin de la session confirmé : étape magasin sautée.
-                    await arriverAvecMagasinSession(parsed, prods);
-                  } else {
-                    setStoreNameEdit(parsed.store || "");
-                    setStoreLocation(parsed.address || "");
-                    await arriverEtapeMagasin(enseigne, parsed.address || null, parsed.store || null);
-                  }
+                  // Correctif anti-invention : même portillon que la caméra.
+                  if (controlerLecture(parsed, { lecturesDivergentes: scan.lecturesDivergentes, comptesLectures: scan.comptesLectures, lignesDivergentes: scan.lignesDivergentes, options: { share: true } })) { setGalleryScanning(false); e.target.value = ""; return; }
+                  await poursuivreLecture(parsed, { share: true });
                 } catch(e) { setError("Erreur scan : " + e.message); }
                 setGalleryScanning(false);
                 e.target.value = "";
@@ -2419,7 +2494,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   const base64 = await imageFileToJpegBase64(file);
                   // Chantier 96 + 98 — même garde-fou et même lecture fiabilisée
                   // que ci-dessus : réessai auto, message honnête.
-                  const scan = await scanTicketRobuste(base64, refProducts);
+                  const scan = await scanTicketRobuste(base64, refProducts, { onEtape: setEtapeScan });
                   if (scan.statut !== 'ok') {
                     setError(MESSAGES_SCAN[scan.statut] || MESSAGES_SCAN.service_indisponible);
                     setScanning(false);
@@ -2428,19 +2503,10 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   const parsed = scan.resultat;
                   // Chantier 108 — contrôle de cohérence AVANT toute écriture
                   // d'état : au-delà de 10 % d'écart, on n'importe pas.
-                  if (controlerLecture(parsed)) { setScanning(false); return; }
-                  const enseigne = storeIdFromName(parsed.store);
-                  const prods = parsed.products.map((p,i) => ({...p, id:i, keep:true}));
-                  setResult(parsed); setSelectedStore(enseigne);
-                  setEditableProducts(prods);
-                  if (magasinSession) {
-                    // Chantier 90 — magasin de la session confirmé : étape magasin sautée.
-                    await arriverAvecMagasinSession(parsed, prods);
-                  } else {
-                    setStoreNameEdit(parsed.store||"");
-                    setStoreLocation(parsed.address || "");
-                    await arriverEtapeMagasin(enseigne, parsed.address || null, parsed.store || null);
-                  }
+                  // Correctif anti-invention : total qui ne colle pas ou
+                  // lectures divergentes -> écran « Reprendre la photo ».
+                  if (controlerLecture(parsed, { lecturesDivergentes: scan.lecturesDivergentes, comptesLectures: scan.comptesLectures, lignesDivergentes: scan.lignesDivergentes })) { setScanning(false); return; }
+                  await poursuivreLecture(parsed);
                 } catch(e) { setError("Erreur scan : " + e.message); }
                 setScanning(false);
               }} style={{ display:"none" }} />
@@ -2492,16 +2558,25 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                 /* ── Magasin CORE validé ── */
                 <>
                   <div style={{ background:"#F0FFF5", borderRadius:14, padding:"16px", marginBottom:20, border:`1.5px solid ${C.green}` }}>
+                    {/* Présélection (11/11) — magasin choisi par l'app : on le dit,
+                        adresse visible pour vérifier d'un coup d'œil. */}
                     <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.green, marginBottom:4 }}>
-                      ✅ {magasinCore.nom}
+                      ✅ {magasinPreselectionne ? `Magasin reconnu : ${magasinCore.nom}` : magasinCore.nom}
                     </div>
                     <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>
                       {formaterAdresseMagasin(magasinCore) || "Adresse non renseignée"}
                     </div>
+                    {magasinPreselectionne ? (
+                      <button onClick={()=>{ setMagasinPreselectionne(false); definirMagasinCore(null); setResolvedStoreId(null); setShowManualAddress(false); setSavedGpsCoords(null); setError(""); if (!magasinsCore && !magasinsCoreLoadingRef.current) chargerSelecteurMagasins(); }}
+                        style={{ marginTop:12, width:"100%", padding:"11px", borderRadius:10, border:`2px solid ${C.blue}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, color:C.blue, fontWeight:900, cursor:"pointer" }}>
+                        Changer de magasin
+                      </button>
+                    ) : (
                     <button onClick={()=>{ definirMagasinCore(null); setResolvedStoreId(null); setShowManualAddress(false); setSavedGpsCoords(null); setError(""); if (!magasinsCore && !magasinsCoreLoadingRef.current) chargerSelecteurMagasins(); }}
                       style={{ marginTop:8, background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.blue, fontWeight:800, cursor:"pointer", padding:0, textDecoration:"underline" }}>
                       Changer de magasin
                     </button>
+                    )}
                   </div>
                   <button onClick={()=>goToShare()} style={{ width:"100%", padding:"16px", border:"none", borderRadius:12, background:C.orange, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.white, cursor:"pointer", marginBottom:10, boxShadow:"0 6px 20px rgba(204,0,0,0.35)" }}>
                     Continuer →
@@ -3079,7 +3154,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
       {(scanning || galleryScanning) && (
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.75)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", zIndex:999, pointerEvents:"all" }}>
           <div style={{ width:48, height:48, border:"4px solid rgba(255,255,255,0.2)", borderTopColor:"#F5C200", borderRadius:"50%", animation:"spin 0.8s linear infinite", marginBottom:20 }}/>
-          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:16, color:"#fff" }}>Analyse en cours...</div>
+          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:16, color:"#fff" }}>{etapeScan === 'sens' ? "Je vérifie le sens de la photo…" : "Analyse en cours..."}</div>
         </div>
       )}
 
@@ -3094,6 +3169,26 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
           controle={lectureRefusee}
           onReprendrePhoto={() => { setLectureRefusee(null); setError(""); setStatus("idle"); }}
           onSaisieManuelle={() => { setLectureRefusee(null); onClose(); onManualEntry?.(); }}
+        />
+      )}
+
+      {/* Correctif « scan anti-invention » — lecture douteuse (total qui ne
+          colle pas, ou deux lectures différentes) : rien n'est encore posé
+          dans result/editableProducts. « Reprendre la photo » en principal,
+          même sortie que le refus 108 ; « Continuer quand même » en second
+          reprend le chemin normal (le bandeau ambre du 108 reste affiché à
+          l'étape suivante). */}
+      {lectureDouteuse && (
+        <EcranLectureDouteuse
+          motifs={lectureDouteuse.motifs}
+          controle={lectureDouteuse.controle}
+          controleDate={lectureDouteuse.controleDate}
+          raisonsFragilite={lectureDouteuse.raisonsFragilite}
+          lignesIncoherentes={lectureDouteuse.lignesIncoherentes}
+          lignesDivergentes={lectureDouteuse.lignesDivergentes}
+          comptesLectures={lectureDouteuse.comptesLectures}
+          onReprendrePhoto={() => { setLectureDouteuse(null); setError(""); setStatus("idle"); }}
+          onContinuer={continuerLectureDouteuse}
         />
       )}
     </div>
@@ -8246,13 +8341,22 @@ function MultiPhotoSheet({ onClose, refProducts, onSuccess }) {
   const [scanError, setScanError] = useState("");
   const fileInputRef = useRef(null);
 
+  // Correctif orientation — chaque photo est remise debout DÈS son ajout
+  // (même vérification que le scan simple) : la miniature affichée est donc
+  // déjà droite, et une photo dont le sens est incertain n'est pas ajoutée.
   const handleFileChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     setAdding(true);
+    setScanError("");
     try {
-      const base64 = await imageFileToJpegBase64(file);
-      setPhotos(prev => [...prev, { base64, preview: `data:image/jpeg;base64,${base64}` }]);
+      const brute = await imageFileToJpegBase64(file);
+      const sens = await redresserPhoto(brute);
+      if (sens.statut === 'ok') {
+        setPhotos(prev => [...prev, { base64: sens.base64, preview: `data:image/jpeg;base64,${sens.base64}` }]);
+      } else {
+        setScanError(MESSAGES_SCAN[sens.statut] || MESSAGES_SCAN.service_indisponible);
+      }
     } catch (_) {}
     setAdding(false);
     e.target.value = "";
@@ -8312,7 +8416,7 @@ function MultiPhotoSheet({ onClose, refProducts, onSuccess }) {
 
           {adding && (
             <div style={{ textAlign:"center", padding:"20px", fontFamily:F, color:C.textLight, fontSize:14 }}>
-              ⏳ Traitement en cours…
+              ⏳ Je vérifie le sens de la photo…
             </div>
           )}
 
