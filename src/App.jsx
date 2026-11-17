@@ -4454,7 +4454,7 @@ function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab }) {
               setSearching(false);
             }
           }} placeholder="🔍 Chercher un produit..."
-          style={{ width:"100%", padding:"12px 16px", paddingRight:TAILLE_TACTILE, borderRadius:12, border:`2px solid ${searchQuery?C.blue:C.grayLight}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:14, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }} />
+          style={{ width:"100%", padding:"12px 16px", paddingRight:TAILLE_TACTILE, borderRadius:14, border:`1.5px solid ${searchQuery?C.blue:"#E8E8E4"}`, background:C.white, fontFamily:"'Nunito',sans-serif", fontSize:15, fontWeight:700, color:C.text, outline:"none", boxSizing:"border-box" }} />
         <BoutonEffacerRecherche
           visible={searchQuery.length > 0}
           champRef={champRechercheRef}
@@ -4550,36 +4550,22 @@ function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab }) {
                 const pres = getCategoryPresentation(cat);
                 const count = categoryCounts[cat.id] || 0;
                 return (
+                  // Chantier 127 — tuile de rayon sobre : pastille teintée, nom,
+                  // nombre de produits. Plus de bordure épaisse ni de badge.
                   <button key={cat.id} onClick={()=>selectCategory(cat)} style={{
-                    padding:0, background:C.white,
-                    border:`2px solid ${count>0?pres.color:C.grayLight}`,
-                    borderRadius:20, cursor:"pointer", overflow:"hidden",
-                    boxShadow: count>0 ? `0 6px 20px ${pres.color}40` : "0 2px 10px rgba(0,0,0,0.08)",
-                    animation: `slideIn 0.3s ease ${i*0.05}s both`,
-                    position:"relative",
-                    aspectRatio:"1",
+                    padding:"14px 12px", background:C.white, border:"none", borderRadius:18, cursor:"pointer",
+                    boxShadow:"0 1px 2px rgba(22,24,29,0.04), 0 6px 20px rgba(22,24,29,0.06)",
+                    display:"flex", flexDirection:"column", alignItems:"flex-start", gap:10, textAlign:"left",
+                    animation: `slideIn 0.3s ease ${Math.min(i,8)*0.03}s both`,
+                    opacity: count>0 ? 1 : 0.55,
                   }}>
-                    {/* Badge compteur */}
-                    {count>0 && (
-                      <div style={{ position:"absolute", top:10, right:10, width:24, height:24, borderRadius:99, background:pres.color, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:12, color:C.white, zIndex:2, boxShadow:"0 2px 6px rgba(0,0,0,0.2)" }}>
-                        {count}
-                      </div>
-                    )}
-                    {/* Fond dégradé plein + emoji géant */}
-                    <div style={{
-                      background:`linear-gradient(145deg, ${pres.color}22, ${pres.color}55)`,
-                      width:"100%", height:"68%",
-                      display:"flex", alignItems:"center", justifyContent:"center",
-                    }}>
-                      <span style={{ fontSize:60, lineHeight:1, filter:"drop-shadow(0 4px 8px rgba(0,0,0,0.15))" }}>{pres.emoji}</span>
-                    </div>
-                    {/* Label en bas */}
-                    <div style={{ padding:"8px 10px 10px", textAlign:"center", background:C.white }}>
-                      <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, color:C.text, lineHeight:1.2 }}>{cat.nom}</div>
-                      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, color:pres.color, marginTop:2, fontWeight:700 }}>
+                    <span style={{ width:48, height:48, borderRadius:14, background:`${pres.color}1F`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:26, lineHeight:1 }}>{pres.emoji}</span>
+                    <span>
+                      <span style={{ display:"block", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.text, lineHeight:1.2 }}>{cat.nom}</span>
+                      <span style={{ display:"block", fontFamily:"'Nunito',sans-serif", fontSize:11.5, color:C.gray, marginTop:2, fontWeight:700 }}>
                         {count} produit{count>1?"s":""}
-                      </div>
-                    </div>
+                      </span>
+                    </span>
                   </button>
                 );
               })}
