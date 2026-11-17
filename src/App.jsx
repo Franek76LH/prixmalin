@@ -9187,6 +9187,22 @@ export default function App() {
   // true OU François (qui garde toujours accès, même flag à false). Ne touche
   // à AUCUN autre gating estFrancois (Micro, admin…).
   const sessionCoursesAccessible = sessionCoursesOuverte || estFrancois;
+  // Chantier 141 — « scan après un ticket » (chantiers 118/119 : identifier
+  // les produits d'un ticket par leur code-barres). Réservé à François depuis
+  // le 09/11 ; s'ouvre aux autres par le réglage `scan_apres_ticket_ouvert`
+  // dans parametres_globaux, sans redéploiement. Réglage absent, illisible ou
+  // différent de 'true' : fermé.
+  const [scanApresTicketOuvert, setScanApresTicketOuvert] = useState(false);
+  const scanApresTicketAccessible = scanApresTicketOuvert || estFrancois;
+  const idPourReglageScan = session?.user?.id ?? null;
+  useEffect(() => {
+    if (!idPourReglageScan) return;
+    let annule = false;
+    supabase.from('parametres_globaux').select('valeur').eq('cle', 'scan_apres_ticket_ouvert').maybeSingle()
+      .then(({ data, error }) => { if (!annule) setScanApresTicketOuvert(!error && data?.valeur === 'true'); },
+            () => { if (!annule) setScanApresTicketOuvert(false); });
+    return () => { annule = true; };
+  }, [idPourReglageScan]);
   // Chantier 94 Lot 10 — flag gamification_visible (même principe) : le
   // profil Points Malin n'est visible que si le flag est à true OU pour
   // François. Absent/illisible => masqué (sauf François), jamais de plantage.
@@ -9445,7 +9461,7 @@ export default function App() {
   // (un import de ticket ramène toujours sur l'accueil). Best effort : une
   // erreur laisse la valeur précédente.
   useEffect(() => {
-    if (!estFrancois || !loaded || tab !== "home" || showHistoriqueTickets) return;
+    if (!scanApresTicketAccessible || !loaded || tab !== "home" || showHistoriqueTickets) return;
     let annule = false;
     chargerDernierTicketAIdentifier(session?.user?.id).then(r => {
       if (annule || r == null) return;
@@ -9453,7 +9469,7 @@ export default function App() {
       setDernierTicketAScanner(resume ? { ...resume, ticket: r.ticket } : null);
     });
     return () => { annule = true; };
-  }, [estFrancois, loaded, tab, showHistoriqueTickets, session?.user?.id]);
+  }, [scanApresTicketAccessible, loaded, tab, showHistoriqueTickets, session?.user?.id]);
   const ouvrirHistoriqueTickets = (ticketInitial = null) => {
     setHistoriqueTicketInitial(ticketInitial);
     setShowHistoriqueTickets(true);
@@ -10985,7 +11001,7 @@ export default function App() {
           <TabErrorBoundary key={tab}>
           {loaded && tab==="home" && gardeOuverte && <PageDeGarde libelleBouton="C'est parti" onCommencer={()=>setGardeOuverte(false)} />}
           {loaded && tab==="home" && !gardeOuverte && <AccueilV2 pseudo={pseudo} items={items} archives={archives} setTab={setTab} communaute={statsCommunaute} onScanner={handleFlash} onReprendreScan={handleResumeScan}
-            ticketAScanner={dernierTicketAScanner} onOuvrirTicket={estFrancois && dernierTicketAScanner ? ()=>ouvrirHistoriqueTickets(dernierTicketAScanner.ticket) : null}
+            ticketAScanner={dernierTicketAScanner} onOuvrirTicket={scanApresTicketAccessible && dernierTicketAScanner ? ()=>ouvrirHistoriqueTickets(dernierTicketAScanner.ticket) : null}
             sessionCourses={sessionCoursesAccessible ? sessionCoursesActive : null} onReprendreCourses={()=>setTab("courses")} onAbandonnerCourses={abandonnerSessionCourses}
             /* Chantier 140 — le bouton « Aide à compléter la base » ne s'affiche plus
                pour l'administrateur quand le réglage est coupé : sans ticket, un
@@ -11021,7 +11037,7 @@ export default function App() {
             setShowRating({id:data.id,store:newArc.store});
             return { ok:true };
           }} userId={session?.user?.id} produitsRef={produitsRef}/>}
-          {loaded && tab==="archive"   && <ArchiveTab   archives={archives} onDelete={deleteArchive} priceDB={priceDB} onImport={handleImportPrices} onSavePrice={handleSavePrice} produitsRef={produitsRef} libelleVersNomProduit={libelleVersNomProduit} onLibelleResolu={(cle,nom)=>setLibelleVersNomProduit(prev=>({...prev,[cle]:nom}))} estFrancois={estFrancois} onOuvrirHistoriqueTickets={estFrancois ? ()=>ouvrirHistoriqueTickets(null) : null} onAddToList={arcItem=>{
+          {loaded && tab==="archive"   && <ArchiveTab   archives={archives} onDelete={deleteArchive} priceDB={priceDB} onImport={handleImportPrices} onSavePrice={handleSavePrice} produitsRef={produitsRef} libelleVersNomProduit={libelleVersNomProduit} onLibelleResolu={(cle,nom)=>setLibelleVersNomProduit(prev=>({...prev,[cle]:nom}))} estFrancois={estFrancois} onOuvrirHistoriqueTickets={scanApresTicketAccessible ? ()=>ouvrirHistoriqueTickets(null) : null} onAddToList={arcItem=>{
             const newItem={id:Date.now()+Math.random(),product:arcItem.product,format:arcItem.format||"",brand:arcItem.brand||"",qty:arcItem.qty||1,checked:false};
             addItem(newItem);
             showAppToast(`✓ ${arcItem.product} ajouté à ta liste`);
@@ -11088,7 +11104,7 @@ export default function App() {
             estAdmin gouverne le seul bouton « proposer quand même » du
             garde-fou 105 — pour tout autre utilisateur il n'existe pas, et sa
             proposition part en file au lieu d'écrire quoi que ce soit. */}
-        {showHistoriqueTickets && estFrancois && (
+        {showHistoriqueTickets && scanApresTicketAccessible && (
           <HistoriqueTicketsSheet userId={session?.user?.id} ticketInitial={historiqueTicketInitial} onClose={()=>{ setShowHistoriqueTickets(false); setHistoriqueTicketInitial(null); }}
             onRetourAccueil={()=>{ setShowHistoriqueTickets(false); setHistoriqueTicketInitial(null); setTab("home"); }}/>
         )}
