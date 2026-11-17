@@ -7,6 +7,7 @@
 import { useState } from 'react';
 import { T } from './theme';
 import { IconeLoupe, IconeChevron, IconeMicro, IconeScanner } from './Icones';
+import DefiCommunaute from './DefiCommunaute';
 import {
   apercuListe, actionPrincipale, montrerModeDemploi, economiesConfirmees,
   ACTION_COMPARER, ACTION_COMMENCER_LISTE,
@@ -80,6 +81,7 @@ export default function AccueilSimple({
   ticketAScanner = null, onOuvrirTicket = null,
   sessionCourses = null, progressionCourses = null, joursCourses = 0, onReprendreCourses, onAbandonnerCourses,
   microDisponible = false, contributionVisible = false, onContribuer,
+  communaute = null,
 }) {
   const [confirme, setConfirme] = useState(null); // 'scan' | 'courses' | null
   const liste = apercuListe(items);
@@ -208,6 +210,9 @@ export default function AccueilSimple({
           </div>
           <IconeChevron width={20} height={20} style={{ color: T.texteLeger, flexShrink: 0 }} />
         </Carte>
+
+        {/* Chantier 139 — le défi de la communauté (pilier communautaire). */}
+        <DefiCommunaute stats={communaute} onScanner={onScanner} />
 
         {/* Économies confirmées : seulement quand il y en a */}
         {confirmees > 0 && (

@@ -90,7 +90,8 @@ describe('le message final dit la vérité', () => {
   it.each(gestionnaires)('$nom n\'annonce pas de succès plein sans archive', ({ debut }) => {
     const corps = corpsDe(debut);
     const posGarde = corps.indexOf('if (!archiveOk) {');
-    const posSucces = corps.indexOf('prix importé${entries.length > 1');
+    // Chantier 139 — le message de succès est désormais le merci communautaire.
+    const posSucces = corps.indexOf('merciApresScan(entries.length)');
     expect(posGarde).toBeGreaterThanOrEqual(0);
     expect(posSucces).toBeGreaterThanOrEqual(0);
     // Le garde-fou passe AVANT le message de succès, et sort de la fonction.

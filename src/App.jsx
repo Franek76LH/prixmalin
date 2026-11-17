@@ -66,6 +66,7 @@ import MesTickets from "./components/v2/MesTickets";
 import PageDeGarde from "./components/v2/PageDeGarde";
 import VerificationTicket from "./components/v2/VerificationTicket";
 import { archiveDejaPresente } from "./lib/ticketsCore";
+import { merciApresScan } from "./lib/communauteCore";
 import ResultatComparaison from "./components/v2/ResultatComparaison";
 import EcranEconomies from "./components/v2/EcranEconomies";
 import ChoixScan from "./components/v2/ChoixScan";
@@ -5309,7 +5310,8 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
     const savingMsg = realizedSaving !== null
       ? ` · Économies : ${realizedSaving >= 0 ? '+' : ''}${realizedSaving.toFixed(2)} €`
       : '';
-    showToast(`✓ ${entries.length} prix importé${entries.length > 1 ? "s" : ""}${savingMsg}`);
+    // Chantier 139 — le merci communautaire remplace « N prix importés ».
+    showToast(`✓ ${merciApresScan(entries.length)}${savingMsg}`);
     if (bilanCore?.niveau === NIVEAU_INFO && bilanCore.detail) {
       setTimeout(() => showToast(`ℹ️ ${bilanCore.detail}`), 2600);
     }
@@ -10867,7 +10869,7 @@ export default function App() {
     const savingMsg = realizedSaving !== null
       ? ` · Économies : ${realizedSaving >= 0 ? '+' : ''}${realizedSaving.toFixed(2)} €`
       : '';
-    showAppToast(`✓ ${entries.length} prix importé${entries.length > 1 ? "s" : ""}${savingMsg}`);
+    showAppToast(`✓ ${merciApresScan(entries.length)}${savingMsg}`);
     if (bilanCore?.niveau === NIVEAU_INFO && bilanCore.detail) {
       setTimeout(() => showAppToast(`ℹ️ ${bilanCore.detail}`), 2600);
     }
@@ -10888,6 +10890,21 @@ export default function App() {
     return data || [];
   }, []);
   const liaisonsProposees = useLiaisonsProposees(items, chercherFichesCatalogue);
+
+  // Chantier 139 — chiffres de la communauté pour l'accueil (totaux seulement).
+  // Relus à l'ouverture et après chaque ticket (le nombre d'archives change).
+  // En cas d'échec : pas de carte, jamais de chiffre inventé.
+  const [statsCommunaute, setStatsCommunaute] = useState(null);
+  const utilisateurConnecte = session?.user?.id ?? null;
+  const nbArchives = archives.length;
+  useEffect(() => {
+    if (!utilisateurConnecte) return;
+    let annule = false;
+    supabase.rpc('stats_communaute').then(({ data, error }) => {
+      if (!annule && !error && data) setStatsCommunaute(data);
+    });
+    return () => { annule = true; };
+  }, [utilisateurConnecte, nbArchives]);
   const relierArticle = (item, proposition) => updateItem({
     id: item.id, product: proposition.produit_nom, qty: item.qty,
     produit_id: proposition.produit_id, variante_produit_id: null,
@@ -10967,7 +10984,7 @@ export default function App() {
           )}
           <TabErrorBoundary key={tab}>
           {loaded && tab==="home" && gardeOuverte && <PageDeGarde libelleBouton="C'est parti" onCommencer={()=>setGardeOuverte(false)} />}
-          {loaded && tab==="home" && !gardeOuverte && <AccueilV2 pseudo={pseudo} items={items} archives={archives} setTab={setTab} onScanner={handleFlash} onReprendreScan={handleResumeScan}
+          {loaded && tab==="home" && !gardeOuverte && <AccueilV2 pseudo={pseudo} items={items} archives={archives} setTab={setTab} communaute={statsCommunaute} onScanner={handleFlash} onReprendreScan={handleResumeScan}
             ticketAScanner={dernierTicketAScanner} onOuvrirTicket={estFrancois && dernierTicketAScanner ? ()=>ouvrirHistoriqueTickets(dernierTicketAScanner.ticket) : null}
             sessionCourses={sessionCoursesAccessible ? sessionCoursesActive : null} onReprendreCourses={()=>setTab("courses")} onAbandonnerCourses={abandonnerSessionCourses}
             microDisponible={estFrancois} contributionVisible={contributionCodesBarresActive || isAdmin} onContribuer={()=>setShowContributionCodeBarres(true)}/>}
