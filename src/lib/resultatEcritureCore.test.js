@@ -196,3 +196,14 @@ describe('lignes_a_confirmer (chantier 111)', () => {
     expect(r.detail).toBe('3 lignes reconnues, 2 à confirmer');
   });
 });
+
+// Chantier 120 — rejet « ticket trop ancien » (plus de 6 mois).
+import { MOTIF_TICKET_TROP_ANCIEN } from './resultatEcritureCore';
+describe('interpreterResultatCore — ticket_trop_ancien (chantier 120)', () => {
+  it('message clair, échec (rien n\'est écrit), pas de jargon', () => {
+    const r = interpreterResultatCore({ statut: 'rejet', prix_ecrits: 0, rejets: [{ motif: MOTIF_TICKET_TROP_ANCIEN }] }, { lignesEnvoyees: 12 });
+    expect(r.niveau).toBe(NIVEAU_ECHEC);
+    expect(r.detail).toBe('Ce ticket a plus de 6 mois, ses prix ne sont plus comparables.');
+    expect(r.messageTechnique).toBeNull();
+  });
+});

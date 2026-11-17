@@ -45,6 +45,10 @@ export const MOTIF_ERREUR_TECHNIQUE = 'erreur_technique';
 // ligne part en file de validation. La confondre avec un échec ferait crier
 // l'app sur presque chaque ticket, et le vrai échec passerait inaperçu.
 export const MOTIF_ALIAS_NON_TROUVE = 'alias_non_trouve';
+// Chantier 120 — enregistrer_ticket_core refuse un ticket de plus de 6 mois
+// (statut 'rejet', rien d'écrit). L'import le bloque avant, mais si la base le
+// renvoie quand même (date corrigée à la main, horloge…), on le dit proprement.
+export const MOTIF_TICKET_TROP_ANCIEN = 'ticket_trop_ancien';
 
 const TITRE_ECHEC = "Tes prix n'ont pas été enregistrés dans le comparateur";
 
@@ -65,6 +69,12 @@ function premierMessage(rejets, motif) {
 function expliquerRejetGlobal(rejets) {
   const motifs = rejets.map(r => r?.motif).filter(Boolean);
 
+  if (motifs.includes(MOTIF_TICKET_TROP_ANCIEN)) {
+    return {
+      detail: 'Ce ticket a plus de 6 mois, ses prix ne sont plus comparables.',
+      messageTechnique: null,
+    };
+  }
   if (motifs.includes(MOTIF_MAGASIN_NON_RESOLU)) {
     return {
       detail: "Le magasin n'a pas été reconnu. Rescanne le ticket en choisissant ton magasin dans la liste proposée.",

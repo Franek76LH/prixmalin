@@ -16,6 +16,7 @@ import BarcodeScannerSheet from './BarcodeScannerSheet';
 // Chantier 119 — écran plein « Identifier ce produit » (validation consciente).
 import IdentifierProduitPlein from './IdentifierProduitPlein';
 import { chercherOffIdentification } from '../lib/scanDepuisHistorique';
+import { affichageRemise } from '../lib/importTicketFichier';
 import { formaterAdresseMagasin } from '../lib/selecteurMagasinCore';
 import {
   etatLigne, ETAT_RECONNU, ETAT_SUGGERE, estAIdentifier, estSansCodeBarres, marquerSansCodeBarres,
@@ -415,7 +416,13 @@ export default function HistoriqueTicketsSheet({ userId, onClose, onCompteChange
             const qte = Number(l.quantite) > 1 ? ` × ${Number(l.quantite)}` : '';
             const evidence = enEvidence === l.id;
             const cadre = { background: '#fff', borderRadius: 12, padding: '12px 14px', marginBottom: 8, border: evidence ? `2px solid ${BLEU}` : '1px solid #eee', boxShadow: evidence ? '0 0 0 4px rgba(0,102,255,0.12)' : 'none' };
-            const prixTxt = <div style={{ fontFamily: F, fontWeight: 900, fontSize: 14, color: ROUGE, whiteSpace: 'nowrap' }}>{euros(prix)}{qte}</div>;
+            // Chantier 120 — remise de ligne : « 4,29 € → 2,14 € (−2,15 €) ».
+            const remiseTxt = Number(l.montant_remise) > 0
+              ? affichageRemise(Number(l.montant_brut) > 0 ? Number(l.montant_brut) : (prix ?? 0) * (Number(l.quantite) || 1), Number(l.montant_remise))
+              : null;
+            const prixTxt = remiseTxt
+              ? <div style={{ fontFamily: F, fontWeight: 900, fontSize: 12, color: VERT, whiteSpace: 'nowrap', textAlign: 'right' }}>{remiseTxt}</div>
+              : <div style={{ fontFamily: F, fontWeight: 900, fontSize: 14, color: ROUGE, whiteSpace: 'nowrap' }}>{euros(prix)}{qte}</div>;
 
             if (etat === ETAT_RECONNU) {
               const p = detail.produits[l.produit_id];

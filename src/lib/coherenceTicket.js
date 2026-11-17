@@ -80,6 +80,16 @@ export function sommeLignes(produits) {
   return (produits || []).reduce((somme, p) => somme + montantLigne(p), 0);
 }
 
+// Chantier 120 — remises RATTACHÉES aux lignes (Carrefour « Remise immédiate
+// −2,15 » sous un article : champ `remise`, montant positif, la ligne restant
+// AVANT remise). Absent / illisible / négatif -> 0.
+export function sommeRemisesLignes(produits) {
+  return (produits || []).reduce((s, p) => {
+    const r = nombreOuNull(p?.remise);
+    return s + (r != null && r > 0 ? r : 0);
+  }, 0);
+}
+
 // Nombre d'ARTICLES lus, pas de lignes : une ligne « ×3 » vaut trois articles.
 // C'est la seule façon de comparer à ce qui est imprimé sur le ticket, qui
 // compte les unités.
@@ -127,11 +137,22 @@ export function controlerCoherenceTicket({ products = [], total_ticket = null, n
   // prend la valeur absolue plutôt que de dépendre d'une convention de signe.
   const remisesLues = nombreOuNull(total_remises);
   const remises = remisesLues != null ? Math.abs(remisesLues) : null;
-  const sommeApresRemises = remises != null ? somme - remises : null;
+  // Chantier 120 — on compare des montants NETS. Les remises rattachées aux
+  // lignes sont déduites ligne par ligne ; du total des remises imprimé, on
+  // ne retire plus que ce qui n'a pas été rattaché à une ligne (remises
+  // globales). Ainsi une remise n'est JAMAIS déduite deux fois, que le ticket
+  // l'inclue dans son « total remises » (Carrefour) ou non.
+  // Sans remise de ligne : strictement le calcul du 108c (somme − remises).
+  const remisesLigne = sommeRemisesLignes(products);
+  const sommeNette = somme - remisesLigne;
+  const remisesGlobales = remises != null ? Math.max(0, remises - remisesLigne) : null;
+  const sommeApresRemises = remises != null ? sommeNette - remisesGlobales : null;
 
   const detail = {
     sommeLignes: somme,
     remises,
+    remisesLigne,
+    sommeNette,
     sommeApresRemises,
     montantNonMesure: null,
     totalTicket: totalTicket != null && totalTicket > 0 ? totalTicket : null,

@@ -35,3 +35,7 @@ scripts/.env
 # posés à la racine du dossier avaient échappé au filet.
 scripts/imports/
 scripts/**/*.csv
+
+# Chantier 120 — vrais tickets de test (données personnelles) et résultats
+# du banc d'essai local de l'Edge Function : jamais commités.
+tests-tickets-120/

@@ -336,3 +336,49 @@ describe('controlerDateTicket', () => {
     expect(controlerDateTicket('2026-08-18', tardLeSoir).suspecte).toBe(false);
   });
 });
+
+// Chantier 120 — montants NETS : remises rattachées aux lignes.
+import { sommeRemisesLignes } from './coherenceTicket';
+
+describe('controlerCoherenceTicket — remises de ligne (chantier 120)', () => {
+  const ligneR = (total, remise) => ({ name: 'x', price: total, qty: 1, total, remise });
+
+  it('Carrefour : 4,29 € remisés de 2,15 €, total imprimé 2,14 €, total remises 2,15 € -> cohérent (pas de double déduction)', () => {
+    const r = controlerCoherenceTicket({ products: [ligneR(4.29, 2.15)], total_ticket: 2.14, total_remises: 2.15 });
+    expect(r.sommeNette).toBeCloseTo(2.14, 6);
+    expect(r.ecartMontantEuros).toBe(0);
+    expect(r.niveau).toBe(NIVEAU_OK);
+  });
+
+  it('remise de ligne non reprise dans total_remises (0) -> comparaison sur les nets, cohérent', () => {
+    const r = controlerCoherenceTicket({ products: [ligneR(4.29, 2.15), ligne(10)], total_ticket: 12.14, total_remises: 0 });
+    expect(r.niveau).toBe(NIVEAU_OK);
+  });
+
+  it('remise de ligne + remise globale : seule la part non rattachée est retirée', () => {
+    // lignes 14,29 brut ; remise ligne 2,15 ; total remises imprimé 3,15 (dont 1,00 global) ; payé 11,14
+    const r = controlerCoherenceTicket({ products: [ligneR(4.29, 2.15), ligne(10)], total_ticket: 11.14, total_remises: 3.15 });
+    expect(r.ecartMontantEuros).toBe(0);
+    expect(r.niveau).toBe(NIVEAU_OK);
+  });
+
+  it('une ligne réellement manquante reste détectée malgré les remises', () => {
+    const r = controlerCoherenceTicket({ products: [ligneR(4.29, 2.15)], total_ticket: 12.14, total_remises: 2.15 });
+    expect(r.niveau).not.toBe(NIVEAU_OK);
+  });
+
+  it('sans aucune remise de ligne : résultat identique au 108c', () => {
+    const a = controlerCoherenceTicket({ products: [ligne(60.49)], total_ticket: 59.43, total_remises: 1.06 });
+    expect(a.remisesLigne).toBe(0);
+    expect(a.niveau).toBe(NIVEAU_OK);
+  });
+
+  it('remises inconnues (null) -> toujours aucune comparaison de montant (règle 108c)', () => {
+    const r = controlerCoherenceTicket({ products: [ligneR(4.29, 2.15)], total_ticket: 2.14, total_remises: null });
+    expect(r.ecartMontant).toBeNull();
+  });
+
+  it('sommeRemisesLignes ignore absent / négatif / illisible', () => {
+    expect(sommeRemisesLignes([{ remise: 2.15 }, { remise: -1 }, { remise: 'x' }, {}])).toBeCloseTo(2.15, 6);
+  });
+});

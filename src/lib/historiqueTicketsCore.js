@@ -111,7 +111,10 @@ export async function chargerDetailTicket(ticketId) {
       .order('cree_le', { ascending: true });
     // numero_ligne donne l'ordre du ticket, sans_code_barres (chantier 119) le
     // marquage « Pas de code-barres » ; si l'une est refusée, on fait sans.
-    let { data, error } = await requete(`${COLONNES_LIGNE}, numero_ligne, sans_code_barres`);
+    // Chantier 120 — montant_brut / montant_remise / montant_net (remise de
+    // ligne calculée par la base) : affichés quand il y a une remise.
+    let { data, error } = await requete(`${COLONNES_LIGNE}, numero_ligne, sans_code_barres, montant_brut, montant_remise, montant_net`);
+    if (error) ({ data, error } = await requete(`${COLONNES_LIGNE}, numero_ligne, sans_code_barres`));
     if (error) ({ data, error } = await requete(`${COLONNES_LIGNE}, numero_ligne`));
     if (error) ({ data, error } = await requete(COLONNES_LIGNE));
     if (error) return { lignes: [], produits: {}, variantes: {}, error };

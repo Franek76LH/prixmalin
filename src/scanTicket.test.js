@@ -147,3 +147,32 @@ describe('scanTicketRobuste — réessai automatique et statuts honnêtes (Chant
     expect(MESSAGES_SCAN.service_indisponible).toMatch(/photo n'y est pour rien/);
   });
 });
+
+// Chantier 120 — lecture d'un ticket importé (une ou plusieurs images).
+import { scanTicketsImportes } from './scanTicket';
+describe('scanTicketsImportes', () => {
+  beforeEach(() => vi.clearAllMocks());
+  const OK = { store: 'Lidl', products: [{ name: 'Lait', price: 1.2 }] };
+
+  it('une seule image -> appel IDENTIQUE au scan photo (champ imageBase64)', async () => {
+    supabase.functions.invoke.mockResolvedValue({ data: OK, error: null });
+    const r = await scanTicketsImportes(['b64'], []);
+    expect(r.statut).toBe('ok');
+    expect(supabase.functions.invoke).toHaveBeenCalledWith('scan-ticket', { body: { imageBase64: 'b64', refProducts: [] } });
+  });
+
+  it('plusieurs images -> champ imagesBase64, dans l\'ordre', async () => {
+    supabase.functions.invoke.mockResolvedValue({ data: OK, error: null });
+    await scanTicketsImportes(['p1', 'p2', 'p3'], []);
+    expect(supabase.functions.invoke).toHaveBeenCalledWith('scan-ticket', { body: { imagesBase64: ['p1', 'p2', 'p3'], refProducts: [] } });
+  });
+
+  it('plusieurs images : réessai automatique puis statut honnête, jamais d\'exception', async () => {
+    supabase.functions.invoke.mockResolvedValue({ data: null, error: { message: 'boom' } });
+    const r = await scanTicketsImportes(['p1', 'p2'], []);
+    expect(supabase.functions.invoke).toHaveBeenCalledTimes(2);
+    expect(r).toEqual({ statut: 'service_indisponible', message: MESSAGES_SCAN.service_indisponible });
+    supabase.functions.invoke.mockResolvedValue({ data: { products: [] }, error: null });
+    expect((await scanTicketsImportes(['p1', 'p2'], [])).statut).toBe('lecture_vide');
+  });
+});

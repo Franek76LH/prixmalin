@@ -37,6 +37,11 @@ export async function envoyerTicketCore(toImport, { magasinId, storeLegacyId, ma
       format:        p.format || null,
       quantite:      Number(p.qty || 1),
       prix_unitaire: Number(p.price),
+      // Chantier 120 — remise rattachée à la ligne (Carrefour « Remise
+      // immédiate »), montant positif ; la base en tire montant_brut /
+      // montant_remise / montant_net. Envoyée SEULEMENT si elle existe : le
+      // scan photo classique envoie exactement le même payload qu'avant.
+      ...(Number(p.remise) > 0 ? { remise: Math.round(Number(p.remise) * 100) / 100 } : {}),
     }));
 
     const montantTotal = montantTotalImprime(totalTicket);
