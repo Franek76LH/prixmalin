@@ -72,7 +72,21 @@ function proximiteMots(a, b) {
   const a2 = sansAccents(a), b2 = sansAccents(b);
   if (a2 === b2) return 0.9;
   if (racine(a2) === racine(b2)) return 0.75;
+  // Une lettre d'écart sur un mot assez long (« knacky » / « knacki », faute de
+  // frappe ou de transcription) : assez proche pour proposer, jamais pour relier.
+  const ra = racine(a2), rb = racine(b2);
+  if (Math.min(ra.length, rb.length) >= 5 && uneLettreDEcart(ra, rb)) return 0.7;
   return 0;
+}
+
+// Vrai si les deux mots diffèrent d'UNE lettre : remplacée, ajoutée ou retirée.
+function uneLettreDEcart(a, b) {
+  if (a === b || Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  if (a.length === b.length) return a.slice(i + 1) === b.slice(i + 1);
+  const [court, long] = a.length < b.length ? [a, b] : [b, a];
+  return court.slice(i) === long.slice(i + 1);
 }
 
 // Seuil au-dessus duquel deux noms faits des mêmes mots sont « le même nom ».
@@ -153,7 +167,17 @@ export async function proposerLiaison(entendu, chercher) {
 
   await lancer(mots.join(' '));
   let decision = deciderLiaison(entendu, candidats);
-  if (decision.issue === LIAISON_RELIE || mots.length === 1) return decision;
+  if (decision.issue === LIAISON_RELIE) return decision;
+  if (mots.length === 1) {
+    // Un seul mot et rien de sérieux : la recherche exige le mot exact, donc
+    // une faute sur la dernière lettre (« knacky ») ne trouve rien. On réessaie
+    // une fois sans cette lettre (« knack »), et la ressemblance tranche.
+    if (decision.issue === LIAISON_A_RELIER && mots[0].length >= 5) {
+      await lancer(mots[0].slice(0, -1));
+      decision = deciderLiaison(entendu, candidats);
+    }
+    return decision;
+  }
 
   const motsLongs = [...new Set(mots)].filter(m => m.length >= 3).sort((a, b) => b.length - a.length).slice(0, 2);
   for (const mot of motsLongs) await lancer(mot);

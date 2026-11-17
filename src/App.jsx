@@ -60,6 +60,10 @@ import BarreNavigation from "./components/v2/BarreNavigation";
 import EcranMoi from "./components/v2/EcranMoi";
 import EnTete from "./components/v2/EnTete";
 import ListeCourses from "./components/v2/ListeCourses";
+// Chantier 126 — produits de la liste en texte libre : fiches proposées.
+import ProduitsARelier from "./components/v2/ProduitsARelier";
+import ResultatComparaison from "./components/v2/ResultatComparaison";
+import { useLiaisonsProposees } from "./components/v2/useLiaisonsProposees";
 // Chantier 110 — correction d'association : remise à zéro entre deux lignes,
 // relecture avant d'appliquer, garde-fou de mots communs sur le texte BRUT.
 import { construireRecapitulatif } from "./lib/coherenceAssociation";
@@ -5014,7 +5018,7 @@ function EditItemSheet({ item, onClose, onSave }) {
 }
 
 // ── LIST TAB ──────────────────────────────────────────────────────────────────
-function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites, saveFavorites, onSetMarquePref, itemsReportes = [], onReactiverReporte, onSupprimerReporte }) {
+function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites, saveFavorites, onSetMarquePref, itemsReportes = [], onReactiverReporte, onSupprimerReporte, liaisonsProposees = {}, onRelier }) {
   const [showFavModal, setShowFavModal] = useState(false);
   const [editItem,     setEditItem]     = useState(null);
 
@@ -5072,6 +5076,7 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
         onCocher={toggleCheck} onModifier={setEditItem} onSupprimer={removeItem} onMarque={onSetMarquePref}
         onReactiverReporte={onReactiverReporte} onSupprimerReporte={onSupprimerReporte}
         onAjouter={()=>setTab("catalog")} onComparer={()=>setTab("compare")} onFavoris={()=>setShowFavModal(true)}
+        propositions={liaisonsProposees} onRelier={onRelier}
       />
 
       {editItem && <EditItemSheet item={editItem} onClose={()=>setEditItem(null)} onSave={updateItem}/>}
@@ -5806,7 +5811,7 @@ function cleCoords(lat, lng) {
   return `${Number(lat).toFixed(4)},${Number(lng).toFixed(4)}`;
 }
 
-function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearchRadius, userPos, setUserPos, zoneLabel, setZoneLabel, zonePrete = true, userId, isAdmin, modeCoreActif, coreActifGlobal, categorieMagasin = 'grande_surface', setCategorieMagasin, sessionCoursesAccessible = false }) {
+function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearchRadius, userPos, setUserPos, zoneLabel, setZoneLabel, zonePrete = true, userId, isAdmin, modeCoreActif, coreActifGlobal, categorieMagasin = 'grande_surface', setCategorieMagasin, sessionCoursesAccessible = false, liaisonsProposees = {}, onRelier }) {
   const F = "'Nunito',sans-serif";
 
   // Chantier géoloc comparateur — sélecteur de zone (point de référence).
@@ -6419,7 +6424,6 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
   const mapsQuery      = best ? `${best.name}${bestStoreEntry ? ' ' + bestStoreEntry.store_address : ''}` : '';
   const mapsUrl        = best ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapsQuery)}` : '#';
   const maxSavings   = best ? worstTotal - best.total : 0;
-  const totalItems   = items.reduce((a,i)=>a+i.qty,0);
   const missingGlobal= items.filter(item=>!priceDB.some(p=>itemMatchesPrice(item,p)));
 
   // #56.4 — variables "Affichée" : legacy par défaut, Core uniquement si
@@ -6442,6 +6446,58 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
   // économie sur produits communs seulement). Calcul pur et léger, pas un
   // hook : on est après le early return items.length===0.
   const verdict = evaluerComparaison({ ranked: rankedAffiche, analysis: analysisAffichee, nbArticles: items.length });
+
+  // Chantier 126 — données de la carte du magasin retenu (ResultatComparaison).
+  // Mêmes règles d'affichage qu'avant : total de ligne = prix × quantité ; une
+  // offre à quantité inventée affiche « Prix à vérifier » à la place du €/kg.
+  const adresseGagnant = bestStoreEntryAffiche?.store_address
+    ? `${bestStoreEntryAffiche.store_address}${bestStoreEntryAffiche.code_postal ? `, ${bestStoreEntryAffiche.code_postal}${bestStoreEntryAffiche.ville ? ' ' + bestStoreEntryAffiche.ville : ''}` : ''}`
+    : null;
+  const nomArticle = (item) => `${item.brand ? `${item.brand} · ` : ''}${item.product}`;
+  const lignesGagnant = bestAffiche ? analysisAffichee.map(({ item, byStore }) => {
+    const p = byStore[bestAffiche.id];
+    const sousTitre = [item.format, item.qty > 1 ? `× ${item.qty}` : null].filter(Boolean).join(' ');
+    if (!p) return { id: item.id, nom: nomArticle(item), sousTitre, manquant: true };
+    const aVerifier = !prixEstFiable(p);
+    const detail = aVerifier
+      ? MENTION_PRIX_A_VERIFIER
+      : [item.qty > 1 ? `${p.price.toFixed(2)} € l'unité` : null, fmtUnitPrice(p.price, item.format) || null].filter(Boolean).join(' · ');
+    return { id: item.id, nom: nomArticle(item), sousTitre, manquant: false, total: p.price * item.qty, detail, aVerifier, marqueMagasin: utiliserCore && p?.est_mdd === true };
+  }) : [];
+  const alternativesGagnant = bestAffiche ? analysisAffichee
+    .filter(({ byStore }) => !byStore[bestAffiche.id] && Object.keys(byStore).length > 0)
+    .map(({ item, byStore }) => {
+      const moinsCher = Object.entries(byStore)
+        .map(([sid, pr]) => ({ magasin: utiliserCore ? (pr?.nom_magasin || 'Magasin') : (STORES.find(st => st.id === sid)?.name || 'Magasin'), pr }))
+        .sort((x, y) => x.pr.price - y.pr.price)[0];
+      return { id: item.id, nom: nomArticle(item), magasin: moinsCher.magasin, prix: moinsCher.pr.price * item.qty };
+    }) : [];
+  const validerMagasinGagnant = () => {
+    // Chantier « Courses » — bascule générale 2026-08-12 : en mode
+    // Core, transmet en 3e argument (additif) les lignes de prix
+    // RETENUES du magasin gagnant, pour figer la session de
+    // courses côté racine. En mode legacy (pas de magasin réel),
+    // extrasCourses est null et onValidate garde le flux
+    // historique (archive + vidage + Historique).
+    // Chantier 87 Lot 1 — sessionCoursesAccessible (flag global OU
+    // François) : sans accès, extrasCourses reste null et la
+    // validation suit le flux historique, comme avant la session.
+    const extrasCourses = (utiliserCore && coreResultat && sessionCoursesAccessible)
+      ? {
+          magasinId: bestAffiche.id,
+          nomEnseigne: coreResultat.regroupement[bestAffiche.id]?.[0]?.prix?.nom_enseigne ?? null,
+          adresse: bestStoreEntryAffiche ? {
+            adresse: bestStoreEntryAffiche.store_address ?? null,
+            code_postal: bestStoreEntryAffiche.code_postal ?? null,
+            ville: bestStoreEntryAffiche.ville ?? null,
+          } : null,
+          lignesPrix: coreResultat.regroupement[bestAffiche.id] ?? [],
+        }
+      : null;
+    // Chantier 122 — l'économie transmise (cagnotte) est l'économie
+    // honnête : produits communs seulement, 0 si non comparable.
+    onValidate(bestAffiche, verdict.economie, extrasCourses);
+  };
 
   // Chantier 83 — magasins de chaque catégorie réellement présents dans la zone
   // (rayon), indépendamment des produits : distingue « aucun magasin de cette
@@ -6489,12 +6545,6 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
 
   return (
     <div style={{ padding: (!zonePrete || zoneManquante) ? "24px 20px 100px" : "16px 16px 110px" }}>
-      {/* Chantier 83 (finition) — retour à la liste : bouton plein bien visible
-          (‹ + libellé), cohérent avec les accents de l'app. */}
-      <button onClick={()=>setTab?.('list')} aria-label="Retour à la liste"
-        style={{ display:"inline-flex", alignItems:"center", gap:6, marginBottom:14, padding:"9px 16px 9px 12px", background:C.orange, border:"none", borderRadius:12, fontFamily:F, fontWeight:900, fontSize:15, color:"#111111", cursor:"pointer", boxShadow:"0 3px 10px rgba(0,0,0,0.15)" }}>
-        <span style={{ fontSize:24, lineHeight:1, marginTop:-2 }}>‹</span> Ma liste
-      </button>
       {!zonePrete ? ecranChargement : zoneManquante ? selecteurZone : (
       <>
       {/* Chantier 81 — zone active DISCRÈTE : tout l'élément est cliquable et
@@ -6526,20 +6576,8 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
         </div>
       </div>
 
-      {/* Résumé liste */}
-      <div style={{ background:C.blue, borderRadius:14, padding:"14px 18px", marginBottom:16, display:"flex", alignItems:"center", gap:12 }}>
-        <div style={{ fontSize:30 }}>🛒</div>
-        <div>
-          <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:C.white }}>
-            {items.length} produit{items.length>1?"s":""} · {totalItems} article{totalItems>1?"s":""}
-          </div>
-          {verdict.economie>0.05 && verdict.reference && (
-            <div style={{ fontFamily:F, fontSize:12, color:"rgba(255,255,255,0.75)", marginTop:2 }}>
-              <strong style={{ color:"#FFD700" }}>{verdict.economie.toFixed(2)} €</strong> d'écart sur {verdict.nbCommuns} produit{verdict.nbCommuns>1?"s":""} comparable{verdict.nbCommuns>1?"s":""}
-            </div>
-          )}
-        </div>
-      </div>
+      {/* Chantier 126 — produits en texte libre : fiches proposées, un appui relie. */}
+      <ProduitsARelier items={items} propositions={liaisonsProposees} onRelier={onRelier} />
 
       {/* #56.6 — badge réservé à l'override admin explicite (isAdmin && modeCoreActif===true),
           jamais lié au réglage global lui-même : un non-admin ne le voit jamais. */}
@@ -6614,7 +6652,7 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
       {/* Produits sans aucun prix */}
       {missingGlobalAffiche.length>0 && rankedAffiche.length>0 && (
         <div style={{ background:"#FFF8E6", borderRadius:12, padding:"12px 14px", marginBottom:14, border:`1px solid ${C.yellow}` }}>
-          <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:"#7A6000", marginBottom:6 }}>⚠️ Aucun prix enregistré pour :</div>
+          <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:"#7A6000", marginBottom:6 }}>Pas encore de prix pour :</div>
           <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
             {missingGlobalAffiche.map(item=>(
               <span key={item.id} style={{ background:C.yellow, borderRadius:99, padding:"3px 10px", fontFamily:F, fontSize:12, fontWeight:700, color:C.text }}>
@@ -6652,178 +6690,17 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
       )}
 
       {rankedAffiche.length>0 && verdict.etat === ETAT_GAGNANT && (
-        <>
-          {/* ── MEILLEUR MAGASIN (grand) ── */}
-          <div style={{ background:"linear-gradient(145deg,#CC0000,#E00000)", borderRadius:18, overflow:"hidden", marginBottom:16, boxShadow:"0 10px 32px rgba(204,0,0,0.45)", animation:"slideIn 0.3s ease both" }}>
-
-            {/* Badge + Prix total */}
-            <div style={{ padding:"18px 18px 0", display:"flex", alignItems:"flex-start", justifyContent:"space-between" }}>
-              <div style={{ background:C.orange, borderRadius:8, padding:"4px 12px", fontFamily:F, fontWeight:900, fontSize:11, color:C.white, letterSpacing:"0.04em" }}>
-                🥇 {verdict.complet ? "MEILLEUR PRIX" : `LE PLUS COMPLET · ${bestAffiche.found}/${items.length}`}
-              </div>
-              <div style={{ textAlign:"right" }}>
-                <div style={{ fontFamily:F, fontWeight:900, fontSize:34, color:C.white, lineHeight:1 }}>{bestAffiche.total.toFixed(2)} €</div>
-                {bestAffiche.missing.length > 0 && (
-                  <div style={{ fontFamily:F, fontSize:11, color:"#FFD700", fontWeight:700, marginTop:4 }}>
-                    Prix pour {bestAffiche.found} article{bestAffiche.found>1?"s":""} sur {items.length} — panier incomplet
-                  </div>
-                )}
-                {/* Chantier 104 — mention discrète sur le total : il contient au
-                    moins un prix qu'on ne peut pas garantir. */}
-                {bestAffiche.aPrixAVerifier && (
-                  <div style={{ fontFamily:F, fontSize:11, color:"#FFD700", fontWeight:700, marginTop:2 }}>
-                    Contient des prix à vérifier
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Nom magasin */}
-            <div style={{ padding:"10px 18px 14px" }}>
-              <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
-                <span style={{ fontSize:26 }}>{bestAffiche.logo}</span>
-                <div>
-                  <div style={{ fontFamily:F, fontWeight:900, fontSize:20, color:C.white }}>{bestAffiche.name}</div>
-                  {/* Chantier 83 (finition) — adresse + code postal (et ville) du
-                      magasin, discret, sous le nom. Le CP est un champ à part de
-                      prix_comparables (adresse_magasin = rue seule). */}
-                  {bestStoreEntryAffiche?.store_address && (
-                    <div style={{ fontFamily:F, fontSize:11, color:"rgba(255,255,255,0.6)", marginTop:2 }}>
-                      {bestStoreEntryAffiche.store_address}
-                      {bestStoreEntryAffiche.code_postal
-                        ? `, ${bestStoreEntryAffiche.code_postal}${bestStoreEntryAffiche.ville ? ' ' + bestStoreEntryAffiche.ville : ''}`
-                        : ''}
-                    </div>
-                  )}
-                  <div style={{ fontFamily:F, fontSize:12, color:"rgba(255,255,255,0.6)" }}>
-                    {bestAffiche.found}/{items.length} produit{items.length>1?"s":""} trouvé{bestAffiche.found>1?"s":""}
-                    {bestAffiche.missing.length>0 && <span style={{ color:"#FFD700" }}> · {bestAffiche.missing.length} manquant{bestAffiche.missing.length>1?"s":""}</span>}
-                  </div>
-                  {lastVerified && (
-                    <div style={{ fontFamily:F, fontSize:11, color:"rgba(255,255,255,0.85)", fontWeight:500, marginTop:3 }}>
-                      Dernier prix vérifié {lastVerified.dateLabel} par {lastVerified.pseudo}
-                    </div>
-                  )}
-                </div>
-              </div>
-              <a href={mapsUrlAffiche} target="_blank" rel="noopener noreferrer"
-                style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, background:"#fff", border:"2px solid #D32F2F", borderRadius:20, padding:"10px 18px", fontFamily:F, fontWeight:700, fontSize:14, color:"#D32F2F", textDecoration:"none", boxShadow:"0 2px 6px rgba(0,0,0,0.15)" }}>
-                📍 Y aller
-              </a>
-            </div>
-
-            {/* Liste des articles */}
-            <div style={{ background:"rgba(0,0,0,0.18)", marginBottom:12 }}>
-              {analysisAffichee.map(({item,byStore})=>{
-                const p     = byStore[bestAffiche.id];
-                const total = p ? p.price*item.qty : null;
-                return (
-                  <div key={item.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 18px", borderBottom:"1px solid rgba(255,255,255,0.07)" }}>
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ fontFamily:F, fontWeight:700, fontSize:13, color:"rgba(255,255,255,0.92)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                        {item.brand?`${item.brand} · `:""}{item.product}
-                        {/* Chantier 84 — badge générique « Marque Distributeur »
-                            quand l'offre retenue en est une (est_mdd). Jamais le
-                            nom de la sous-marque distributeur. */}
-                        {utiliserCore && p?.est_mdd === true && (
-                          <span style={{ marginLeft:6, background:"rgba(255,255,255,0.22)", color:"#fff", borderRadius:5, padding:"1px 5px", fontSize:9, fontWeight:900, verticalAlign:"middle", whiteSpace:"nowrap" }}>Marque Distributeur</span>
-                        )}
-                      </div>
-                      <div style={{ fontFamily:F, fontSize:11, color:"rgba(255,255,255,0.45)", marginTop:1 }}>
-                        {item.format}{item.qty>1?` × ${item.qty}`:""}
-                      </div>
-                    </div>
-                    {total!==null ? (
-                      <div style={{ textAlign:"right", flexShrink:0 }}>
-                        <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:"#FFD700" }}>{total.toFixed(2)} €</div>
-                        {item.qty>1 && <div style={{ fontFamily:F, fontSize:10, color:"rgba(255,255,255,0.4)" }}>{p.price.toFixed(2)} €/u</div>}
-                        {/* Chantier 104 — le €/kg d'une offre à quantité inventée
-                            est faux : la mention prend exactement sa place, donc
-                            jamais de ligne vide ni de valeur trompeuse. */}
-                        {!prixEstFiable(p) ? (
-                          <div style={{ fontFamily:F, fontSize:10, color:"#FFD700", fontWeight:800, marginTop:1 }}>{MENTION_PRIX_A_VERIFIER}</div>
-                        ) : fmtUnitPrice(p.price, item.format) && (
-                          <div style={{ fontFamily:F, fontSize:10, color:"rgba(255,255,255,0.35)", marginTop:1 }}>{fmtUnitPrice(p.price, item.format)}</div>
-                        )}
-                      </div>
-                    ) : (
-                      <span style={{ fontFamily:F, fontSize:12, fontWeight:800, color:"#FFD700", flexShrink:0 }}>⚠️ manquant</span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Bouton valider */}
-            <div style={{ padding:"0 12px 16px" }}>
-              <button onClick={()=>{
-                // Chantier « Courses » — bascule générale 2026-08-12 : en mode
-                // Core, transmet en 3e argument (additif) les lignes de prix
-                // RETENUES du magasin gagnant, pour figer la session de
-                // courses côté racine. En mode legacy (pas de magasin réel),
-                // extrasCourses est null et onValidate garde le flux
-                // historique (archive + vidage + Historique).
-                // Chantier 87 Lot 1 — sessionCoursesAccessible (flag global OU
-                // François) : sans accès, extrasCourses reste null et la
-                // validation suit le flux historique, comme avant la session.
-                const extrasCourses = (utiliserCore && coreResultat && sessionCoursesAccessible)
-                  ? {
-                      magasinId: bestAffiche.id,
-                      nomEnseigne: coreResultat.regroupement[bestAffiche.id]?.[0]?.prix?.nom_enseigne ?? null,
-                      adresse: bestStoreEntryAffiche ? {
-                        adresse: bestStoreEntryAffiche.store_address ?? null,
-                        code_postal: bestStoreEntryAffiche.code_postal ?? null,
-                        ville: bestStoreEntryAffiche.ville ?? null,
-                      } : null,
-                      lignesPrix: coreResultat.regroupement[bestAffiche.id] ?? [],
-                    }
-                  : null;
-                // Chantier 122 — l'économie transmise (cagnotte) est l'économie
-                // honnête : produits communs seulement, 0 si non comparable.
-                onValidate(bestAffiche, verdict.economie, extrasCourses);
-              }} style={{ width:"100%", padding:"15px", border:"none", borderRadius:12, background:C.orange, fontFamily:F, fontWeight:900, fontSize:16, color:"#111", cursor:"pointer", boxShadow:"0 4px 16px rgba(0,0,0,0.25)" }}>
-                ✅ Je fais mes courses chez {bestAffiche.name}
-              </button>
-
-              {verdict.economie > 0.05 && verdict.reference && (
-                <div style={{ fontFamily:F, fontSize:12, color:"rgba(255,255,255,0.75)", textAlign:"center", marginTop:10 }}>
-                  Sur les <strong style={{ color:"#FFD700" }}>{verdict.nbCommuns} produit{verdict.nbCommuns>1?"s":""}</strong> que {verdict.reference.name} vend aussi, tu économises <strong style={{ color:"#FFD700" }}>{verdict.economie.toFixed(2)} €</strong> chez {bestAffiche.name}
-                </div>
-              )}
-
-            </div>
-
-            {/* Suggestions pour produits manquants — après le bouton */}
-            {analysisAffichee.some(({byStore})=>!byStore[bestAffiche.id]&&Object.keys(byStore).length>0) && (
-              <div style={{ padding:"0 12px 16px", display:"flex", flexDirection:"column", gap:6 }}>
-                {analysisAffichee
-                  .filter(({byStore})=>!byStore[bestAffiche.id]&&Object.keys(byStore).length>0)
-                  .map(({item,byStore})=>{
-                    const alt = Object.entries(byStore)
-                      .map(([sid,pr])=>({ store: utiliserCore ? { logo:'🏪', name: pr?.nom_magasin || 'Magasin' } : STORES.find(s=>s.id===sid), pr }))
-                      .sort((a,b)=>a.pr.price-b.pr.price)[0];
-                    return (
-                      <div key={item.id} style={{ background:"rgba(255,255,255,0.1)", borderRadius:8, padding:"8px 12px", display:"flex", alignItems:"center", gap:8 }}>
-                        <span style={{ fontSize:14 }}>{alt?.store?.logo}</span>
-                        <div style={{ flex:1, minWidth:0 }}>
-                          <div style={{ fontFamily:F, fontWeight:800, fontSize:12, color:"rgba(255,255,255,0.9)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                            {item.brand?`${item.brand} · `:""}{item.product} <span style={{ fontWeight:600, color:"rgba(255,255,255,0.5)" }}>{item.format}</span>
-                          </div>
-                          <div style={{ fontFamily:F, fontSize:11, color:"rgba(255,255,255,0.5)", marginTop:1 }}>
-                            disponible chez <span style={{ fontWeight:800, color:"rgba(255,255,255,0.75)" }}>{alt?.store?.name}</span>
-                          </div>
-                        </div>
-                        <div style={{ fontFamily:F, fontWeight:900, fontSize:13, color:"rgba(255,255,255,0.8)", flexShrink:0 }}>
-                          {alt ? (alt.pr.price*item.qty).toFixed(2)+" €" : "—"}
-                        </div>
-                      </div>
-                    );
-                  })}
-              </div>
-            )}
-          </div>
-
-        </>
+        <ResultatComparaison
+          magasin={{ nom: bestAffiche.name, adresse: adresseGagnant }}
+          complet={verdict.complet} trouves={bestAffiche.found} nbArticles={items.length}
+          total={bestAffiche.total} aPrixAVerifier={bestAffiche.aPrixAVerifier === true}
+          lignes={lignesGagnant} alternatives={alternativesGagnant}
+          economie={verdict.economie > 0.05 && verdict.reference
+            ? `${verdict.economie.toFixed(2).replace('.', ',')} € de moins que chez ${verdict.reference.name}, sur les ${verdict.nbCommuns} produit${verdict.nbCommuns>1?"s":""} que les deux vendent`
+            : null}
+          dernierReleve={lastVerified ? `Dernier prix relevé ${lastVerified.dateLabel} par ${lastVerified.pseudo}` : null}
+          lienItineraire={mapsUrlAffiche} onValider={validerMagasinGagnant}
+        />
       )}
         </>
       )}
@@ -11468,6 +11345,20 @@ export default function App() {
     showAppToast("✓ Prix enregistré");
   };
 
+  // Chantier 126 — fiches proposées pour les produits de la liste écrits en
+  // texte libre ; relier = updateItem avec le produit choisi (toutes marques,
+  // tous formats), c'est-à-dire exactement ce que fait la fiche du Catalogue.
+  const chercherFichesCatalogue = useCallback(async (terme) => {
+    const { data, error } = await supabase.rpc('rechercher_produits_catalogue_v2', { p_terme: terme });
+    if (error) throw error;
+    return data || [];
+  }, []);
+  const liaisonsProposees = useLiaisonsProposees(items, chercherFichesCatalogue);
+  const relierArticle = (item, proposition) => updateItem({
+    id: item.id, product: proposition.produit_nom, qty: item.qty,
+    produit_id: proposition.produit_id, variante_produit_id: null,
+  });
+
   const handleLogout = async () => { await supabase.auth.signOut(); };
 
   const globalStyle = (
@@ -11558,9 +11449,9 @@ export default function App() {
           {/* Chantier 87 Lot 1 — jamais rendu sans accès (flag OU François),
               même si tab="courses" traîne en state. */}
           {loaded && tab==="courses" && sessionCoursesAccessible && sessionCoursesActive && <CoursesTab session={sessionCoursesActive} onChangerEtat={changerEtatArticleSession} onAjouterNote={ajouterNoteCourses} onSupprimerNote={supprimerNoteCourses} onTerminer={demanderTerminerCourses} onPasserEnCaisse={()=>setCaisseCourses(true)} syncEchec={syncCoursesEchec}/>}
-          {loaded && tab==="list"      && <ListTab      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} onSetMarquePref={setMarquePrefItem} itemsReportes={itemsReportes} onReactiverReporte={reactiverReporte} onSupprimerReporte={supprimerReporte}/>}
+          {loaded && tab==="list"      && <ListTab liaisonsProposees={liaisonsProposees} onRelier={relierArticle}      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} onSetMarquePref={setMarquePrefItem} itemsReportes={itemsReportes} onReactiverReporte={reactiverReporte} onSupprimerReporte={supprimerReporte}/>}
           {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab}/>}
-          {loaded && tab==="compare"   && <CompareTab   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix} sessionCoursesAccessible={sessionCoursesAccessible}/>}
+          {loaded && tab==="compare"   && <CompareTab liaisonsProposees={liaisonsProposees} onRelier={relierArticle}   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix} sessionCoursesAccessible={sessionCoursesAccessible}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
           {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} estFrancois={estFrancois} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} magasinSession={scanCaisse?.magasin ?? null} onImportSession={rattacherTicketScanSession} onScanSessionFerme={()=>definirScanCaisse(null)} onVoirTicketExistant={()=>setTab("archive")} notifierPoints={profilVisible} onEchecEcritureCore={setEchecEcritureCore} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;

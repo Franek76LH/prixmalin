@@ -21,7 +21,7 @@ function BoutonRond({ onClick, label, children, fond = T.fond, couleur = T.texte
   );
 }
 
-function Ligne({ item, fait, dernier, vignette, onCocher, onModifier, onSupprimer, onMarque }) {
+function Ligne({ item, fait, dernier, vignette, onCocher, onModifier, onSupprimer, onMarque, propositions = null, onRelier }) {
   const pref = item.marque_pref === 'mdd' ? 'mdd' : 'nationale';
   const sousTitre = [item.formatDisplay ?? item.format, item.qty > 1 ? `× ${item.qty}` : null].filter(Boolean).join(' · ');
   return (
@@ -44,6 +44,15 @@ function Ligne({ item, fait, dernier, vignette, onCocher, onModifier, onSupprime
       {!fait && onModifier && <BoutonRond onClick={onModifier} label={`Modifier ${item.product}`}><IconeCrayon width={16} height={16} /></BoutonRond>}
       <BoutonRond onClick={onSupprimer} label={`Retirer ${item.product}`} fond="transparent" couleur={T.texteLeger}><IconeCroix width={16} height={16} /></BoutonRond>
     </div>
+        {/* Chantier 126 — produit écrit en texte libre : fiches proposées. */}
+        {!fait && propositions?.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 8, marginLeft: vignette ? 84 : 36 }}>
+            <span style={{ fontFamily: T.police, fontWeight: 800, fontSize: 11.5, color: T.texteLeger }}>Tu veux dire :</span>
+            {propositions.map(p => (
+              <button key={p.produit_id} onClick={() => onRelier?.(item, p)} style={{ border: `1px solid ${T.bleu}`, background: '#fff', color: T.bleu, borderRadius: 99, padding: '4px 10px', fontFamily: T.police, fontWeight: 800, fontSize: 11.5, cursor: 'pointer' }}>{p.produit_nom}</button>
+            ))}
+          </div>
+        )}
         {/* Préférence de marque de CETTE ligne (liste_courses.marque_pref) :
             « Grandes marques » écarte les marques de magasin (sauf produit qui
             n'existe qu'ainsi), « Toutes marques » les inclut. */}
@@ -65,7 +74,7 @@ function Ligne({ item, fait, dernier, vignette, onCocher, onModifier, onSupprime
 export default function ListeCourses({
   items = [], itemsReportes = [], nbFavoris = 0, vignette = null,
   onCocher, onModifier, onSupprimer, onMarque, onReactiverReporte, onSupprimerReporte,
-  onAjouter, onComparer, onFavoris,
+  onAjouter, onComparer, onFavoris, propositions = {}, onRelier,
 }) {
   const aAcheter = items.filter(i => !i.checked);
   const pris = items.filter(i => i.checked);
@@ -96,7 +105,8 @@ export default function ListeCourses({
         <Section titre={`À acheter (${aAcheter.length})`}>
           {aAcheter.map((item, i) => (
             <Ligne key={item.id} item={item} fait={false} dernier={i === aAcheter.length - 1} vignette={vignette}
-              onCocher={() => onCocher(item.id)} onModifier={() => onModifier(item)} onSupprimer={() => onSupprimer(item.id)} onMarque={onMarque} />
+              onCocher={() => onCocher(item.id)} onModifier={() => onModifier(item)} onSupprimer={() => onSupprimer(item.id)} onMarque={onMarque}
+              propositions={propositions[item.id]} onRelier={onRelier} />
           ))}
         </Section>
       )}

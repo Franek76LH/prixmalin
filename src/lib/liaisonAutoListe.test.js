@@ -104,11 +104,25 @@ describe('proposerLiaison', () => {
     expect(d.suggestions[0]).toMatchObject({ produit_id: 'c', produit_nom: 'Cola' });
     expect(chercher.mock.calls.length).toBeLessThanOrEqual(3);
   });
-  it('un seul mot sans résultat : pas de recherche supplémentaire', async () => {
-    const chercher = vi.fn(async () => []);
+  it('cas réel « knacky » : rien sur le mot exact, on réessaie sans la dernière lettre et « Knacki » est proposé (jamais relié seul)', async () => {
+    const chercher = vi.fn(async (terme) => (terme === 'knack' ? [fiche('k', 'Knacki'), fiche('k2', 'Knacki origin')] : []));
     const d = await proposerLiaison('knacky', chercher);
+    expect(chercher.mock.calls.map(c => c[0])).toEqual(['knacky', 'knack']);
+    expect(d.issue).toBe(LIAISON_SUGGESTIONS);
+    expect(d.suggestions[0]).toMatchObject({ produit_id: 'k', produit_nom: 'Knacki' });
+  });
+  it('un seul mot court sans résultat : pas de recherche supplémentaire', async () => {
+    const chercher = vi.fn(async () => []);
+    const d = await proposerLiaison('kiwi', chercher);
     expect(chercher).toHaveBeenCalledTimes(1);
     expect(d.issue).toBe(LIAISON_A_RELIER);
+  });
+  it('une lettre d\'écart : proposé, mais deux lettres ou un mot court ne comptent pas', () => {
+    expect(ressemblance('knacky', 'Knacki')).toBe(0.7);
+    expect(ressemblance('yaourt', 'Yaourts')).toBe(0.95); // pluriel : règle plus forte
+    expect(ressemblance('brioche', 'Broche')).toBe(0.7);
+    expect(ressemblance('pain', 'Bain')).toBe(0);          // mot trop court
+    expect(ressemblance('tomate', 'Patate')).toBe(0);      // deux lettres
   });
   it('panne de recherche : jamais d\'exception, le produit reste à relier', async () => {
     const d = await proposerLiaison('beurre', async () => { throw new Error('réseau'); });
