@@ -123,7 +123,7 @@ export default function PageDeGarde({ onCommencer, onDejaUnCompte = null, libell
             Ensemble, on trouve<br />le magasin le moins cher.
           </p>
           <p style={{ fontFamily: T.police, fontWeight: 700, fontSize: 14, color: '#D3D1C7', margin: '0 0 26px', lineHeight: 1.45 }}>
-            Chaque ticket scanné aide tout le monde à payer moins.
+            Chaque ticket scanné aide tout le monde<br />à faire des économies.
           </p>
           <button onClick={onCommencer} style={{ width: '100%', border: 'none', background: T.rouge, color: '#fff', borderRadius: 16, padding: 16, fontFamily: T.police, fontWeight: 900, fontSize: 17, cursor: 'pointer' }}>
             {libelleBouton}
