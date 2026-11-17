@@ -10987,7 +10987,10 @@ export default function App() {
           {loaded && tab==="home" && !gardeOuverte && <AccueilV2 pseudo={pseudo} items={items} archives={archives} setTab={setTab} communaute={statsCommunaute} onScanner={handleFlash} onReprendreScan={handleResumeScan}
             ticketAScanner={dernierTicketAScanner} onOuvrirTicket={estFrancois && dernierTicketAScanner ? ()=>ouvrirHistoriqueTickets(dernierTicketAScanner.ticket) : null}
             sessionCourses={sessionCoursesAccessible ? sessionCoursesActive : null} onReprendreCourses={()=>setTab("courses")} onAbandonnerCourses={abandonnerSessionCourses}
-            microDisponible={estFrancois} contributionVisible={contributionCodesBarresActive || isAdmin} onContribuer={()=>setShowContributionCodeBarres(true)}/>}
+            /* Chantier 140 — le bouton « Aide à compléter la base » ne s'affiche plus
+               pour l'administrateur quand le réglage est coupé : sans ticket, un
+               code-barres ne rapporte aucun prix (décision de François, 17/11). */
+            microDisponible={estFrancois} contributionVisible={contributionCodesBarresActive} onContribuer={()=>setShowContributionCodeBarres(true)}/>}
           {loaded && tab==="moi"       && <EcranMoi pseudo={pseudo} email={session?.user?.email} archives={archives} setTab={setTab} version={__APP_VERSION__}
             onProfil={profilVisible ? ()=>setShowProfilSheet(true) : null} onCercle={()=>setShowCircleSheet(true)} invitationsEnAttente={invitationsEnAttente}
             onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFavoris={()=>setShowFavorisSheet(true)} onAide={()=>setShowFaqSheet(true)}
