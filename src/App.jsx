@@ -63,6 +63,7 @@ import ListeCourses from "./components/v2/ListeCourses";
 // Chantier 126 — produits de la liste en texte libre : fiches proposées.
 import ProduitsARelier from "./components/v2/ProduitsARelier";
 import MesTickets from "./components/v2/MesTickets";
+import VerificationTicket from "./components/v2/VerificationTicket";
 import { archiveDejaPresente } from "./lib/ticketsCore";
 import ResultatComparaison from "./components/v2/ResultatComparaison";
 import EcranEconomies from "./components/v2/EcranEconomies";
@@ -2727,15 +2728,24 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
             </>
           )}
 
+          {/* Chantier 132 — même étape, mêmes règles, nouvelle présentation
+              (components/v2/VerificationTicket.jsx). */}
           {status==="preview" && result && (
-            <>
-              <div style={{ background:C.blueLight, borderRadius:12, padding:"12px 16px", marginBottom:16 }}>
-                <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:C.blue, marginBottom:6 }}>
-                  ✅ {editableProducts.length} produit{editableProducts.length>1?"s":""} détecté{editableProducts.length>1?"s":""}
-                </div>
-                {result.date && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>📅 {new Date(result.date).toLocaleDateString("fr-FR",{day:"numeric",month:"long",year:"numeric"})}</div>}
-              </div>
-
+            <VerificationTicket
+              magasin={`${storeNameEdit}${storeLocation.trim()?` – ${storeLocation.trim()}`:""}`}
+              date={result.date}
+              totalImprime={montantTotalImprime(result.total_ticket)}
+              produits={editableProducts}
+              libelle={libelleProduit}
+              format={p => formatStructureLu(p) || p.format}
+              etiquette={p => badgeProduit(p, reconnaissanceParId)}
+              remise={p => affichageRemise(Number(p.price) * Number(p.qty || 1), p.remise)}
+              onBasculer={toggleProduct}
+              onPrix={updatePrice}
+              onModifierMagasin={()=>setStatus("store")}
+              onContinuer={() => goToShare()}
+              onRecommencer={()=>setStatus("idle")}
+            >
               {/* Chantier 108 — lecture partiellement douteuse (2 % à 10 %) :
                   on prévient, on n'empêche rien. Et une date invraisemblable
                   ne s'enregistre jamais en silence. */}
@@ -2751,54 +2761,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                 onGarder={retenirDateTicket}
                 onRemplacer={retenirDateTicket}
               />
-
-              <div style={{ background:C.grayLight, borderRadius:10, padding:"10px 14px", marginBottom:16, display:"flex", alignItems:"center", gap:8 }}>
-                <span style={{ fontSize:16 }}>🏪</span>
-                <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{storeNameEdit}{storeLocation.trim()?` – ${storeLocation.trim()}`:""}</span>
-                <button onClick={()=>setStatus("store")} style={{ marginLeft:"auto", background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.blue, fontWeight:800, cursor:"pointer", padding:0 }}>Modifier</button>
-              </div>
-
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Produits à importer</div>
-              <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:20 }}>
-                {editableProducts.map(p=>(
-                  <div key={p.id} style={{ background:p.keep?C.white:C.grayLight, borderRadius:12, border:`1px solid ${p.keep?C.blue:C.grayLight}`, opacity:p.keep?1:0.5, overflow:"hidden" }}>
-                    <div style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 14px" }}>
-                      <button onClick={()=>toggleProduct(p.id)} style={{ width:24, height:24, borderRadius:6, flexShrink:0, cursor:"pointer", border:`2px solid ${p.keep?C.blue:C.gray}`, background:p.keep?C.blue:C.white, color:C.white, fontSize:13, display:"flex", alignItems:"center", justifyContent:"center" }}>{p.keep?"✓":""}</button>
-                      <div style={{ flex:1 }}>
-                        <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text }}>{p.brand?`${p.brand} · `:""}{libelleProduit(p)}</div>
-                        <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap", marginTop:2 }}>
-                          {(formatStructureLu(p) || p.format) && (
-                            <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight }}>{formatStructureLu(p) || p.format}</span>
-                          )}
-                          {/* Chantier 100 / 118 — reconnu (mémoire exacte) / suggéré / à vérifier */}
-                          {badgeProduit(p, reconnaissanceParId) === 'reconnu' ? (
-                            <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:900, color:C.green, background:"#DFF7E8", borderRadius:99, padding:"2px 8px" }}>✓ reconnu</span>
-                          ) : badgeProduit(p, reconnaissanceParId) === 'suggere' ? (
-                            <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:900, color:C.blue, background:"#E3EEFF", borderRadius:99, padding:"2px 8px" }}>? suggéré</span>
-                          ) : badgeProduit(p, reconnaissanceParId) === 'a_verifier' ? (
-                            <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:900, color:"#B25900", background:"#FFE7C2", borderRadius:99, padding:"2px 8px" }}>⚠ à vérifier</span>
-                          ) : null}
-                        </div>
-                        {/* Chantier 120 — remise rattachée à la ligne. */}
-                        {affichageRemise(Number(p.price) * Number(p.qty || 1), p.remise) && (
-                          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:800, color:C.green, marginTop:2 }}>{affichageRemise(Number(p.price) * Number(p.qty || 1), p.remise)}</div>
-                        )}
-                      </div>
-                      <input type="number" step="0.01" min="0" value={p.price} onChange={e=>updatePrice(p.id,e.target.value)}
-                        style={{ width:68, padding:"6px 8px", textAlign:"right", borderRadius:8, border:`2px solid ${C.orange}`, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.orange, outline:"none" }} />
-                      <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.orange }}>€</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <button onClick={() => goToShare()} style={{ width:"100%", padding:"16px", border:"none", borderRadius:12, background:C.orange, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.white, cursor:"pointer", marginBottom:10, boxShadow:"0 6px 20px rgba(204,0,0,0.35)" }}>
-                Continuer →
-              </button>
-              <button onClick={()=>setStatus("idle")} style={{ width:"100%", padding:"13px", border:`2px solid ${C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.textLight, cursor:"pointer" }}>
-                ← Coller un autre JSON
-              </button>
-            </>
+            </VerificationTicket>
           )}
 
           {status==="share" && (
@@ -2869,7 +2832,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                           )}
                         </div>
                         <div style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0 }}>
-                          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.orange }}>{p.price.toFixed(2)} €</div>
+                          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.text }}>{p.price.toFixed(2).replace(".",",")} €</div>
                           <span style={{ fontSize:11, color:C.gray }}>✏️</span>
                         </div>
                       </div>
@@ -2893,7 +2856,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                             </select>
                           </div>
                           <button onClick={saveEdit} style={{ width:"100%", padding:"10px", border:"none", borderRadius:8, background:"#4A90D9", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer" }}>
-                            ✓ OK
+                            Enregistrer la correction
                           </button>
                         </div>
                       )}
@@ -2903,12 +2866,12 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
               </div>
 
               <button onClick={()=>confirm(shareChecked)} disabled={saving}
-                style={{ width:"100%", padding:"16px", border:"none", borderRadius:12, background:saving?C.grayLight:C.green, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.white, cursor:saving?"default":"pointer", marginBottom:10, boxShadow:saving?"none":"0 6px 20px rgba(0,179,65,0.35)" }}>
-                👥 Partager {shareChecked.size} article{shareChecked.size !== 1 ? "s" : ""}
+                style={{ width:"100%", padding:"16px", border:"none", borderRadius:14, background:saving?C.grayLight:C.blue, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.white, cursor:saving?"default":"pointer", marginBottom:10 }}>
+                Partager {shareChecked.size} article{shareChecked.size !== 1 ? "s" : ""}
               </button>
               <button onClick={()=>confirm(new Set())} disabled={saving}
                 style={{ width:"100%", padding:"14px", border:`2px solid ${C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:saving?C.gray:C.textLight, cursor:saving?"default":"pointer" }}>
-                Non merci — garder tout privé
+                Ne rien partager, tout garder privé
               </button>
             </>
           )}
