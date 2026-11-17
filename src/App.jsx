@@ -63,6 +63,7 @@ import ListeCourses from "./components/v2/ListeCourses";
 // Chantier 126 — produits de la liste en texte libre : fiches proposées.
 import ProduitsARelier from "./components/v2/ProduitsARelier";
 import MesTickets from "./components/v2/MesTickets";
+import PageDeGarde from "./components/v2/PageDeGarde";
 import VerificationTicket from "./components/v2/VerificationTicket";
 import { archiveDejaPresente } from "./lib/ticketsCore";
 import ResultatComparaison from "./components/v2/ResultatComparaison";
@@ -492,7 +493,8 @@ function PseudoModal({ onSave }) {
 // ── AUTH SCREEN ───────────────────────────────────────────────────────────────
 function AuthScreen() {
   const F = "'Nunito',sans-serif";
-  const [mode,     setMode]     = useState('login');
+  // Chantier 135 — on arrive d'abord sur la page de garde (tickets qui glissent).
+  const [mode,     setMode]     = useState('garde');
   const [email,    setEmail]    = useState('');
   const [password, setPassword] = useState('');
   const [confirm,  setConfirm]  = useState('');
@@ -536,6 +538,8 @@ function AuthScreen() {
       </button>
     </div>
   );
+
+  if (mode === 'garde') return <PageDeGarde onCommencer={()=>switchMode('register')} onDejaUnCompte={()=>switchMode('login')} />;
 
   if (mode === 'register_success') return (
     <div style={{ minHeight:"100vh", background:C.bg, maxWidth:430, margin:"0 auto", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", padding:"32px 24px", overflowY:"auto" }}>
