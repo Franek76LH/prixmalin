@@ -55,6 +55,8 @@ import { proposerLiaison, LIAISON_RELIE } from "./lib/liaisonAutoListe";
 import AccueilSimple from "./components/v2/AccueilSimple";
 import BarreNavigation from "./components/v2/BarreNavigation";
 import EcranMoi from "./components/v2/EcranMoi";
+import EnTete from "./components/v2/EnTete";
+import ListeCourses from "./components/v2/ListeCourses";
 // Chantier 110 — correction d'association : remise à zéro entre deux lignes,
 // relecture avant d'appliquer, garde-fou de mots communs sur le texte BRUT.
 import { construireRecapitulatif } from "./lib/coherenceAssociation";
@@ -1165,76 +1167,6 @@ function MesPrixSheet({ priceDB, setPriceDB, archives, updateArchive, onTicketVa
 }
 
 // ── HEADER ────────────────────────────────────────────────────────────────────
-function Header({ tab, itemCount, userEmail, displayName, onLogout, pendingCount, onCircle }) {
-  const F = "'Nunito',sans-serif";
-  const titles = { list:"Ma liste", catalog:"Catalogue", compare:"Comparer", prices:"Mes prix", archive:"Mes tickets", economies:"Mes économies", rejets:"Rejets", micro:"Dicter ma liste", moi:"Mon espace", courses:"Mes courses" };
-  const [showMenu, setShowMenu] = useState(false);
-  const menuRef = useRef(null);
-  useEffect(() => {
-    if (!showMenu) return;
-    const handler = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setShowMenu(false); };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [showMenu]);
-  return (
-    <div style={{ background:C.blue, padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", boxShadow:"0 4px 20px rgba(204,0,0,0.4)" }}>
-      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-        <div style={{ width:36, height:36, borderRadius:10, background:"#FFFFFF", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, boxShadow:"0 2px 8px rgba(0,0,0,0.15)" }}>🛒</div>
-        <div>
-          <div style={{ fontFamily:F, fontWeight:700, fontSize:11, color:"rgba(255,255,255,0.7)", lineHeight:1 }}>PrixMalin</div>
-          <div style={{ fontFamily:F, fontWeight:900, fontSize:20, color:C.white, marginTop:1 }}>{titles[tab]}</div>
-          {tab==="archive" && (
-            <div style={{ fontFamily:F, fontSize:10, color:"rgba(255,255,255,0.55)", marginTop:2 }}>
-              Tous tes tickets scannés, par mois ou par produit
-            </div>
-          )}
-        </div>
-      </div>
-      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-        {tab==="list" && itemCount>0 && (
-          <div style={{ background:C.orange, borderRadius:99, padding:"6px 14px", fontFamily:F, fontWeight:800, fontSize:13, color:C.white }}>
-            🧾 {itemCount} article{itemCount>1?"s":""}
-          </div>
-        )}
-        {userEmail && (
-          <div ref={menuRef} style={{ position:"relative" }}>
-            <button onClick={()=>setShowMenu(s=>!s)}
-              style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:99, padding:"6px 10px", fontFamily:F, fontSize:12, fontWeight:700, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", gap:5, position:"relative" }}>
-              👤 {displayName || userEmail.split('@')[0]}
-              {pendingCount > 0 && (
-                <span style={{ position:"absolute", top:-4, right:-4, background:C.orange, borderRadius:99, width:16, height:16, fontSize:10, fontWeight:900, color:C.white, display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1 }}>{pendingCount}</span>
-              )}
-            </button>
-            {showMenu && (
-              <div style={{ position:"absolute", right:0, top:38, background:C.white, borderRadius:12, boxShadow:"0 4px 20px rgba(0,0,0,0.15)", padding:"8px", zIndex:200, minWidth:170 }}>
-                <div style={{ fontFamily:F, padding:"6px 10px" }}>
-                  {displayName && <div style={{ fontSize:13, fontWeight:800, color:C.text }}>{displayName}</div>}
-                  <div style={{ fontSize:12, color:C.textLight }}>{userEmail}</div>
-                </div>
-                <button onClick={()=>{ setShowMenu(false); onCircle(); }}
-                  style={{ width:"100%", padding:"10px 12px", border:"none", background:"none", borderRadius:8, fontFamily:F, fontWeight:800, fontSize:13, color:C.text, cursor:"pointer", textAlign:"left", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-                  <span>👥 Mon cercle</span>
-                  {pendingCount > 0 && <span style={{ background:C.orange, borderRadius:99, padding:"2px 7px", fontSize:11, color:C.white, fontWeight:900 }}>{pendingCount}</span>}
-                </button>
-                <button onClick={()=>{ setShowMenu(false); onLogout(); }}
-                  style={{ width:"100%", padding:"10px 12px", border:"none", background:"#FEE", borderRadius:8, fontFamily:F, fontWeight:800, fontSize:13, color:C.red, cursor:"pointer", textAlign:"left" }}>
-                  Se déconnecter
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── TAB BAR ───────────────────────────────────────────────────────────────────
-// Couleurs par identité d'onglet (id), jamais par index/position — pack
-// d'animations "Fou furieux". home/economies réutilisent C.blue/C.green ;
-// archive/rejets reprennent des teintes déjà présentes ailleurs dans l'app
-// (bleu de AutresOptionsSheet/MultiPhotoSheet, violet du mode debug Core #56.4)
-// plutôt que d'inventer une palette nouvelle.
 // ── TOAST ─────────────────────────────────────────────────────────────────────
 function Toast({ msg, ok = true }) {
   return (
@@ -4470,15 +4402,7 @@ function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab }) {
   return (
     <div style={{ padding:"16px 16px 110px" }}>
 
-      {/* Titre */}
-      <div style={{ marginBottom:20 }}>
-        <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:24, color:C.text, letterSpacing:"-0.5px" }}>
-          Catalogue <span style={{ color:"#CC0000" }}>🛍️</span>
-        </div>
-        <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.gray, marginTop:2 }}>
-          Parcours les rayons et ajoute tes produits
-        </div>
-      </div>
+      {/* Chantier 125 — le titre est porté par l'en-tête commun (EnTete). */}
 
       {/* Barre de recherche */}
       {/* Chantier 104c — la remise à zéro passe par le MÊME code que la saisie
@@ -5072,8 +4996,6 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
   const removeItem    = id  => onRemove(id);
   const updateItem    = updated => onUpdate(updated);
   const removeFavorite = i  => saveFavorites(favorites.filter((_,idx)=>idx!==i));
-  const unchecked = items.filter(i=>!i.checked);
-  const checked   = items.filter(i=>i.checked);
 
   // Sauvegarder la liste courante comme favoris — les identifiants Core sont
   // conservés s'ils existent, pour éviter de repasser par le rapprochement alias
@@ -5106,131 +5028,21 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
     setShowFavModal(false);
   };
 
-  // Comparateur — le toggle reflète et édite le PROFIL GLOBAL (même réglage
-  // pour tous les produits, persisté). Plus de préférence par item.
-  const ItemRow = ({item, done}) => {
-    // Chantier 84 — préférence marque PAR ARTICLE (défaut 'nationale' si NULL).
-    const pref = item.marque_pref === 'mdd' ? 'mdd' : 'nationale';
-    return (
-    <div style={{ display:"flex", alignItems:"center", gap:12, background:done?'#F3FAF5':C.white, borderRadius:12, padding:"12px 14px", border:`1px solid ${done?'#C8E6C9':C.grayLight}`, opacity:1, boxShadow:done?'inset 3px 0 0 #4CAF50':'0 1px 4px rgba(0,0,0,0.06)' }}>
-      <button onClick={()=>toggleCheck(item.id)} style={{ width:26, height:26, borderRadius:6, border:`2px solid ${done?C.green:C.blue}`, background:done?C.green:C.white, cursor:"pointer", flexShrink:0, color:C.white, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13 }}>
-        {done?"✓":""}
-      </button>
-      {/* Chantier 83 — petite vignette photo (OFF+Cloudinary) ; carré neutre en repli. */}
-      <div style={{ width:38, height:38, flexShrink:0 }}>
-        <PhotoProduit varianteId={item.variante_produit_id} taille="thumb" radius={8}
-          fallback={<div style={{ width:"100%", height:"100%", borderRadius:8, background:C.grayLight }} />} />
-      </div>
-      <div style={{ flex:1, minWidth:0 }}>
-        <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, textDecoration:'none' }}>
-          {item.brand?`${item.brand} · `:""}{item.product}
-        </div>
-        <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.gray, marginTop:1 }}>
-          {item.formatDisplay ?? item.format}{item.brand?"":""} {!item.brand&&<span style={{ color:C.orange, fontSize:11 }}>· toutes marques</span>}
-        </div>
-        {/* Chantier 84 — préférence marque PAR ARTICLE : chaque bouton écrit
-            liste_courses.marque_pref de CETTE ligne. "nationale" écarte les
-            marques distributeur (sauf produit qui n'existe qu'en distributeur),
-            "distributeur" les inclut — affichées en générique dans le comparateur. */}
-        {!done && (
-          <div style={{ display:"inline-flex", marginTop:6, borderRadius:8, overflow:"hidden", border:`1px solid ${C.grayLight}` }}>
-            <button onClick={()=>onSetMarquePref?.(item.id, 'nationale')} style={{ padding:"3px 9px", border:"none", cursor:"pointer", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:11, background:pref==='nationale'?C.blue:C.white, color:pref==='nationale'?C.white:C.gray }}>
-              Marque nationale
-            </button>
-            <button onClick={()=>onSetMarquePref?.(item.id, 'mdd')} style={{ padding:"3px 9px", border:"none", cursor:"pointer", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:11, background:pref==='mdd'?C.blue:C.white, color:pref==='mdd'?C.white:C.gray }}>
-              Marque Distributeur
-            </button>
-          </div>
-        )}
-      </div>
-      <div style={{ background:done?C.green:C.blue, color:C.white, borderRadius:8, padding:"3px 9px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13 }}>×{item.qty}</div>
-      {!done && <button onClick={()=>setEditItem(item)} style={{ background:C.grayLight, border:"none", borderRadius:8, padding:"4px 7px", fontSize:12, cursor:"pointer" }}>✏️</button>}
-      <button onClick={()=>removeItem(item.id)} style={{ background:"none", border:"none", fontSize:15, cursor:"pointer", color:C.gray }}>✕</button>
-    </div>
-    );
-  };
-
+  // Chantier 125 — la présentation de la liste vit dans components/v2/
+  // ListeCourses.jsx ; ListTab garde les actions, la feuille de modification
+  // et la fenêtre des courses habituelles.
   return (
-    <div style={{ padding:"16px 16px 110px" }}>
-      {items.length===0 && (
-        <div style={{ background:"#FFF0F0", borderRadius:16, padding:"32px 24px", textAlign:"center", marginBottom:16, border:"2px dashed #CC0000" }}>
-          <div style={{ fontSize:52, marginBottom:10 }}>🛒</div>
-          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:17, color:"#CC0000", marginBottom:6 }}>Ta liste est vide</div>
-          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>Ajoute tes produits avec marque et format pour comparer les prix</div>
-        </div>
-      )}
-      {unchecked.length>0 && (
-        <>
-          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:8 }}>À acheter ({unchecked.length})</div>
-          <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:14 }}>
-            {unchecked.map(item=><ItemRow key={item.id} item={item} done={false}/>)}
-          </div>
-        </>
-      )}
-      {checked.length>0 && (
-        <>
-          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:8 }}>Dans le panier ({checked.length})</div>
-          <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:14 }}>
-            {checked.map(item=><ItemRow key={item.id} item={item} done={true}/>)}
-          </div>
-        </>
-      )}
-      {/* Chantier 88 Lot 2 — section « À acheter plus tard » : lignes
-          liste_courses de statut 'reporte' (gardées à la clôture des
-          courses). Jamais comptées comme achetées, jamais dans la liste
-          active ni le comparateur. ↩︎ les remet dans la liste active
-          ('a_acheter'), ✕ les supprime définitivement. */}
-      {itemsReportes.length>0 && (
-        <>
-          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.gray, letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:8 }}>⏳ À acheter plus tard ({itemsReportes.length})</div>
-          <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:14 }}>
-            {itemsReportes.map(item=>(
-              <div key={item.id} style={{ display:"flex", alignItems:"center", gap:12, background:"#FAF7F0", borderRadius:12, padding:"12px 14px", border:"1px dashed #D8CFBB" }}>
-                <div style={{ width:38, height:38, flexShrink:0, opacity:0.75 }}>
-                  <PhotoProduit varianteId={item.variante_produit_id} taille="thumb" radius={8}
-                    fallback={<div style={{ width:"100%", height:"100%", borderRadius:8, background:C.grayLight }} />} />
-                </div>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:"#6B6152" }}>
-                    {item.product}
-                  </div>
-                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.gray, marginTop:1 }}>
-                    {item.formatDisplay ?? item.format}
-                  </div>
-                </div>
-                <div style={{ background:"#D8CFBB", color:"#4A4436", borderRadius:8, padding:"3px 9px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13 }}>×{item.qty}</div>
-                <button onClick={()=>onReactiverReporte?.(item.id)} title="Remettre dans la liste"
-                  style={{ background:C.blue, border:"none", borderRadius:8, padding:"6px 9px", fontSize:13, cursor:"pointer", color:C.white, fontWeight:900 }}>↩︎</button>
-                <button onClick={()=>onSupprimerReporte?.(item.id)} style={{ background:"none", border:"none", fontSize:15, cursor:"pointer", color:C.gray }}>✕</button>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-      {/* Chantier 81 — la rangée de rayons a été retirée de l'onglet Liste :
-          le rayon se règle uniquement dans le sélecteur de zone du comparateur. */}
-      {items.length>=1 && (
-        <button onClick={()=>setTab("compare")} style={{ width:"100%", padding:"15px", marginBottom:10, background:"linear-gradient(135deg,#CC0000,#FF1A1A)", border:"none", borderRadius:14, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 6px 20px rgba(180,0,0,0.45)" }}>
-          🏪 Comparer les prix
-        </button>
-      )}
-      {/* Bouton favoris */}
-      {favorites.length>0 && (
-        <button onClick={()=>setShowFavModal(true)} style={{ width:"100%", padding:"15px", marginBottom:10, background:"linear-gradient(135deg,#CC0000,#FF1A1A)", border:"none", borderRadius:14, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 6px 16px rgba(180,0,0,0.4)" }}>
-          ⭐ Recharger mes courses habituelles
-        </button>
-      )}
-
-      <button onClick={()=>setTab("catalog")} style={{ width:"100%", padding:"15px", background:C.orange, border:"none", borderRadius:14, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:"#111111", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:"0 6px 16px rgba(200,160,0,0.4)" }}>
-        + Ajouter un produit
-      </button>
-
-      {/* Sauvegarder comme favoris (si liste non vide) */}
-      {items.length>0 && (
-        <button onClick={()=>setShowFavModal(true)} style={{ width:"100%", padding:"12px", marginTop:10, background:"transparent", border:`2px solid ${C.grayLight}`, borderRadius:14, fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:13, color:C.gray, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
-          ⭐ {favorites.length>0?"Mettre à jour mes courses habituelles":"Sauvegarder comme courses habituelles"}
-        </button>
-      )}
+    <div>
+      <ListeCourses
+        items={items} itemsReportes={itemsReportes} nbFavoris={favorites.length}
+        vignette={(item) => (
+          <PhotoProduit varianteId={item.variante_produit_id} taille="thumb" radius={10}
+            fallback={<div style={{ width:"100%", height:"100%", borderRadius:10, background:C.grayLight }} />} />
+        )}
+        onCocher={toggleCheck} onModifier={setEditItem} onSupprimer={removeItem} onMarque={onSetMarquePref}
+        onReactiverReporte={onReactiverReporte} onSupprimerReporte={onSupprimerReporte}
+        onAjouter={()=>setTab("catalog")} onComparer={()=>setTab("compare")} onFavoris={()=>setShowFavModal(true)}
+      />
 
       {editItem && <EditItemSheet item={editItem} onClose={()=>setEditItem(null)} onSave={updateItem}/>}
 
@@ -8991,14 +8803,8 @@ function MicroTab({ onAdd, setTab }) {
   return (
     <div style={{ padding:"16px 16px 110px" }}>
 
-      {/* Titre — même gabarit que le Catalogue */}
-      <div style={{ marginBottom:6 }}>
-        <div style={{ fontFamily:F, fontWeight:900, fontSize:24, color:C.text, letterSpacing:"-0.5px" }}>
-          Micro <span style={{ color:"#CC0000" }}>🎤</span>
-        </div>
-        <div style={{ fontFamily:F, fontSize:13, color:C.gray, marginTop:2 }}>
-          Dis ce qu'il te manque, on en fera ta liste de courses
-        </div>
+      <div style={{ fontFamily:F, fontSize:13, color:C.gray, marginBottom:10 }}>
+        Dis ce qu'il te manque, on en fera ta liste de courses.
       </div>
 
       {/* Badge shadow : rappel que cette version n'est visible que par François */}
@@ -11669,9 +11475,7 @@ export default function App() {
       )}
       <div style={{ minHeight:"100vh", background:C.bg, maxWidth:430, margin:"0 auto" }}>
         {tab !== "home" && (
-          <Header tab={tab} itemCount={items.length} userEmail={session.user.email} displayName={pseudo} onLogout={handleLogout}
-            pendingCount={invitationsEnAttente}
-            onCircle={()=>setShowCircleSheet(true)}/>
+          <EnTete tab={tab} setTab={setTab}/>
         )}
         <div style={{ paddingTop: tab === "home" ? 0 : 4 }}>
           {!loaded && (

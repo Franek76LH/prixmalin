@@ -10,3 +10,8 @@ export const IconeMoi = (p) => (<svg {...base} {...p}><circle cx="12" cy="8" r="
 export const IconeLoupe = (p) => (<svg {...base} {...p}><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>);
 export const IconeChevron = (p) => (<svg {...base} {...p}><path d="m9 6 6 6-6 6" /></svg>);
 export const IconeMicro = (p) => (<svg {...base} {...p}><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>);
+export const IconeRetour = (p) => (<svg {...base} {...p}><path d="m15 6-6 6 6 6" /></svg>);
+export const IconePlus = (p) => (<svg {...base} {...p}><path d="M12 5v14M5 12h14" /></svg>);
+export const IconeCroix = (p) => (<svg {...base} {...p}><path d="M6 6l12 12M18 6 6 18" /></svg>);
+export const IconeCrayon = (p) => (<svg {...base} {...p}><path d="M4 20h4L19 9l-4-4L4 16v4Z" /><path d="m13.5 6.5 4 4" /></svg>);
+export const IconeCoche = (p) => (<svg {...base} {...p}><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>);

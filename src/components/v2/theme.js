@@ -3,8 +3,8 @@
 // marque, le jaune réservé à ce qui fait gagner de l'argent.
 export const T = {
   police: "'Nunito',sans-serif",
-  rouge: '#D9121A',
-  rougeFonce: '#B00D14',
+  rouge: '#CC0000',
+  rougeFonce: '#A30000',
   rougePale: '#FFF1F1',
   jaune: '#FFD000',
   jaunePale: '#FFF8DC',
@@ -12,7 +12,7 @@ export const T = {
   vertPale: '#E9F8EF',
   bleu: '#1D5FD6',
   bleuPale: '#EEF4FF',
-  fond: '#F6F6F4',
+  fond: '#F8F8F8',
   carte: '#FFFFFF',
   trait: '#E8E8E4',
   texte: '#16181D',

@@ -2,20 +2,8 @@
 // cinq entrées fixes, toujours au même endroit, l'action principale (scanner
 // son ticket) au centre. Remplace les pastilles flottantes animées.
 import { T } from './theme';
+import { entreeActive } from '../../lib/navigationCore';
 import { IconeAccueil, IconeListe, IconeScanner, IconeComparer, IconeMoi } from './Icones';
-
-// Onglets de l'app rattachés à chaque entrée (pour savoir laquelle allumer).
-const FAMILLES = {
-  home: 'home',
-  list: 'list', catalog: 'list', micro: 'list', courses: 'list',
-  prices: 'scan',
-  compare: 'compare',
-  moi: 'moi', archive: 'moi', economies: 'moi', rejets: 'moi',
-};
-
-export function entreeActive(tab) {
-  return FAMILLES[tab] || 'home';
-}
 
 export default function BarreNavigation({ tab, setTab, onScanner, nbListe = 0, pastilleMoi = false }) {
   const active = entreeActive(tab);
@@ -35,7 +23,9 @@ export default function BarreNavigation({ tab, setTab, onScanner, nbListe = 0, p
       padding: '6px 6px calc(6px + env(safe-area-inset-bottom, 0px))', boxSizing: 'border-box',
       userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none', touchAction: 'manipulation',
     }}>
-      {entrees.map(({ id, libelle, Icone, action, compteur, central, point }) => {
+      {entrees.map((entree) => {
+        const { id, libelle, action, compteur, central, point } = entree;
+        const Icone = entree.Icone;
         const allume = active === id;
         const couleur = allume ? T.rouge : T.texteLeger;
         if (central) {
@@ -47,7 +37,7 @@ export default function BarreNavigation({ tab, setTab, onScanner, nbListe = 0, p
               <span style={{
                 width: 56, height: 56, borderRadius: '50%', background: T.rouge, color: '#fff',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                border: '4px solid #fff', boxShadow: '0 6px 16px rgba(217,18,26,0.35)',
+                border: '4px solid #fff', boxShadow: '0 6px 16px rgba(204,0,0,0.35)',
               }}>
                 <Icone width={26} height={26} />
               </span>
