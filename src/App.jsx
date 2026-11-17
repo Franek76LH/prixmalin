@@ -45,6 +45,11 @@ import { EcranLectureRefusee, EcranLectureDouteuse, BandeauLectureIncomplete, Co
 // Chantier 109 — lire la réponse de enregistrer_ticket_core au lieu de la jeter.
 import { interpreterResultatCore, NIVEAU_ECHEC, NIVEAU_INFO } from "./lib/resultatEcritureCore";
 import AlerteEcritureCore from "./components/AlerteEcritureCore";
+// Chantier 122 — comparaison honnête : pas de gagnant sous la moitié de la
+// liste, économie calculée sur les seuls produits communs.
+import { evaluerComparaison, ETAT_INSUFFISANT, ETAT_GAGNANT } from "./lib/comparaisonHonnete";
+// Chantier 122 — liaison automatique des produits dictés au catalogue.
+import { proposerLiaison, LIAISON_RELIE } from "./lib/liaisonAutoListe";
 // Chantier 110 — correction d'association : remise à zéro entre deux lignes,
 // relecture avant d'appliquer, garde-fou de mots communs sur le texte BRUT.
 import { construireRecapitulatif } from "./lib/coherenceAssociation";
@@ -6623,13 +6628,11 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
     return { analysis: analysisCore, ranked: rankedCore, missingGlobal: missingGlobalCore, exclusions };
   }, [utiliserCore, coreResultat, items]);
 
-  if(items.length===0) return (
-    <div style={{ padding:"40px 20px 100px", textAlign:"center" }}>
-      <div style={{ fontSize:60, marginBottom:14 }}>🏪</div>
-      <div style={{ fontFamily:F, fontWeight:900, fontSize:17, color:"#CC0000", marginBottom:6 }}>Ta liste est vide</div>
-      <div style={{ fontFamily:F, fontSize:13, color:C.textLight }}>Ajoute des produits dans "Liste" pour comparer</div>
-    </div>
-  );
+  // Chantier 122 — l'écran « liste vide » était un retour anticipé placé AVANT
+  // quatre hooks (useMemo ×2, useState, useEffect). Quand la liste se vidait
+  // pendant que cet écran était affiché (au moment de valider ses courses),
+  // React recevait moins de hooks qu'au rendu précédent et plantait. Le retour
+  // est désormais fait plus bas, après le dernier hook.
 
   // Chantier géoloc comparateur — tant qu'aucun point de référence n'existe
   // (GPS jamais accepté et rien de mémorisé/saisi), CE sélecteur remplace la
@@ -6796,9 +6799,6 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
   const analysisAffichee       = utiliserCore ? (coreAdapte?.analysis ?? []) : analysis;
   const rankedAffiche          = utiliserCore ? (coreAdapte?.ranked ?? []) : ranked;
   const bestAffiche            = rankedAffiche[0];
-  const secondBestAffiche      = rankedAffiche[1] ?? null;
-  const worstTotalAffiche      = rankedAffiche.length > 1 ? rankedAffiche[rankedAffiche.length - 1].total : 0;
-  const savingsVsSecondAffiche = (bestAffiche && secondBestAffiche) ? secondBestAffiche.total - bestAffiche.total : 0;
   const bestStoreEntryAffiche  = bestAffiche
     ? analysisAffichee
         .map(({ byStore }) => byStore[bestAffiche.id])
@@ -6807,8 +6807,11 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
     : null;
   const mapsQueryAffichee   = bestAffiche ? `${bestAffiche.name}${bestStoreEntryAffiche ? ' ' + bestStoreEntryAffiche.store_address : ''}` : '';
   const mapsUrlAffiche      = bestAffiche ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapsQueryAffichee)}` : '#';
-  const maxSavingsAffiche   = bestAffiche ? worstTotalAffiche - bestAffiche.total : 0;
   const missingGlobalAffiche = utiliserCore ? (coreAdapte?.missingGlobal ?? []) : missingGlobal;
+  // Chantier 122 — verdict honnête (aucun gagnant sous la moitié de la liste ;
+  // économie sur produits communs seulement). Calcul pur et léger, pas un
+  // hook : on est après le early return items.length===0.
+  const verdict = evaluerComparaison({ ranked: rankedAffiche, analysis: analysisAffichee, nbArticles: items.length });
 
   // Chantier 83 — magasins de chaque catégorie réellement présents dans la zone
   // (rayon), indépendamment des produits : distingue « aucun magasin de cette
@@ -6845,6 +6848,14 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
         setLastVerified({ dateLabel, pseudo: data?.pseudo || 'un utilisateur' });
       });
   }, [bestAffiche?.id]);
+
+  if(items.length===0) return (
+    <div style={{ padding:"40px 20px 100px", textAlign:"center" }}>
+      <div style={{ fontSize:60, marginBottom:14 }}>🏪</div>
+      <div style={{ fontFamily:F, fontWeight:900, fontSize:17, color:"#CC0000", marginBottom:6 }}>Ta liste est vide</div>
+      <div style={{ fontFamily:F, fontSize:13, color:C.textLight }}>Ajoute des produits dans "Liste" pour comparer</div>
+    </div>
+  );
 
   return (
     <div style={{ padding: (!zonePrete || zoneManquante) ? "24px 20px 100px" : "16px 16px 110px" }}>
@@ -6892,9 +6903,9 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
           <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:C.white }}>
             {items.length} produit{items.length>1?"s":""} · {totalItems} article{totalItems>1?"s":""}
           </div>
-          {maxSavingsAffiche>0.05 && (
+          {verdict.economie>0.05 && verdict.reference && (
             <div style={{ fontFamily:F, fontSize:12, color:"rgba(255,255,255,0.75)", marginTop:2 }}>
-              Jusqu'à <strong style={{ color:"#FFD700" }}>{maxSavingsAffiche.toFixed(2)} €</strong> d'écart entre magasins
+              <strong style={{ color:"#FFD700" }}>{verdict.economie.toFixed(2)} €</strong> d'écart sur {verdict.nbCommuns} produit{verdict.nbCommuns>1?"s":""} comparable{verdict.nbCommuns>1?"s":""}
             </div>
           )}
         </div>
@@ -6984,7 +6995,33 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
         </div>
       )}
 
-      {rankedAffiche.length>0 && (
+      {/* Chantier 122 — pas assez de prix : AUCUN gagnant. On montre ce qu'on
+          sait (qui a combien de prix), sans désigner personne. */}
+      {rankedAffiche.length>0 && verdict.etat === ETAT_INSUFFISANT && (
+        <div style={{ background:C.white, borderRadius:18, padding:"20px 18px", marginBottom:16, border:`2px solid ${C.grayLight}`, boxShadow:"0 4px 16px rgba(0,0,0,0.06)" }}>
+          <div style={{ fontSize:34, textAlign:"center", marginBottom:6 }}>🤷</div>
+          <div style={{ fontFamily:F, fontWeight:900, fontSize:17, color:C.text, textAlign:"center", marginBottom:6 }}>
+            Pas encore assez de prix pour comparer
+          </div>
+          <div style={{ fontFamily:F, fontSize:13, color:C.textLight, textAlign:"center", marginBottom:14 }}>
+            Le magasin le mieux renseigné n'a que <strong>{verdict.couvertureMax} prix sur {items.length}</strong> produit{items.length>1?"s":""} de ta liste. Désigner un gagnant ne serait pas honnête.
+          </div>
+          <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:14 }}>
+            {rankedAffiche.slice(0,5).map(m=>(
+              <div key={m.id} style={{ display:"flex", alignItems:"center", gap:10, background:C.grayLight, borderRadius:10, padding:"9px 12px" }}>
+                <span style={{ fontSize:18 }}>{m.logo}</span>
+                <span style={{ flex:1, minWidth:0, fontFamily:F, fontWeight:800, fontSize:13, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{m.name}</span>
+                <span style={{ fontFamily:F, fontWeight:800, fontSize:12, color:C.textLight, whiteSpace:"nowrap" }}>{m.found}/{items.length} produit{items.length>1?"s":""}</span>
+              </div>
+            ))}
+          </div>
+          <button onClick={()=>setTab("prices")} style={{ width:"100%", padding:"13px", border:"none", borderRadius:12, background:C.blue, fontFamily:F, fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer" }}>
+            📸 Scanner un ticket pour ajouter des prix
+          </button>
+        </div>
+      )}
+
+      {rankedAffiche.length>0 && verdict.etat === ETAT_GAGNANT && (
         <>
           {/* ── MEILLEUR MAGASIN (grand) ── */}
           <div style={{ background:"linear-gradient(145deg,#CC0000,#E00000)", borderRadius:18, overflow:"hidden", marginBottom:16, boxShadow:"0 10px 32px rgba(204,0,0,0.45)", animation:"slideIn 0.3s ease both" }}>
@@ -6992,7 +7029,7 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
             {/* Badge + Prix total */}
             <div style={{ padding:"18px 18px 0", display:"flex", alignItems:"flex-start", justifyContent:"space-between" }}>
               <div style={{ background:C.orange, borderRadius:8, padding:"4px 12px", fontFamily:F, fontWeight:900, fontSize:11, color:C.white, letterSpacing:"0.04em" }}>
-                🥇 {bestAffiche.missing.length > 0 ? "MEILLEUR PRIX PARTIEL" : "MEILLEUR PRIX"}
+                🥇 {verdict.complet ? "MEILLEUR PRIX" : `LE PLUS COMPLET · ${bestAffiche.found}/${items.length}`}
               </div>
               <div style={{ textAlign:"right" }}>
                 <div style={{ fontFamily:F, fontWeight:900, fontSize:34, color:C.white, lineHeight:1 }}>{bestAffiche.total.toFixed(2)} €</div>
@@ -7001,7 +7038,6 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
                     Prix pour {bestAffiche.found} article{bestAffiche.found>1?"s":""} sur {items.length} — panier incomplet
                   </div>
                 )}
-                {maxSavingsAffiche>0.05 && <div style={{ fontFamily:F, fontSize:11, color:"rgba(255,255,255,0.6)", marginTop:2 }}>−{maxSavingsAffiche.toFixed(2)} € vs le + cher</div>}
                 {/* Chantier 104 — mention discrète sur le total : il contient au
                     moins un prix qu'on ne peut pas garantir. */}
                 {bestAffiche.aPrixAVerifier && (
@@ -7112,14 +7148,16 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
                       lignesPrix: coreResultat.regroupement[bestAffiche.id] ?? [],
                     }
                   : null;
-                onValidate(bestAffiche, savingsVsSecondAffiche, extrasCourses);
+                // Chantier 122 — l'économie transmise (cagnotte) est l'économie
+                // honnête : produits communs seulement, 0 si non comparable.
+                onValidate(bestAffiche, verdict.economie, extrasCourses);
               }} style={{ width:"100%", padding:"15px", border:"none", borderRadius:12, background:C.orange, fontFamily:F, fontWeight:900, fontSize:16, color:"#111", cursor:"pointer", boxShadow:"0 4px 16px rgba(0,0,0,0.25)" }}>
                 ✅ Je fais mes courses chez {bestAffiche.name}
               </button>
 
-              {secondBestAffiche && savingsVsSecondAffiche > 0 && (
+              {verdict.economie > 0.05 && verdict.reference && (
                 <div style={{ fontFamily:F, fontSize:12, color:"rgba(255,255,255,0.75)", textAlign:"center", marginTop:10 }}>
-                  Avec cette liste de courses, aujourd'hui <strong style={{ color:"#FFD700" }}>{bestAffiche.name}</strong> est le plus malin · tu économises <strong style={{ color:"#FFD700" }}>{savingsVsSecondAffiche.toFixed(2)} €</strong>
+                  Sur les <strong style={{ color:"#FFD700" }}>{verdict.nbCommuns} produit{verdict.nbCommuns>1?"s":""}</strong> que {verdict.reference.name} vend aussi, tu économises <strong style={{ color:"#FFD700" }}>{verdict.economie.toFixed(2)} €</strong> chez {bestAffiche.name}
                 </div>
               )}
 
@@ -8834,6 +8872,43 @@ function MicroTab({ onAdd, setTab }) {
   });
   // Lot 4 — élément en cours de liaison au Catalogue (feuille ouverte).
   const [lienElement, setLienElement] = useState(null);
+
+  // Chantier 122 — liaison automatique. Pour chaque élément encore « à
+  // relier », on cherche sa fiche : nom exact -> relié sans rien demander ;
+  // ressemblance -> jusqu'à 3 propositions à un appui ; sinon rien ne change.
+  // On ne touche JAMAIS un élément que l'utilisateur a modifié entre-temps
+  // (renommé, relié à la main, marqué introuvable).
+  const lierAutomatiquement = useCallback(async (elements) => {
+    const chercher = async (terme) => {
+      const { data, error } = await supabase.rpc('rechercher_produits_catalogue', { p_terme: terme });
+      if (error) throw error;
+      return data || [];
+    };
+    for (const el of elements || []) {
+      if (!el?.id || !el?.nom) continue;
+      const decision = await proposerLiaison(el.nom, chercher);
+      setElementsListe(prev => prev.map(e => {
+        if (e.id !== el.id || e.nom !== el.nom) return e;
+        if ((e.statut_resolution ?? "a_relier") !== "a_relier") return e;
+        if (decision.issue === LIAISON_RELIE) {
+          return { ...e, statut_resolution: "resolu", produit_id: decision.produit.produit_id, variante_produit_id: null,
+            marque_pref: "nationale", produit_nom: decision.produit.produit_nom, suggestions: [], liaison_cherchee: true };
+        }
+        return { ...e, liaison_cherchee: true,
+          suggestions: decision.suggestions.map(sg => ({ produit_id: sg.produit_id, produit_nom: sg.produit_nom })) };
+      }));
+    }
+  }, []);
+
+  // Liste reprise d'un brouillon : les éléments jamais cherchés le sont une
+  // fois, à l'ouverture de l'écran.
+  const rechercheInitialeFaite = useRef(false);
+  useEffect(() => {
+    if (rechercheInitialeFaite.current) return;
+    rechercheInitialeFaite.current = true;
+    const aChercher = elementsListe.filter(e => (e.statut_resolution ?? "a_relier") === "a_relier" && !e.liaison_cherchee);
+    if (aChercher.length > 0) lierAutomatiquement(aChercher);
+  }, [elementsListe, lierAutomatiquement]);
   // Lot 5 — ajout groupé au caddie.
   const [confirmAjout, setConfirmAjout] = useState(false);
   const [ajoutEnCours, setAjoutEnCours] = useState(false);
@@ -9036,10 +9111,9 @@ function MicroTab({ onAdd, setTab }) {
       // Lot 3 — les éléments extraits rejoignent le RÉCAPITULATIF unique
       // (une seule fois : le statut ne repasse jamais de "ok" à autre chose).
       if (resultat.elements.length > 0) {
-        setElementsListe(prev => [
-          ...prev,
-          ...resultat.elements.map(e => ({ ...e, id: genIdElementMicro(), origine: "vocal", statut_resolution: "a_relier", produit_id: null, variante_produit_id: null, produit_nom: null })),
-        ]);
+        const nouveaux = resultat.elements.map(e => ({ ...e, id: genIdElementMicro(), origine: "vocal", statut_resolution: "a_relier", produit_id: null, variante_produit_id: null, produit_nom: null }));
+        setElementsListe(prev => [...prev, ...nouveaux]);
+        lierAutomatiquement(nouveaux); // Chantier 122 — sans attendre, sans bloquer
       }
       // Lot 6 — mesure d'usage (jamais le contenu : des comptes, pas des mots).
       capturerEvenement("micro_prise_transcrite", {
@@ -9059,7 +9133,9 @@ function MicroTab({ onAdd, setTab }) {
   const ajouterElementManuel = () => {
     const nom = nouvelElement.trim();
     if (!nom) return;
-    setElementsListe(prev => [...prev, { id: genIdElementMicro(), texte_entendu: "", nom, quantite: null, unite: null, qualificatifs: null, confiance: "haute", origine: "manuel", statut_resolution: "a_relier", produit_id: null, variante_produit_id: null, produit_nom: null }]);
+    const nouveau = { id: genIdElementMicro(), texte_entendu: "", nom, quantite: null, unite: null, qualificatifs: null, confiance: "haute", origine: "manuel", statut_resolution: "a_relier", produit_id: null, variante_produit_id: null, produit_nom: null };
+    setElementsListe(prev => [...prev, nouveau]);
+    lierAutomatiquement([nouveau]); // Chantier 122
     setNouvelElement("");
   };
   const changerQuantite = (id, delta) => {
@@ -9071,9 +9147,12 @@ function MicroTab({ onAdd, setTab }) {
     const nom = editionNom.trim();
     // Renommer remet aussi la liaison Catalogue à zéro : le nouveau nom peut
     // correspondre à un tout autre produit (statut « à relier »).
-    if (nom) setElementsListe(prev => prev.map(e => e.id === editionId
-      ? { ...e, nom, confiance: "haute", statut_resolution: "a_relier", produit_id: null, variante_produit_id: null, produit_nom: null }
-      : e));
+    if (nom) {
+      setElementsListe(prev => prev.map(e => e.id === editionId
+        ? { ...e, nom, confiance: "haute", statut_resolution: "a_relier", produit_id: null, variante_produit_id: null, produit_nom: null, suggestions: [], liaison_cherchee: false }
+        : e));
+      lierAutomatiquement([{ id: editionId, nom }]); // Chantier 122 — nouveau nom, nouvelle recherche
+    }
     setEditionId(null); setEditionNom("");
   };
 
@@ -9324,7 +9403,25 @@ function MicroTab({ onAdd, setTab }) {
                    {/* Lot 4 — statut de liaison au Catalogue (hors mode édition) */}
                    {editionId !== e.id && (
                      <div style={{ marginTop:6, display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
-                       {(e.statut_resolution ?? "a_relier") === "a_relier" && (
+                       {/* Chantier 122 — propositions à un appui : plus besoin
+                           d'ouvrir la recherche pour chaque produit. */}
+                       {(e.statut_resolution ?? "a_relier") === "a_relier" && (e.suggestions?.length ?? 0) > 0 && (
+                         <>
+                           <span style={{ fontFamily:F, fontSize:11, fontWeight:800, color:C.gray }}>C'est :</span>
+                           {e.suggestions.map(sg => (
+                             <button key={sg.produit_id}
+                               onClick={() => resoudreElement(e.id, { produit_id: sg.produit_id, variante_produit_id: null, marque_pref: "nationale", produit_nom: sg.produit_nom, qty: 1 })}
+                               style={{ border:"1px solid #BFDBFE", borderRadius:99, background:"#EFF6FF", color:"#1D4ED8", fontFamily:F, fontWeight:800, fontSize:11.5, padding:"5px 11px", cursor:"pointer" }}>
+                               {sg.produit_nom}
+                             </button>
+                           ))}
+                           <button onClick={() => setLienElement(e)}
+                             style={{ border:`1px solid ${C.grayLight}`, borderRadius:99, background:"#fff", color:C.textLight, fontFamily:F, fontWeight:800, fontSize:11.5, padding:"5px 11px", cursor:"pointer" }}>
+                             Autre…
+                           </button>
+                         </>
+                       )}
+                       {(e.statut_resolution ?? "a_relier") === "a_relier" && (e.suggestions?.length ?? 0) === 0 && (
                          <button onClick={() => setLienElement(e)}
                            style={{ border:"1px solid #BFDBFE", borderRadius:99, background:"#EFF6FF", color:"#1D4ED8", fontFamily:F, fontWeight:800, fontSize:11.5, padding:"5px 11px", cursor:"pointer" }}>
                            🔗 Relier au catalogue
