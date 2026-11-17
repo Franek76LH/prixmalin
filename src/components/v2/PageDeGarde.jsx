@@ -99,13 +99,13 @@ export default function PageDeGarde({ onCommencer, onDejaUnCompte = null, libell
           </h1>
 {/* Chantier 137 — l'ancien message (« Tes tickets de caisse te disent
               où ta liste coûte le moins cher ») laissait croire qu'il fallait
-              déjà avoir ses propres tickets. On dit d'abord ce que l'app fait
-              pour toi, puis d'où viennent les prix : de tout le monde. */}
-          <p style={{ fontFamily: T.police, fontWeight: 800, fontSize: 16, color: '#fff', margin: '16px 0 8px', lineHeight: 1.4 }}>
-            Fais ta liste de courses.<br />On te dit où elle coûte le moins cher.
+              déjà avoir ses propres tickets. Choix de François (17/11) : le
+              message COMMUNAUTAIRE, un des piliers de communication de l'app. */}
+          <p style={{ fontFamily: T.police, fontWeight: 800, fontSize: 19, color: '#fff', margin: '16px 0 8px', lineHeight: 1.4 }}>
+            Ensemble, on trouve<br />le magasin le moins cher.
           </p>
           <p style={{ fontFamily: T.police, fontWeight: 700, fontSize: 14, color: '#D3D1C7', margin: '0 0 26px', lineHeight: 1.45 }}>
-            Les prix viennent des tickets de caisse scannés par tous les utilisateurs.
+            Chaque ticket scanné aide tout le monde à payer moins.
           </p>
           <button onClick={onCommencer} style={{ width: '100%', border: 'none', background: T.rouge, color: '#fff', borderRadius: 16, padding: 16, fontFamily: T.police, fontWeight: 900, fontSize: 17, cursor: 'pointer' }}>
             {libelleBouton}
