@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback, Component } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback, Component } from "react";
 import { imageFileToJpegBase64, scanMultipleTicketsWithClaude, filtrerProduitsExploitables, scanTicketRobuste, MESSAGES_SCAN, badgeProduit, redresserPhoto } from "./scanTicket";
 import { motifsDoute } from "./lib/lectureDouteuse";
 import { nettoyerAdresseMagasin } from "./lib/adresseMagasin";
@@ -50,6 +50,11 @@ import AlerteEcritureCore from "./components/AlerteEcritureCore";
 import { evaluerComparaison, ETAT_INSUFFISANT, ETAT_GAGNANT } from "./lib/comparaisonHonnete";
 // Chantier 122 — liaison automatique des produits dictés au catalogue.
 import { proposerLiaison, LIAISON_RELIE } from "./lib/liaisonAutoListe";
+// Chantier 123 — nouvelle interface : accueil simple, barre du bas classique,
+// espace « Moi ».
+import AccueilSimple from "./components/v2/AccueilSimple";
+import BarreNavigation from "./components/v2/BarreNavigation";
+import EcranMoi from "./components/v2/EcranMoi";
 // Chantier 110 — correction d'association : remise à zéro entre deux lignes,
 // relecture avant d'appliquer, garde-fou de mots communs sur le texte BRUT.
 import { construireRecapitulatif } from "./lib/coherenceAssociation";
@@ -1162,7 +1167,7 @@ function MesPrixSheet({ priceDB, setPriceDB, archives, updateArchive, onTicketVa
 // ── HEADER ────────────────────────────────────────────────────────────────────
 function Header({ tab, itemCount, userEmail, displayName, onLogout, pendingCount, onCircle }) {
   const F = "'Nunito',sans-serif";
-  const titles = { list:"Ma liste", catalog:"Catalogue", compare:"Comparer", prices:"Mes prix", archive:"Historique", economies:"Mes économies", rejets:"Rejets", micro:"Micro" };
+  const titles = { list:"Ma liste", catalog:"Catalogue", compare:"Comparer", prices:"Mes prix", archive:"Mes tickets", economies:"Mes économies", rejets:"Rejets", micro:"Dicter ma liste", moi:"Mon espace", courses:"Mes courses" };
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef(null);
   useEffect(() => {
@@ -1230,223 +1235,6 @@ function Header({ tab, itemCount, userEmail, displayName, onLogout, pendingCount
 // archive/rejets reprennent des teintes déjà présentes ailleurs dans l'app
 // (bleu de AutresOptionsSheet/MultiPhotoSheet, violet du mode debug Core #56.4)
 // plutôt que d'inventer une palette nouvelle.
-const TAB_COLORS = {
-  home:      C.blue,
-  archive:   "#4A90D9",
-  economies: C.green,
-  rejets:    "#8E44AD",
-};
-
-function runTabBounce(el) {
-  if (!el?.animate) return;
-  el.animate([
-    { transform:"scale(0.7) rotate(0deg)",   offset:0 },
-    { transform:"scale(1.55) rotate(4deg)",  offset:0.4 },
-    { transform:"scale(1.22) rotate(-2deg)", offset:0.7 },
-    { transform:"scale(1.3) rotate(0deg)",   offset:1 },
-  ], { duration:550, easing:"cubic-bezier(.34,1.56,.64,1)" });
-}
-
-function runTabParticles(layer, el, color) {
-  if (!layer || !el?.animate) return;
-  const layerRect = layer.getBoundingClientRect();
-  const r = el.getBoundingClientRect();
-  const cx = r.left + r.width/2 - layerRect.left;
-  const cy = r.top  + r.height/2 - layerRect.top;
-  const N = 12;
-  for (let i=0; i<N; i++) {
-    const angle = (i/N) * Math.PI * 2;
-    const dist  = 30 + Math.random()*12;
-    const dx = Math.cos(angle)*dist, dy = Math.sin(angle)*dist;
-    const size = 6 + Math.random()*2;
-    const white = i % 4 === 0;
-    const p = document.createElement("div");
-    p.style.cssText = `position:absolute;width:${size}px;height:${size}px;border-radius:50%;left:${cx-size/2}px;top:${cy-size/2}px;background:${white?"#fff":color};pointer-events:none;`;
-    layer.appendChild(p);
-    p.animate([
-      { transform:"translate(0,0) scale(1)", opacity:1 },
-      { transform:`translate(${dx}px,${dy}px) scale(0.2)`, opacity:0 },
-    ], { duration:600, easing:"cubic-bezier(.2,.7,.3,1)" }).onfinish = () => p.remove();
-  }
-}
-
-function runTabComet(layer, fromEl, toEl, color, onArrive) {
-  if (!layer || !fromEl?.animate || !toEl) return;
-  const layerRect = layer.getBoundingClientRect();
-  const a = fromEl.getBoundingClientRect();
-  const b = toEl.getBoundingClientRect();
-  const ax = a.left + a.width/2 - layerRect.left, ay = a.top + a.height/2 - layerRect.top;
-  const bx = b.left + b.width/2 - layerRect.left, by = b.top + b.height/2 - layerRect.top;
-  const dx = bx - ax, dy = by - ay;
-
-  const comet = document.createElement("div");
-  comet.style.cssText = `position:absolute;width:16px;height:16px;border-radius:50%;left:${ax-8}px;top:${ay-8}px;background:radial-gradient(circle,#fff 0%,${color} 70%);box-shadow:0 0 10px 3px ${color},0 0 4px 2px #fff;pointer-events:none;`;
-  layer.appendChild(comet);
-
-  let step = 0;
-  const totalSteps = 6;
-  const trailTimer = setInterval(() => {
-    step += 1;
-    if (step >= totalSteps) { clearInterval(trailTimer); return; }
-    const t = step / totalSteps;
-    const sx = ax + dx*t, sy = ay + dy*t;
-    // Poussière d'étoiles : taille aléatoire 4-10px, retombe doucement
-    // (10-20px de descente) en rétrécissant/s'estompant, avec un
-    // scintillement (opacity qui varie) pendant la chute — durée de vie
-    // volontairement longue (~1-1,2s) pour rester visible derrière la comète.
-    const size = 4 + Math.random()*6;
-    const fall = 10 + Math.random()*10;
-    const spark = document.createElement("div");
-    spark.style.cssText = `position:absolute;width:${size}px;height:${size}px;border-radius:50%;left:${sx-size/2}px;top:${sy-size/2}px;background:${color};pointer-events:none;`;
-    layer.appendChild(spark);
-    spark.animate([
-      { opacity:0.9,  transform:"translateY(0) scale(1)",                     offset:0    },
-      { opacity:0.45, transform:`translateY(${fall*0.4}px) scale(0.85)`,      offset:0.35 },
-      { opacity:0.8,  transform:`translateY(${fall*0.6}px) scale(0.7)`,       offset:0.55 },
-      { opacity:0.25, transform:`translateY(${fall*0.85}px) scale(0.45)`,     offset:0.8  },
-      { opacity:0,    transform:`translateY(${fall}px) scale(0.15)`,          offset:1    },
-    ], { duration:1000 + Math.random()*200, easing:"ease-out" }).onfinish = () => spark.remove();
-  }, 500/totalSteps);
-
-  const cometAnim = comet.animate([
-    { transform:"translate(0,0)",                     offset:0   },
-    { transform:`translate(${dx*0.5}px,${dy*0.5}px)`, offset:0.5 },
-    { transform:`translate(${dx}px,${dy}px)`,         offset:1   },
-  ], { duration:500, easing:"ease-in" });
-
-  cometAnim.onfinish = () => {
-    clearInterval(trailTimer);
-    comet.remove();
-
-    // Éclat d'impact — deux couches : flash central + onde de choc (anneau
-    // net qui s'étend en s'affinant), plus quelques éclats blancs projetés.
-    // Diamètre de référence pris sur le cercle d'arrivée déjà rendu (donc
-    // déjà à sa taille "actif" éventuelle) pour calibrer l'expansion en 1,5-2x.
-    const diam = b.width;
-    const flashMax = diam * 1.8;
-
-    const flash = document.createElement("div");
-    flash.style.cssText = `position:absolute;width:${diam*0.5}px;height:${diam*0.5}px;border-radius:50%;left:${bx-diam*0.25}px;top:${by-diam*0.25}px;background:radial-gradient(circle,#fff 0%,${color} 60%,transparent 75%);pointer-events:none;`;
-    layer.appendChild(flash);
-    flash.animate([
-      { opacity:1, transform:"scale(1)" },
-      { opacity:0, transform:`scale(${flashMax/(diam*0.5)})` },
-    ], { duration:650, easing:"ease-out" }).onfinish = () => flash.remove();
-
-    const ring = document.createElement("div");
-    ring.style.cssText = `position:absolute;width:${diam}px;height:${diam}px;border-radius:50%;left:${bx-diam/2}px;top:${by-diam/2}px;border:3px solid #fff;background:transparent;pointer-events:none;`;
-    layer.appendChild(ring);
-    ring.animate([
-      { opacity:0.9, transform:"scale(1)",                 borderWidth:"3px" },
-      { opacity:0,   transform:`scale(${flashMax/diam})`,  borderWidth:"0px" },
-    ], { duration:650, easing:"ease-out" }).onfinish = () => ring.remove();
-
-    const nbEclats = 4 + Math.floor(Math.random()*3);
-    for (let i=0; i<nbEclats; i++) {
-      const angle = Math.random()*Math.PI*2;
-      const dist = diam*0.5 + Math.random()*diam*0.4;
-      const ex = Math.cos(angle)*dist, ey = Math.sin(angle)*dist;
-      const eclat = document.createElement("div");
-      eclat.style.cssText = `position:absolute;width:5px;height:5px;border-radius:50%;left:${bx-2.5}px;top:${by-2.5}px;background:#fff;pointer-events:none;`;
-      layer.appendChild(eclat);
-      eclat.animate([
-        { transform:"translate(0,0) scale(1)", opacity:1 },
-        { transform:`translate(${ex}px,${ey}px) scale(0.2)`, opacity:0 },
-      ], { duration:500, easing:"ease-out" }).onfinish = () => eclat.remove();
-    }
-
-    onArrive?.();
-  };
-}
-
-function TabBar({ tab, setTab, isAdmin }) {
-  const F = "'Nunito',sans-serif";
-  const tabs = [
-    { id:"home",      icon:"🏠", label:"Accueil"   },
-    { id:"archive",   icon:"📦", label:"Historique"},
-    { id:"economies", icon:"💰", label:"Économies" },
-    // #56.3b — onglet admin uniquement, jamais rendu pour un utilisateur non-admin.
-    ...(isAdmin ? [{ id:"rejets", icon:"🛠️", label:"Rejets" }] : []),
-  ];
-
-  const btnRefs = useRef({});
-  const fxLayerRef = useRef(null);
-  const prevTabRef = useRef(null);
-  const [reducedMotion, setReducedMotion] = useState(
-    () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
-  );
-
-  useEffect(() => {
-    const mql = window.matchMedia?.("(prefers-reduced-motion: reduce)");
-    if (!mql) return;
-    const onChange = () => setReducedMotion(mql.matches);
-    mql.addEventListener?.("change", onChange);
-    return () => mql.removeEventListener?.("change", onChange);
-  }, []);
-
-  // Rebond + particules + comète : uniquement au CHANGEMENT d'onglet, jamais
-  // au montage initial (prevTabRef démarre à null pour distinguer les deux).
-  // useLayoutEffect (pas useEffect) pour démarrer l'animation avant peinture
-  // et éviter un flash "scale(1.3) statique" avant le rebond.
-  useLayoutEffect(() => {
-    if (prevTabRef.current === null) { prevTabRef.current = tab; return; }
-    const prevId = prevTabRef.current;
-    prevTabRef.current = tab;
-    if (prevId === tab || reducedMotion) return;
-
-    const layer = fxLayerRef.current;
-    const toEl = btnRefs.current[tab];
-    const fromEl = btnRefs.current[prevId];
-    if (!layer || !toEl) return;
-
-    const color = TAB_COLORS[tab] || C.text;
-    const arrivee = () => { runTabBounce(toEl); runTabParticles(layer, toEl, color); };
-    if (fromEl) runTabComet(layer, fromEl, toEl, color, arrivee);
-    else arrivee();
-  }, [tab, reducedMotion]);
-
-  return (
-    <div className="tabBarRoot" style={{ position:"fixed", bottom:16, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:430, display:"flex", justifyContent:"space-evenly", alignItems:"center", zIndex:50, pointerEvents:"none" }}>
-      {tabs.map(t=>{
-        const active = tab===t.id;
-        const color = TAB_COLORS[t.id] || C.text;
-        return (
-          <button key={t.id} onClick={()=>setTab(t.id)} onTouchStart={()=>{}} style={{ border:"none", background:"none", cursor:"pointer", padding:0, display:"flex", flexDirection:"column", alignItems:"center", pointerEvents:"all" }}>
-            <div
-              ref={el => { btnRefs.current[t.id] = el; }}
-              className="tabCircleBtn"
-              style={{
-                width:48, height:48, borderRadius:"50%", boxSizing:"border-box",
-                background: color,
-                border: active ? "5px solid #fff" : "3px solid #fff",
-                display:"flex", alignItems:"center", justifyContent:"center",
-                transform: active ? "scale(1.3)" : "scale(1)",
-                transition: "transform 0.2s ease",
-                // Anneau blanc net via border (couche intermédiaire) ; le néon
-                // (box-shadow) démarre par nature au bord externe du border,
-                // donc toujours à l'extérieur de l'anneau, jamais par-dessus.
-                boxShadow: active
-                  ? (reducedMotion
-                      ? `0 4px 12px rgba(0,0,0,0.15), 0 0 8px 2px ${color}88`
-                      : `0 4px 12px rgba(0,0,0,0.15), 0 0 10px 2px ${color}`)
-                  : "0 4px 12px rgba(0,0,0,0.15)",
-                animation: active && !reducedMotion ? "tabNeonPulse 1.2s ease-in-out infinite" : "none",
-                "--tab-glow": color,
-              }}
-            >
-              <span style={{ fontSize:24 }}>{t.icon}</span>
-            </div>
-            <span style={{ marginTop:4, fontFamily:F, fontSize:10, fontWeight: active?900:700, color: active?color:C.textLight }}>
-              {t.label}
-            </span>
-          </button>
-        );
-      })}
-      <div ref={fxLayerRef} style={{ position:"absolute", inset:0, pointerEvents:"none", overflow:"visible" }} />
-    </div>
-  );
-}
-
 // ── TOAST ─────────────────────────────────────────────────────────────────────
 function Toast({ msg, ok = true }) {
   return (
@@ -8630,48 +8418,6 @@ function AutresOptionsSheet({ onClose, onBack, onGalleryImport, onManualEntry })
   );
 }
 
-// ── HOME TAB ─────────────────────────────────────────────────────────────────
-// #64.1 — animation pure d'affichage, aucun calcul d'économie touché ici.
-// Roulement d'un montant vers un autre, easing décéléré (rapide→doux).
-function animateAmountRoll(from, to, duration, onFrame, onDone) {
-  const start = performance.now();
-  const ease = t => 1 - Math.pow(1 - t, 3);
-  function step(now) {
-    const t = Math.min(1, (now - start) / duration);
-    onFrame(from + (to - from) * ease(t));
-    if (t < 1) requestAnimationFrame(step);
-    else onDone?.();
-  }
-  requestAnimationFrame(step);
-}
-
-function runConfettiRain(layer, onDone) {
-  if (!layer) { onDone?.(); return; }
-  const COLORS = ["#fff", "#F5C200", "#FF7A00", "#4A90D9", "#FF4FA3", "#00B341", "#E5181B"];
-  const N = 160;
-  const vw = window.innerWidth, vh = window.innerHeight;
-  for (let i = 0; i < N; i++) {
-    setTimeout(() => {
-      const size   = 8 + Math.random()*14;
-      const isRect = Math.random() < 0.5;
-      const color  = COLORS[Math.floor(Math.random()*COLORS.length)];
-      const startX = Math.random()*vw;
-      const drift  = (Math.random()-0.5)*220;
-      const fallMs = 1600 + Math.random()*1400;
-      const rot0   = Math.random()*360;
-      const rot1   = rot0 + (Math.random()<0.5?1:-1)*(360+Math.random()*360);
-      const el = document.createElement("div");
-      el.style.cssText = `position:absolute;left:${startX}px;top:-20px;width:${size}px;height:${isRect?size*0.5:size}px;background:${color};${isRect?"":"border-radius:50%;"}pointer-events:none;`;
-      layer.appendChild(el);
-      el.animate([
-        { transform:`translate(0,0) rotate(${rot0}deg)`,                 opacity:1, offset:0    },
-        { transform:`translate(${drift}px,${vh+40}px) rotate(${rot1}deg)`, opacity:1, offset:0.85 },
-        { transform:`translate(${drift}px,${vh+40}px) rotate(${rot1}deg)`, opacity:0, offset:1    },
-      ], { duration:fallMs, easing:"cubic-bezier(.4,0,.6,1)" }).onfinish = () => el.remove();
-    }, Math.random()*500);
-  }
-  setTimeout(() => onDone?.(), 3600);
-}
 
 // ── CHANTIER « MICRO » — LOT 4 : liaison d'un élément vocal au Catalogue ─────
 // Feuille de recherche : même RPC que l'onglet Catalogue
@@ -10004,404 +9750,23 @@ function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, on
   );
 }
 
-function HomeTab({ items, circles, profileMap, userId, setTab, onCircle, onFlash, onResumeScan, archives = [], pseudo, onStats, onMesPrix, onFavoris, onProfil = null, onFaq, onSignOut, pendingCagnotte, onConsumeCagnotteCelebration, pendingPotential, onConsumePotentialCelebration, estFrancois = false, sessionCourses = null, onReprendreCourses, onAbandonnerCourses, contributionCodesBarresVisible = false, onContribuerCodeBarres, dernierTicketAScanner = null, onOuvrirDernierTicket = null }) {
-  const F = "'Nunito',sans-serif";
-  // Chantier 79 (ajustement) — scan en cours visible dès l'accueil. HomeTab
-  // n'étant monté que sur l'onglet home, la lecture au montage reflète l'état
-  // courant du brouillon (relu à chaque retour sur l'accueil).
+// Chantier 123 — adaptateur entre la racine et le nouvel accueil : il lit le
+// brouillon de scan (relu à chaque retour sur l'accueil, l'écran n'étant monté
+// que sur cet onglet) et calcule la progression des courses en cours.
+function AccueilV2({ sessionCourses = null, ...reste }) {
   const [scanDraft, setScanDraft] = useState(() => lireScanDraft());
-  const [confirmAbandonScan, setConfirmAbandonScan] = useState(false);
-  // Chantier « Courses » Lot 3 (shadow estFrancois) — confirmation d'abandon
-  // de la session de courses (même pattern que l'abandon de scan).
-  const [confirmAbandonCourses, setConfirmAbandonCourses] = useState(false);
-  const progCourses = sessionCourses ? calculerProgression(sessionCourses.articles) : null;
-  const joursCourses = sessionCourses ? joursDepuis(sessionCourses.cree_le) : 0;
-  const unchecked = items.filter(i => !i.checked).length;
-  const members   = circles.filter(c => c.status === 'accepted');
-  const avatarBg  = ["#E5181B","#F5C200","#00B341","#4A90D9","#8E44AD"];
-  const scannedArchives = archives.filter(a => a.ticket_scanned && a.realized_saving != null);
-  const cagnotteTotal   = scannedArchives.reduce((a, arc) => a + (arc.realized_saving || 0), 0);
-  const potentialTotal  = archives.reduce((a, arc) => a + (arc.potential_saving || 0), 0);
-
-  // #64.1 — célébration purement visuelle. La détection du CHANGEMENT vit
-  // maintenant au niveau racine (pendingCagnotte/pendingPotential, props :
-  // survit aux montages/démontages de HomeTab quand on change d'onglet).
-  // HomeTab se contente de JOUER la célébration en attente si elle existe
-  // (au montage, ou en direct si elle arrive pendant qu'il est déjà affiché),
-  // puis prévient la racine pour qu'elle l'efface (jouée une seule fois).
-  // N'observe/ne modifie aucun calcul d'économie.
-  const [displayCagnotte, setDisplayCagnotte]   = useState(() => pendingCagnotte ? pendingCagnotte.from : cagnotteTotal);
-  const [displayPotential, setDisplayPotential] = useState(() => pendingPotential ? pendingPotential.from : potentialTotal);
-  const [hideRealCagnotte, setHideRealCagnotte] = useState(false);
-  const cagnotteRealRef  = useRef(null);
-  const estimeesRef      = useRef(null);
-  const fxLayerRef       = useRef(null);
-  const confettiBusyRef  = useRef(false);
-  const [reducedMotion, setReducedMotion] = useState(
-    () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
-  );
-
-  useEffect(() => {
-    const mql = window.matchMedia?.("(prefers-reduced-motion: reduce)");
-    if (!mql) return;
-    const onChange = () => setReducedMotion(mql.matches);
-    mql.addEventListener?.("change", onChange);
-    return () => mql.removeEventListener?.("change", onChange);
-  }, []);
-
-  // "Confirmées" — roulement + pop géant (échappe à overflow:hidden via clone
-  // fixed) + pluie de confettis plein écran. Se joue dès qu'une célébration
-  // en attente existe (au montage si elle s'est accumulée pendant que
-  // HomeTab n'était pas affiché, ou immédiatement si on est déjà dessus).
-  useEffect(() => {
-    if (!pendingCagnotte) return;
-    const { from, to } = pendingCagnotte;
-    if (from === to) { onConsumeCagnotteCelebration?.(); return; }
-    if (reducedMotion) { setDisplayCagnotte(to); onConsumeCagnotteCelebration?.(); return; }
-
-    const rect = cagnotteRealRef.current?.getBoundingClientRect();
-    let popEl = null;
-    if (rect && fxLayerRef.current) {
-      const cx = rect.left + rect.width/2, cy = rect.top + rect.height/2;
-      setHideRealCagnotte(true);
-      popEl = document.createElement("div");
-      popEl.style.cssText = `position:fixed;left:${cx}px;top:${cy}px;transform:translate(-50%,-50%) scale(1);font-family:'Nunito',sans-serif;font-weight:900;font-size:18px;color:#fff;white-space:nowrap;pointer-events:none;z-index:9998;text-shadow:0 2px 8px rgba(0,0,0,0.25);`;
-      popEl.textContent = `${from>=0?"+":""}${from.toFixed(2)} €`;
-      fxLayerRef.current.appendChild(popEl);
-      popEl.animate([
-        { transform:"translate(-50%,-50%) scale(1)",   offset:0    },
-        { transform:"translate(-50%,-50%) scale(2.6)", offset:0.35 },
-        { transform:"translate(-50%,-50%) scale(2.6)", offset:0.8  },
-        { transform:"translate(-50%,-50%) scale(1)",   offset:1    },
-      ], { duration:1300, easing:"cubic-bezier(.34,1.56,.64,1)" }).onfinish = () => {
-        popEl.remove();
-        setHideRealCagnotte(false);
-      };
-    }
-
-    animateAmountRoll(from, to, 1300, v => {
-      setDisplayCagnotte(v);
-      if (popEl) popEl.textContent = `${v>=0?"+":""}${v.toFixed(2)} €`;
-    });
-
-    if (!confettiBusyRef.current) {
-      confettiBusyRef.current = true;
-      runConfettiRain(fxLayerRef.current, () => { confettiBusyRef.current = false; });
-    }
-
-    onConsumeCagnotteCelebration?.();
-  }, [pendingCagnotte, reducedMotion]);
-
-  // "Estimées" — roulement + pop léger uniquement, jamais de confettis.
-  useEffect(() => {
-    if (!pendingPotential) return;
-    const { from, to } = pendingPotential;
-    if (from === to) { onConsumePotentialCelebration?.(); return; }
-    if (reducedMotion) { setDisplayPotential(to); onConsumePotentialCelebration?.(); return; }
-
-    estimeesRef.current?.animate([
-      { transform:"scale(1)",    offset:0    },
-      { transform:"scale(1.25)", offset:0.35 },
-      { transform:"scale(1.25)", offset:0.8  },
-      { transform:"scale(1)",    offset:1    },
-    ], { duration:1300, easing:"cubic-bezier(.34,1.56,.64,1)" });
-
-    animateAmountRoll(from, to, 1300, v => setDisplayPotential(v));
-    onConsumePotentialCelebration?.();
-  }, [pendingPotential, reducedMotion]);
-
-  const [showMenuProfil, setShowMenuProfil] = useState(false);
-  const menuProfilRef = useRef(null);
-  useEffect(() => {
-    if (!showMenuProfil) return;
-    const handler = e => { if (menuProfilRef.current && !menuProfilRef.current.contains(e.target)) setShowMenuProfil(false); };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [showMenuProfil]);
-
-  const NavBtn = ({ label, icon, target, style = {} }) => (
-    <button onClick={() => setTab(target)} style={{
-      background: "#fff",
-      border: "none",
-      borderRadius: 16,
-      padding: "11px 18px",
-      fontFamily: F, fontWeight: 900, fontSize: 14, color: "#111",
-      cursor: "pointer",
-      boxShadow: "0 4px 20px rgba(0,0,0,0.13)",
-      display: "flex", alignItems: "center", gap: 7,
-      whiteSpace: "nowrap",
-      ...style,
-    }}>
-      <span style={{ fontSize: 16 }}>{icon}</span>
-      {label}
-    </button>
-  );
-
   return (
-    <div style={{
-      background: "linear-gradient(160deg, #F5C200 60%, #FFDA44 100%)",
-      minHeight: "calc(100vh - 68px)",
-      position: "relative",
-      overflow: "hidden",
-      display: "flex",
-      flexDirection: "column",
-    }}>
-
-      {/* Illustration de fond (fournie par l'utilisateur → /illustration-home.png) */}
-      <div style={{ position:"absolute", top:0, left:0, width:"100%", height:"100%", overflow:"hidden", zIndex:1, pointerEvents:"none" }}>
-        <img
-          src="/illustration-home.png" alt=""
-          style={{ width:"100%", height:"100%", objectFit:"cover", objectPosition:"center -64px", pointerEvents:"none" }}
-          onError={e => { e.target.parentElement.style.display = "none"; }}
-        />
-      </div>
-
-      {/* ── Barre du haut ── */}
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"18px 20px 0", position:"relative", zIndex:20 }}>
-
-        {/* Bouton Moi — haut gauche avec dropdown */}
-        <div ref={menuProfilRef} style={{ position:"relative" }}>
-          <div onClick={() => setShowMenuProfil(s => !s)} style={{ background:"#E5181B", borderRadius:99, width:54, height:54, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:F, fontWeight:900, fontSize:13, color:"#fff", boxShadow:"0 3px 12px rgba(229,24,27,0.45)", cursor:"pointer" }}>
-            {pseudo ? pseudo.substring(0, 6) : "Moi"}
-          </div>
-          {showMenuProfil && (
-            <div style={{ position:"absolute", top:60, left:0, width:220, background:"#fff", borderRadius:14, boxShadow:"0 6px 24px rgba(0,0,0,0.16)", zIndex:20, overflow:"hidden" }}>
-              {[
-                // Chantier 94 — profil Points Malin, seulement quand le flag
-                // gamification_visible l'autorise (onProfil absent sinon).
-                ...(onProfil ? [{ emoji:"🏅", label:"Mon profil", action: () => { setShowMenuProfil(false); onProfil(); } }] : []),
-                { img:"/menu-cercle.png",     label:"Mon Cercle",          action: () => { setShowMenuProfil(false); onCircle(); } },
-                { img:"/menu-stats.png",       label:"Mes Statistiques",    action: () => { setShowMenuProfil(false); onStats?.(); } },
-                { img:"/menu-prix.png",        label:"Mes Prix",            action: () => { setShowMenuProfil(false); onMesPrix?.(); } },
-                // Chantier 92 — favoris Core (par format), entrée à emoji
-                // (pas d'image dédiée dans /public).
-                { emoji:"❤️",                  label:"Mes Favoris",         action: () => { setShowMenuProfil(false); onFavoris?.(); } },
-                { img:"/menu-faq.png",         label:"Nous contacter",      action: () => { setShowMenuProfil(false); onFaq?.(); } },
-              ].map(({ img, emoji, label, action }) => (
-                <div key={label} onClick={action} style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 16px", cursor:"pointer", borderBottom:"1px solid #F0F0F0" }}
-                  onMouseEnter={e => e.currentTarget.style.background="#F9F9F9"}
-                  onMouseLeave={e => e.currentTarget.style.background="transparent"}>
-                  {img
-                    ? <img src={img} alt="" width={32} height={32} style={{ borderRadius:6, flexShrink:0 }} />
-                    : <span style={{ width:32, height:32, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, flexShrink:0 }}>{emoji}</span>}
-                  <span style={{ fontFamily:F, fontWeight:700, fontSize:14, color:"#111" }}>{label}</span>
-                </div>
-              ))}
-              <div style={{ borderTop:"2px solid #EBEBEB" }}/>
-              <div onClick={() => { setShowMenuProfil(false); onSignOut?.(); }} style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 16px", cursor:"pointer" }}
-                onMouseEnter={e => e.currentTarget.style.background="#FEE2E2"}
-                onMouseLeave={e => e.currentTarget.style.background="transparent"}>
-                <img src="/menu-deconnexion.png" alt="" width={32} height={32} style={{ borderRadius:6, flexShrink:0 }} />
-                <span style={{ fontFamily:F, fontWeight:700, fontSize:14, color:"#CC0000" }}>Se Déconnecter</span>
-              </div>
-              {/* #66 — version SemVer, source unique package.json via __APP_VERSION__ (vite.config.js), jamais en dur ici */}
-              <div style={{ textAlign:"center", padding:"8px 0 10px" }}>
-                <span style={{ fontFamily:F, fontSize:10, color:C.gray }}>PrixMalin v{__APP_VERSION__}</span>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Logo PrixMalin — centre */}
-        <img src="/prixmalin-logo.png" alt="PrixMalin" style={{ height:64, width:"auto", filter:"drop-shadow(0 3px 10px rgba(0,0,0,0.35))" }} />
-
-        {/* Bouton caddie Ma liste — haut droite */}
-        <div onClick={() => setTab("list")} style={{ position:"relative", background:"#E5181B", borderRadius:99, width:44, height:44, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, boxShadow:"0 3px 12px rgba(229,24,27,0.45)", cursor:"pointer" }}>
-          🛒
-          {unchecked > 0 && (
-            <span style={{ position:"absolute", top:-4, right:-4, background:"#E5181B", border:"2px solid #fff", color:"#fff", borderRadius:99, minWidth:18, height:18, fontSize:10, fontWeight:900, display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4px", boxSizing:"border-box" }}>
-              {unchecked}
-            </span>
-          )}
-        </div>
-      </div>
-
-      <div style={{margin:'10px 40px', padding:'8px 16px', background:'rgba(0,140,60,0.58)', borderRadius:12, display:'flex', justifyContent:'space-around', alignItems:'center', position:'relative', zIndex:10}}>
-        <div style={{display:'flex', alignItems:'center', gap:6}}>
-          <span style={{fontSize:'14px', color:'rgba(255,255,255,0.85)'}}>💰 Estimées</span>
-          <span ref={estimeesRef} style={{fontSize:'18px', fontWeight:'bold', color:'white', display:'inline-block'}}>{displayPotential >= 0 ? "+" : ""}{displayPotential.toFixed(2)} €</span>
-        </div>
-        <div style={{width:1, height:20, background:'rgba(255,255,255,0.3)'}}/>
-        <div style={{display:'flex', alignItems:'center', gap:6}}>
-          <span style={{fontSize:'14px', color:'rgba(255,255,255,0.85)'}}>✅ Confirmées</span>
-          <span ref={cagnotteRealRef} style={{fontSize:'18px', fontWeight:'bold', color:'white', display:'inline-block', opacity: hideRealCagnotte ? 0 : 1}}>{displayCagnotte >= 0 ? "+" : ""}{displayCagnotte.toFixed(2)} €</span>
-        </div>
-      </div>
-
-      {/* Chantier 118 — produits à scanner du DERNIER ticket seulement ;
-          ouvre directement ce ticket. Masquée s'il n'y a rien à scanner. */}
-      {onOuvrirDernierTicket && dernierTicketAScanner && (
-        <button onClick={onOuvrirDernierTicket} style={{ display:'flex', alignItems:'center', gap:10, width:'calc(100% - 40px)', margin:'12px 20px 0', padding:'11px 14px', background:'#FFF4E0', border:'1.5px solid #F5A623', borderRadius:14, position:'relative', zIndex:10, boxShadow:'0 3px 12px rgba(0,0,0,0.12)', cursor:'pointer', textAlign:'left', boxSizing:'border-box' }}>
-          <span style={{ fontSize:20 }}>📷</span>
-          <span style={{ flex:1, fontFamily:F, fontWeight:900, fontSize:13, color:'#7A4A00' }}>
-            {dernierTicketAScanner.titre}
-            <span style={{ display:'block', fontWeight:700, fontSize:11, marginTop:1 }}>{dernierTicketAScanner.sousTitre}</span>
-          </span>
-          <span style={{ color:'#7A4A00', fontSize:18 }}>›</span>
-        </button>
-      )}
-
-      {/* Chantier 79 (ajustement) — carte "scan en cours" visible dès l'accueil */}
-      {scanDraft && (
-        <div style={{ margin:'12px 20px 0', padding:'12px 14px', background:'#FFF8E6', border:'1.5px solid #F5C200', borderRadius:14, position:'relative', zIndex:10, boxShadow:'0 3px 12px rgba(0,0,0,0.12)' }}>
-          <div style={{ fontFamily:F, fontWeight:900, fontSize:13, color:'#7A6000' }}>
-            🧾 Scan de ticket en cours
-          </div>
-          <div style={{ fontFamily:F, fontSize:12, color:'#7A6000', marginTop:2 }}>
-            étape : {etapeLisibleScan(scanDraft.status)}{scanDraft.createdAt ? ` · commencé le ${formatDateBrouillon(scanDraft.createdAt)}` : ''}
-          </div>
-          <div style={{ display:'flex', gap:8, marginTop:10 }}>
-            <button onClick={() => onResumeScan?.()} style={{ flex:1, padding:'10px', border:'none', borderRadius:10, background:'#E5181B', fontFamily:F, fontWeight:900, fontSize:13, color:'#fff', cursor:'pointer' }}>
-              Reprendre
-            </button>
-            <button onClick={() => setConfirmAbandonScan(true)} style={{ padding:'10px 14px', border:'1.5px solid rgba(122,96,0,0.35)', borderRadius:10, background:'transparent', fontFamily:F, fontWeight:800, fontSize:13, color:'#7A6000', cursor:'pointer' }}>
-              Abandonner
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Chantier 106 Lot A — « Complète la base ». Visible UNIQUEMENT si le
-          flag contribution_codes_barres_actif vaut 'true' ou si l'utilisateur
-          est administrateur : sinon rien n'est rendu, pas même un conteneur
-          vide. Le bouton ouvre directement le lecteur de code-barres — la
-          carte a déjà servi d'explication, un écran intermédiaire de plus ne
-          dirait rien. */}
-      {contributionCodesBarresVisible && (
-        <div style={{ margin:'12px 20px 0', padding:'12px 14px', background:'#fff', border:'2px solid #0066FF', borderRadius:14, position:'relative', zIndex:10, boxShadow:'0 3px 12px rgba(0,0,0,0.12)' }}>
-          <div style={{ fontFamily:F, fontWeight:900, fontSize:13, color:'#1a1a1a' }}>
-            🏷️ Complète la base
-          </div>
-          <div style={{ fontFamily:F, fontSize:12, color:'#666', marginTop:2, lineHeight:1.4 }}>
-            Scanne un produit du placard ou du rayon pour proposer son code-barres. Chaque proposition acceptée rapporte 10 points.
-          </div>
-          <button onClick={() => onContribuerCodeBarres?.()}
-            style={{ width:'100%', marginTop:10, padding:'11px', border:'none', borderRadius:10, background:'#0066FF', fontFamily:F, fontWeight:900, fontSize:13, color:'#fff', cursor:'pointer' }}>
-            📷 Scanner un produit
-          </button>
-        </div>
-      )}
-
-      {/* Chantier « Courses » Lot 3 (shadow estFrancois) — carte de reprise :
-          visible uniquement quand une session est active, entièrement
-          cliquable (Reprendre), progression réelle mise à jour à chaque
-          cochage, bandeau d'ancienneté au-delà de 2 jours. Ne disparaît que
-          sur abandon explicite (ou clôture, Lot 6) — jamais d'expiration
-          automatique. Distincte du bouton caddie 🛒 en haut à droite (qui
-          ouvre « Ma liste » pour PRÉPARER un comparatif). */}
-      {sessionCourses && (
-        <div onClick={() => onReprendreCourses?.()}
-          style={{ margin:'12px 20px 0', padding:'12px 14px', background:'#fff', border:'2px solid #E5181B', borderRadius:14, position:'relative', zIndex:10, boxShadow:'0 3px 12px rgba(0,0,0,0.12)', cursor:'pointer' }}>
-          <div style={{ fontFamily:F, fontWeight:900, fontSize:13, color:'#1a1a1a' }}>
-            🛒 Courses en cours chez {sessionCourses.magasin?.nom}
-          </div>
-          <div style={{ fontFamily:F, fontSize:12, color:'#666', marginTop:2 }}>
-            {progCourses.pris} article{progCourses.pris > 1 ? 's' : ''} sur {progCourses.total} dans le caddie
-            {progCourses.introuvables > 0 ? ` · ${progCourses.introuvables} introuvable${progCourses.introuvables > 1 ? 's' : ''}` : ''}
-          </div>
-          <div style={{ marginTop:6, height:6, borderRadius:99, background:'#F0F0F0', overflow:'hidden' }}>
-            <div style={{ width:`${progCourses.total > 0 ? Math.round(progCourses.pris / progCourses.total * 100) : 0}%`, height:'100%', borderRadius:99, background:'#E5181B' }} />
-          </div>
-          {joursCourses >= 2 && (
-            <div style={{ fontFamily:F, fontSize:11, fontWeight:800, color:'#7A6000', background:'#FFF8E6', border:`1px solid ${C.yellow}`, borderRadius:8, padding:'4px 8px', marginTop:8, display:'inline-block' }}>
-              ⚠️ commencées il y a {joursCourses} jours
-            </div>
-          )}
-          <div style={{ display:'flex', gap:8, marginTop:10 }}>
-            <button onClick={(e) => { e.stopPropagation(); onReprendreCourses?.(); }}
-              style={{ flex:1, padding:'10px', border:'none', borderRadius:10, background:'#E5181B', fontFamily:F, fontWeight:900, fontSize:13, color:'#fff', cursor:'pointer' }}>
-              Reprendre
-            </button>
-            <button onClick={(e) => { e.stopPropagation(); setConfirmAbandonCourses(true); }}
-              style={{ padding:'10px 14px', border:'1.5px solid rgba(204,0,0,0.3)', borderRadius:10, background:'transparent', fontFamily:F, fontWeight:800, fontSize:13, color:'#CC0000', cursor:'pointer' }}>
-              Abandonner
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Confirmation d'abandon des courses en cours */}
-      {confirmAbandonCourses && sessionCourses && (
-        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:9999, padding:24 }} onClick={() => setConfirmAbandonCourses(false)}>
-          <div onClick={e => e.stopPropagation()} style={{ background:'#fff', borderRadius:16, padding:'20px', maxWidth:320, width:'100%' }}>
-            <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:'#1a1a1a', marginBottom:6 }}>Abandonner ces courses en cours ?</div>
-            <div style={{ fontFamily:F, fontSize:13, color:'#888', marginBottom:16 }}>
-              La progression ({progCourses.pris} sur {progCourses.total}) sera perdue. Ton caddie « Ma liste » n'est pas touché.
-            </div>
-            <div style={{ display:'flex', gap:8 }}>
-              <button onClick={() => { onAbandonnerCourses?.(); setConfirmAbandonCourses(false); }} style={{ flex:1, padding:'12px', border:'none', borderRadius:10, background:'#CC0000', fontFamily:F, fontWeight:900, fontSize:14, color:'#fff', cursor:'pointer' }}>
-                Abandonner
-              </button>
-              <button onClick={() => setConfirmAbandonCourses(false)} style={{ padding:'12px 16px', border:'1.5px solid #eee', borderRadius:10, background:'#fff', fontFamily:F, fontWeight:800, fontSize:14, color:'#333', cursor:'pointer' }}>
-                Annuler
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Confirmation d'abandon du scan en cours */}
-      {confirmAbandonScan && (
-        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:9999, padding:24 }} onClick={() => setConfirmAbandonScan(false)}>
-          <div onClick={e => e.stopPropagation()} style={{ background:'#fff', borderRadius:16, padding:'20px', maxWidth:320, width:'100%' }}>
-            <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:'#1a1a1a', marginBottom:6 }}>Abandonner ce scan en cours ?</div>
-            <div style={{ fontFamily:F, fontSize:13, color:'#888', marginBottom:16 }}>Le ticket scanné et les modifications seront perdus.</div>
-            <div style={{ display:'flex', gap:8 }}>
-              <button onClick={() => { effacerScanDraft(); setScanDraft(null); setConfirmAbandonScan(false); }} style={{ flex:1, padding:'12px', border:'none', borderRadius:10, background:'#CC0000', fontFamily:F, fontWeight:900, fontSize:14, color:'#fff', cursor:'pointer' }}>
-                Abandonner
-              </button>
-              <button onClick={() => setConfirmAbandonScan(false)} style={{ padding:'12px 16px', border:'1.5px solid #eee', borderRadius:10, background:'#fff', fontFamily:F, fontWeight:800, fontSize:14, color:'#333', cursor:'pointer' }}>
-                Annuler
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* #64.1 — calque plein écran pour le pop géant (clone échappant à
-          l'overflow:hidden du conteneur racine) et la pluie de confettis */}
-      <div ref={fxLayerRef} style={{position:'fixed', inset:0, pointerEvents:'none', zIndex:9999, overflow:'visible'}} />
-
-      {/* ── Navigation circulaire ── */}
-      <div style={{ flex:1, display:"flex", alignItems:"flex-start", justifyContent:"center", position:"relative", zIndex:10, paddingTop:8 }}>
-        <div style={{ position:"relative", width:300, height:290 }}>
-
-          {/* Catalogue — bas centre. Chantier « Micro » Lot 1 (shadow) : la
-              pastille Micro n'est rendue QUE pour François ; pour tout autre
-              utilisateur le rangée flex ne contient que Catalogue, centré
-              exactement comme avant. */}
-          <div style={{ position:"absolute", bottom:0, left:"50%", transform:"translateX(-50%)", display:"flex", gap:10 }}>
-            <NavBtn label="Catalogue" icon="🛍️" target="catalog" />
-            {estFrancois && <NavBtn label="Micro" icon="🎤" target="micro" />}
-          </div>
-
-          {/* Bouton Flasher — centre */}
-          <div style={{ position:"absolute", top:"50%", left:"50%", transform:"translate(-50%, -46%)", display:"flex", flexDirection:"column", alignItems:"center" }}>
-            <button onClick={() => onFlash()} style={{
-              width:125, height:125,
-              borderRadius:"50%",
-              background:"#E5181B",
-              border:"5px solid #fff",
-              cursor:"pointer",
-              display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:4,
-              boxShadow:"0 8px 36px rgba(229,24,27,0.55), 0 0 0 10px rgba(229,24,27,0.12)",
-              transition:"transform 0.15s ease",
-            }}
-              onMouseDown={e => e.currentTarget.style.transform = "scale(0.94)"}
-              onMouseUp={e   => e.currentTarget.style.transform = "scale(1)"}
-              onTouchStart={e => e.currentTarget.style.transform = "scale(0.94)"}
-              onTouchEnd={e   => e.currentTarget.style.transform = "scale(1)"}
-            >
-              <span style={{ fontSize:28 }}>📷</span>
-              <span style={{ fontFamily:F, fontWeight:900, fontSize:16, color:"#fff", letterSpacing:"0.01em" }}>Flasher</span>
-              <span style={{ fontFamily:F, fontWeight:500, fontSize:11, color:"rgba(255,255,255,0.85)", letterSpacing:"0.01em" }}>ticket de caisse</span>
-            </button>
-          </div>
-
-        </div>
-      </div>
-
-    </div>
+    <AccueilSimple
+      {...reste}
+      sessionCourses={sessionCourses}
+      progressionCourses={sessionCourses ? calculerProgression(sessionCourses.articles) : null}
+      joursCourses={sessionCourses ? joursDepuis(sessionCourses.cree_le) : 0}
+      scanEnCours={scanDraft ? {
+        etape: etapeLisibleScan(scanDraft.status),
+        date: scanDraft.createdAt ? formatDateBrouillon(scanDraft.createdAt) : null,
+      } : null}
+      onAbandonnerScan={() => { effacerScanDraft(); setScanDraft(null); }}
+    />
   );
 }
 
@@ -10774,76 +10139,6 @@ export default function App() {
   const [libelleVersNomProduit, setLibelleVersNomProduit] = useState({});
   const [loaded, setLoaded]       = useState(false);
 
-  // #64.1 — mémoire de "célébration en attente" pour la bannière Accueil.
-  // Vit ici (racine), pas dans HomeTab, car HomeTab démonte/remonte à chaque
-  // changement d'onglet ({loaded && tab==="home" && <HomeTab/>}) : une
-  // confirmation d'économie a lieu pendant le scan, donc typiquement pendant
-  // que HomeTab n'est PAS monté. Uniquement en mémoire vive (aucun
-  // localStorage/DB) : un rechargement de page perd toute célébration en
-  // attente, conformément à la règle "jamais d'animation au chargement".
-  // N'observe QUE cagnotteTotal/potentialTotal, recalculés ici avec
-  // exactement la même formule que dans HomeTab — aucun nouveau calcul
-  // d'économie, aucune donnée modifiée.
-  const prevCagnotteRootRef  = useRef(null);
-  const prevPotentialRootRef = useRef(null);
-  const [pendingCagnotte, setPendingCagnotte]   = useState(null);
-  const [pendingPotential, setPendingPotential] = useState(null);
-
-  // Réarme une référence neuve à chaque nouveau cycle de chargement (login,
-  // reconnexion, changement de session) : sans ça, les totaux d'une session
-  // précédente resteraient comparés à ceux de la nouvelle après un logout/login.
-  useEffect(() => {
-    if (loaded) return;
-    prevCagnotteRootRef.current  = null;
-    prevPotentialRootRef.current = null;
-    setPendingCagnotte(null);
-    setPendingPotential(null);
-  }, [loaded]);
-
-  useEffect(() => {
-    // Tant que le chargement initial n'est pas terminé, archives peut valoir
-    // [] puis passer à son contenu réel : ce n'est PAS un changement du point
-    // de vue utilisateur, juste l'arrivée des données. On ignore tout tant
-    // que loaded n'est pas vrai ; le premier passage APRÈS loaded===true sert
-    // uniquement de référence, jamais de déclencheur (cf. bug rechargement).
-    if (!loaded) return;
-    const scannedArchives = archives.filter(a => a.ticket_scanned && a.realized_saving != null);
-    const newCagnotte  = scannedArchives.reduce((a, arc) => a + (arc.realized_saving || 0), 0);
-    const newPotential = archives.reduce((a, arc) => a + (arc.potential_saving || 0), 0);
-
-    if (prevCagnotteRootRef.current === null) {
-      prevCagnotteRootRef.current = newCagnotte;
-    } else if (prevCagnotteRootRef.current !== newCagnotte) {
-      const oldVal = prevCagnotteRootRef.current;
-      prevCagnotteRootRef.current = newCagnotte;
-      setPendingCagnotte(p => p ? { from: p.from, to: newCagnotte } : { from: oldVal, to: newCagnotte });
-    }
-
-    if (prevPotentialRootRef.current === null) {
-      prevPotentialRootRef.current = newPotential;
-    } else if (prevPotentialRootRef.current !== newPotential) {
-      const oldVal = prevPotentialRootRef.current;
-      prevPotentialRootRef.current = newPotential;
-      setPendingPotential(p => p ? { from: p.from, to: newPotential } : { from: oldVal, to: newPotential });
-    }
-  }, [archives, loaded]);
-
-  // #64.1 — outils de simulation dev uniquement (import.meta.env.DEV, jamais
-  // en prod). N'écrivent rien en base, ne touchent à aucune archive réelle :
-  // arment juste directement une célébration en attente, comme le ferait une
-  // vraie confirmation détectée par l'effet ci-dessus.
-  const simulerCagnotteDev = () => {
-    const from = prevCagnotteRootRef.current ?? 0;
-    const to = Math.round((from + 0.5) * 100) / 100;
-    prevCagnotteRootRef.current = to;
-    setPendingCagnotte(p => p ? { from: p.from, to } : { from, to });
-  };
-  const simulerPotentialDev = () => {
-    const from = prevPotentialRootRef.current ?? 0;
-    const to = Math.round((from + 0.5) * 100) / 100;
-    prevPotentialRootRef.current = to;
-    setPendingPotential(p => p ? { from: p.from, to } : { from, to });
-  };
 
   const [storeRatings, setStoreRatings] = useState({});
   const [showSuccess, setShowSuccess] = useState(null);
@@ -12351,6 +11646,9 @@ export default function App() {
   );
 
   if (!session) return <>{globalStyle}<AuthScreen/></>;
+  // Chantier 123 — invitations de cercle reçues et pas encore traitées
+  // (pastille de l'en-tête et de l'entrée « Moi »).
+  const invitationsEnAttente = circles.filter(c=>(c.recipient_id===session.user.id||c.recipient_email?.toLowerCase()===session.user.email?.toLowerCase())&&c.status==='pending').length;
 
   if (loaded && cguAcceptedAt === null) return (
     <>{globalStyle}<CguRattrapageScreen onAccept={handleCguAccept}/></>
@@ -12372,7 +11670,7 @@ export default function App() {
       <div style={{ minHeight:"100vh", background:C.bg, maxWidth:430, margin:"0 auto" }}>
         {tab !== "home" && (
           <Header tab={tab} itemCount={items.length} userEmail={session.user.email} displayName={pseudo} onLogout={handleLogout}
-            pendingCount={circles.filter(c=>(c.recipient_id===session.user.id||c.recipient_email?.toLowerCase()===session.user.email?.toLowerCase())&&c.status==='pending').length}
+            pendingCount={invitationsEnAttente}
             onCircle={()=>setShowCircleSheet(true)}/>
         )}
         <div style={{ paddingTop: tab === "home" ? 0 : 4 }}>
@@ -12392,7 +11690,14 @@ export default function App() {
             </div>
           )}
           <TabErrorBoundary key={tab}>
-          {loaded && tab==="home"      && <HomeTab      items={items} circles={circles} profileMap={profileMap} userId={session?.user?.id} setTab={setTab} onCircle={()=>setShowCircleSheet(true)} onFlash={handleFlash} onResumeScan={handleResumeScan} archives={archives} pseudo={pseudo} onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFavoris={()=>setShowFavorisSheet(true)} onProfil={profilVisible ? ()=>setShowProfilSheet(true) : null} onFaq={()=>setShowFaqSheet(true)} onSignOut={handleLogout} pendingCagnotte={pendingCagnotte} onConsumeCagnotteCelebration={()=>setPendingCagnotte(null)} pendingPotential={pendingPotential} onConsumePotentialCelebration={()=>setPendingPotential(null)} estFrancois={estFrancois} sessionCourses={sessionCoursesAccessible ? sessionCoursesActive : null} onReprendreCourses={()=>setTab("courses")} onAbandonnerCourses={abandonnerSessionCourses} contributionCodesBarresVisible={contributionCodesBarresActive || isAdmin} onContribuerCodeBarres={()=>setShowContributionCodeBarres(true)} dernierTicketAScanner={dernierTicketAScanner} onOuvrirDernierTicket={estFrancois && dernierTicketAScanner ? ()=>ouvrirHistoriqueTickets(dernierTicketAScanner.ticket) : null}/>}
+          {loaded && tab==="home"      && <AccueilV2 pseudo={pseudo} items={items} archives={archives} setTab={setTab} onScanner={handleFlash} onReprendreScan={handleResumeScan}
+            ticketAScanner={dernierTicketAScanner} onOuvrirTicket={estFrancois && dernierTicketAScanner ? ()=>ouvrirHistoriqueTickets(dernierTicketAScanner.ticket) : null}
+            sessionCourses={sessionCoursesAccessible ? sessionCoursesActive : null} onReprendreCourses={()=>setTab("courses")} onAbandonnerCourses={abandonnerSessionCourses}
+            microDisponible={estFrancois} contributionVisible={contributionCodesBarresActive || isAdmin} onContribuer={()=>setShowContributionCodeBarres(true)}/>}
+          {loaded && tab==="moi"       && <EcranMoi pseudo={pseudo} email={session?.user?.email} archives={archives} setTab={setTab} version={__APP_VERSION__}
+            onProfil={profilVisible ? ()=>setShowProfilSheet(true) : null} onCercle={()=>setShowCircleSheet(true)} invitationsEnAttente={invitationsEnAttente}
+            onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFavoris={()=>setShowFavorisSheet(true)} onAide={()=>setShowFaqSheet(true)}
+            onDeconnexion={handleLogout} estAdmin={isAdmin}/>}
           {/* Chantier « Micro » Lot 1 — même mécanique shadow que rejets (#56.3b) :
               jamais rendu pour un autre utilisateur, même si tab="micro" traîne en state.
               Lot 5 : onAdd = le addItem OFFICIEL du caddie (même chemin que le Catalogue). */}
@@ -12429,19 +11734,7 @@ export default function App() {
           {loaded && isAdmin && tab==="rejets" && <AdminRejetsCorePanel modeCoreActif={modeCoreActif} onToggleModeCore={setModeCoreActif} coreActifGlobal={coreActifGlobal}/>}
           </TabErrorBoundary>
         </div>
-        <TabBar tab={tab} setTab={setTab} isAdmin={isAdmin}/>
-        {/* #64.1 — dev uniquement, jamais en prod, jamais sur l'Accueil : reproduit
-            le vrai parcours (simulation hors Accueil → retour Accueil → célébration) */}
-        {import.meta.env.DEV && tab !== "home" && (
-          <div style={{ position:"fixed", bottom:90, right:12, zIndex:500, display:"flex", flexDirection:"column", gap:6 }}>
-            <button onClick={simulerCagnotteDev} style={{ padding:"8px 12px", borderRadius:10, border:"none", background:"#00B341", color:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:11, cursor:"pointer", boxShadow:"0 3px 10px rgba(0,0,0,0.25)" }}>
-              🎉 Simuler économie confirmée
-            </button>
-            <button onClick={simulerPotentialDev} style={{ padding:"8px 12px", borderRadius:10, border:"none", background:"#4A90D9", color:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:11, cursor:"pointer", boxShadow:"0 3px 10px rgba(0,0,0,0.25)" }}>
-              💰 Simuler économie estimée
-            </button>
-          </div>
-        )}
+        <BarreNavigation tab={tab} setTab={setTab} onScanner={handleFlash} nbListe={items.filter(i=>!i.checked).length} pastilleMoi={invitationsEnAttente>0}/>
         {/* Chantier #73 + "Scan code-barres" 3B — accès discrets réservés admin
             (isAdmin via la RPC est_administrateur() / app_metadata.role==='admin'),
             jamais dans la TabBar, invisibles pour tout autre utilisateur en prod.
