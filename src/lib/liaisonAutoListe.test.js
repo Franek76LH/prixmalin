@@ -133,3 +133,23 @@ describe('proposerLiaison', () => {
     expect((await proposerLiaison('beurre', null)).issue).toBe(LIAISON_A_RELIER);
   });
 });
+
+// Chantier 130 — une fiche trouvée par la base avec TOUS les mots dits est
+// proposée même si son nom ne ressemble pas (« fromage râpé » -> « Emmental râpé »).
+describe('chantier 130 — fiche trouvée par tous les mots', () => {
+  const base = async (terme) => {
+    if (terme === 'fromage rape') return [{ produit_id: 'e', nom_reference: 'Emmental râpé', dernier_prix: 1.76 }];
+    if (terme === 'fromage') return [{ produit_id: 'f', nom_reference: 'Fromage', dernier_prix: null }];
+    return [];
+  };
+  it('« fromage râpé » propose « Emmental râpé », sans jamais le relier seul', async () => {
+    const d = await proposerLiaison('fromage râpé', base);
+    expect(d.issue).toBe(LIAISON_SUGGESTIONS);
+    expect(d.produit).toBeNull();
+    expect(d.suggestions.map(s => s.produit_nom)).toContain('Emmental râpé');
+  });
+  it('un mot seul ne profite pas de ce coup de pouce (« riz » est dans « chorizo »)', async () => {
+    const d = await proposerLiaison('riz', async () => [{ produit_id: 'c', nom_reference: 'Chorizo', dernier_prix: 3 }]);
+    expect(d.suggestions.map(s => s.produit_nom)).not.toContain('Chorizo');
+  });
+});

@@ -23,12 +23,17 @@ export function useLiaisonsProposees(items, chercher) {
   useEffect(() => { monte.current = true; return () => { monte.current = false; }; }, []);
 
   useEffect(() => {
-    const aChercher = produitsNonRelies(items)
-      .map(i => motsUtiles(i.product).join(' '))
-      .filter(cle => !demandes.current.has(cle));
-    [...new Set(aChercher)].forEach(async (cle) => {
+    // Chantier 130 — on garde le texte tel qu'il est écrit (accents compris) :
+    // c'est lui qui départage « pâtes » et « pâté ». La clé sans accent ne
+    // sert qu'à ne pas chercher deux fois la même chose.
+    const aChercher = new Map();
+    for (const i of produitsNonRelies(items)) {
+      const cle = motsUtiles(i.product).join(' ');
+      if (!demandes.current.has(cle) && !aChercher.has(cle)) aChercher.set(cle, i.product);
+    }
+    aChercher.forEach(async (texte, cle) => {
       demandes.current.add(cle);
-      const decision = await proposerLiaison(cle, chercher);
+      const decision = await proposerLiaison(texte, chercher);
       const propositions = decision.produit ? [decision.produit] : decision.suggestions;
       if (monte.current) setParTexte(prev => ({ ...prev, [cle]: propositions.map(p => ({ produit_id: p.produit_id, produit_nom: p.produit_nom })) }));
     });

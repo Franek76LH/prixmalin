@@ -6,7 +6,8 @@ import { T } from './theme';
 import { IconeChevron, IconeRetour } from './Icones';
 import { bilanEconomies, coursesDuMois, nomDuMois } from '../../lib/economiesCore';
 
-const signe = (n) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n).toFixed(2).replace('.', ',')} €`;
+// Chantier 130 — zéro tout rond = aucun écart mesuré : un tiret, pas « 0,00 € ».
+const signe = (n) => (Math.abs(n) < 0.005 ? '—' : `${n > 0 ? '+' : '−'}${Math.abs(n).toFixed(2).replace('.', ',')} €`);
 const couleur = (n) => (n > 0 ? T.vert : n < 0 ? '#B45309' : T.texteLeger);
 
 export default function EcranEconomies({ archives = [], onScanner }) {
@@ -41,7 +42,7 @@ export default function EcranEconomies({ archives = [], onScanner }) {
         <div style={{ fontFamily: T.police, fontWeight: 800, fontSize: 13, color: T.vert }}>Économisé au total</div>
         <div style={{ fontFamily: T.police, fontWeight: 900, fontSize: 36, color: bilan.total >= 0 ? T.vert : '#B45309', lineHeight: 1.1, marginTop: 2 }}>{signe(bilan.total)}</div>
         <div style={{ fontFamily: T.police, fontSize: 12.5, color: T.texteDoux, marginTop: 8 }}>
-          Sur {bilan.nbCourses} course{bilan.nbCourses > 1 ? 's' : ''} dont tu as scanné le ticket, par rapport au prix moyen des autres magasins.
+          Sur {bilan.nbCourses} course{bilan.nbCourses > 1 ? 's' : ''} dont le ticket a pu être comparé au prix moyen des autres magasins.
           {bilan.meilleurMois ? ` Ton meilleur mois : ${nomDuMois(bilan.meilleurMois)}.` : ''}
         </div>
       </div>
@@ -79,7 +80,7 @@ export default function EcranEconomies({ archives = [], onScanner }) {
               <button key={m.mois} onClick={() => setMoisOuvert(m.mois)} style={{ width: '100%', border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10, padding: '13px 16px', borderBottom: i === moisAffiches.length - 1 ? 'none' : `1px solid ${T.trait}` }}>
                 <span style={{ flex: 1, minWidth: 0 }}>
                   <span style={{ display: 'block', fontFamily: T.police, fontWeight: 800, fontSize: 15, color: T.texte }}>{nomDuMois(m.mois)}</span>
-                  <span style={{ display: 'block', fontFamily: T.police, fontSize: 12.5, color: T.texteLeger, marginTop: 1 }}>{m.nb} course{m.nb > 1 ? 's' : ''}</span>
+                  <span style={{ display: 'block', fontFamily: T.police, fontSize: 12.5, color: T.texteLeger, marginTop: 1 }}>{m.nb} course{m.nb > 1 ? 's' : ''} comparée{m.nb > 1 ? 's' : ''}</span>
                 </span>
                 <span style={{ fontFamily: T.police, fontWeight: 900, fontSize: 15, color: couleur(m.total) }}>{signe(m.total)}</span>
                 <IconeChevron width={18} height={18} style={{ color: T.texteLeger, flexShrink: 0 }} />
@@ -87,7 +88,7 @@ export default function EcranEconomies({ archives = [], onScanner }) {
             ))}
           </div>
           <div style={{ fontFamily: T.police, fontSize: 12, color: T.texteLeger, margin: '10px 4px 0' }}>
-            Un montant négatif veut dire que tes courses ont coûté plus cher que la moyenne ce mois-là.
+            Un montant négatif veut dire que tes courses ont coûté plus cher que la moyenne ce mois-là. Un tiret : pas d'écart mesuré.
           </div>
         </>
       )}

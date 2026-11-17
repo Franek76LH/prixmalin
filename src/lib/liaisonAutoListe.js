@@ -21,6 +21,11 @@ export const LIAISON_SUGGESTIONS = 'suggestions';
 export const LIAISON_A_RELIER = 'a_relier';
 
 export const SEUIL_SUGGESTION = 0.5;
+// Chantier 130 — une fiche que la recherche en base a trouvée avec TOUS les
+// mots dits (dans son nom, sa famille, sa marque ou ses libellés de caisse)
+// mérite d'être proposée même si son nom ne ressemble pas : « fromage râpé »
+// -> « Emmental râpé ». Assez pour proposer, jamais pour relier seul.
+export const NOTE_TROUVE_PAR_TOUS_LES_MOTS = 0.55;
 export const MAX_SUGGESTIONS = 3;
 
 // Mots qui ne désignent aucun produit (« du lait », « des pâtes », « l'huile »).
@@ -129,7 +134,8 @@ export function deciderLiaison(entendu, candidats) {
   for (const c of candidats || []) {
     if (!c?.produit_id || vus.has(c.produit_id)) continue;
     vus.add(c.produit_id);
-    const score = ressemblance(entendu, c.nom_reference);
+    let score = ressemblance(entendu, c.nom_reference);
+    if (c.tousLesMotsTrouves) score = Math.max(score, NOTE_TROUVE_PAR_TOUS_LES_MOTS);
     if (score <= 0) continue;
     notes.push({ produit_id: c.produit_id, produit_nom: c.nom_reference, score, aUnPrix: c.dernier_prix != null });
   }
@@ -157,15 +163,17 @@ export async function proposerLiaison(entendu, chercher) {
     return { issue: LIAISON_A_RELIER, produit: null, suggestions: [] };
   }
   const candidats = [];
-  const lancer = async (terme) => {
+  const lancer = async (terme, tousLesMotsTrouves = false) => {
     if (terme.length < 2) return;
     try {
       const lignes = await chercher(terme);
-      if (Array.isArray(lignes)) candidats.push(...lignes);
+      if (Array.isArray(lignes)) candidats.push(...lignes.map(l => (tousLesMotsTrouves ? { ...l, tousLesMotsTrouves: true } : l)));
     } catch { /* panne réseau : on fait avec ce qu'on a */ }
   };
 
-  await lancer(mots.join(' '));
+  // Deux mots ou plus : ce que la base trouve avec le terme complet contient
+  // tous les mots dits. Un mot seul est trop vague (« riz » est dans « chorizo »).
+  await lancer(mots.join(' '), mots.length >= 2);
   let decision = deciderLiaison(entendu, candidats);
   if (decision.issue === LIAISON_RELIE) return decision;
   if (mots.length === 1) {

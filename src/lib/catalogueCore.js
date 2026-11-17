@@ -178,7 +178,21 @@ export function calculerPrixUnitaire(prix, variante) {
 }
 
 // Détermine l'emoji/couleur de présentation d'une catégorie Core, avec repli sur CATEGORY_META
+// Chantier 130 — rayons du Core dont ni le slug ni le nom ne correspondent à
+// l'ancienne liste : sans ça ils tombaient sur le carton « 📦 » par défaut.
+const PRESENTATION_PAR_SLUG = {
+  'produits-laitiers-oeufs': { emoji: '🥛', color: '#4A90E2' },
+  'plats-prepares-traiteur': { emoji: '🥘', color: '#E74C3C' },
+  'surgeles': { emoji: '❄️', color: '#5DADE2' },
+  'entretien-nettoyage': { emoji: '🧽', color: '#16A085' },
+  'hygiene-beaute': { emoji: '🧴', color: '#8E44AD' },
+  'bebe': { emoji: '🍼', color: '#F1948A' },
+  'animalerie': { emoji: '🐾', color: '#A0522D' },
+};
+
 export function getCategoryPresentation(categorieDb) {
+  const connu = PRESENTATION_PAR_SLUG[categorieDb.slug];
+  if (connu && !categorieDb.icone) return connu;
   const bySlug = CATEGORY_META.find(c => c.id === categorieDb.slug);
   const byName = bySlug || CATEGORY_META.find(c => normalizeName(c.name) === normalizeName(categorieDb.nom));
   return {

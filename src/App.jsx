@@ -62,6 +62,7 @@ import EnTete from "./components/v2/EnTete";
 import ListeCourses from "./components/v2/ListeCourses";
 // Chantier 126 — produits de la liste en texte libre : fiches proposées.
 import ProduitsARelier from "./components/v2/ProduitsARelier";
+import MesTickets from "./components/v2/MesTickets";
 import ResultatComparaison from "./components/v2/ResultatComparaison";
 import EcranEconomies from "./components/v2/EcranEconomies";
 import ChoixScan from "./components/v2/ChoixScan";
@@ -6264,6 +6265,7 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
   const mapsQueryAffichee   = bestAffiche ? `${bestAffiche.name}${bestStoreEntryAffiche ? ' ' + bestStoreEntryAffiche.store_address : ''}` : '';
   const mapsUrlAffiche      = bestAffiche ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapsQueryAffichee)}` : '#';
   const missingGlobalAffiche = utiliserCore ? (coreAdapte?.missingGlobal ?? []) : missingGlobal;
+  const sansPrixHorsPropositions = missingGlobalAffiche.filter(item => !liaisonsProposees?.[item.id]?.length);
   // Chantier 122 — verdict honnête (aucun gagnant sous la moitié de la liste ;
   // économie sur produits communs seulement). Calcul pur et léger, pas un
   // hook : on est après le early return items.length===0.
@@ -6472,11 +6474,13 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
       )}
 
       {/* Produits sans aucun prix */}
-      {missingGlobalAffiche.length>0 && rankedAffiche.length>0 && (
+      {/* Chantier 130 — un produit déjà listé dans « à préciser » juste au-dessus
+          n'est pas répété ici : deux blocs pour dire la même chose, c'est du bruit. */}
+      {sansPrixHorsPropositions.length>0 && rankedAffiche.length>0 && (
         <div style={{ background:"#FFF8E6", borderRadius:12, padding:"12px 14px", marginBottom:14, border:`1px solid ${C.yellow}` }}>
           <div style={{ fontFamily:F, fontWeight:800, fontSize:13, color:"#7A6000", marginBottom:6 }}>Pas encore de prix pour :</div>
           <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-            {missingGlobalAffiche.map(item=>(
+            {sansPrixHorsPropositions.map(item=>(
               <span key={item.id} style={{ background:C.yellow, borderRadius:99, padding:"3px 10px", fontFamily:F, fontSize:12, fontWeight:700, color:C.text }}>
                 {item.brand?`${item.brand} · `:""}{item.product} {item.format}
               </span>
@@ -6537,7 +6541,7 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
 }
 
 // ── ARCHIVE TAB ───────────────────────────────────────────────────────────────
-function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceDB, onImport, onSavePrice, produitsRef = [], libelleVersNomProduit = {}, onLibelleResolu, estFrancois = false, onOuvrirHistoriqueTickets = null }) {
+function ArchiveTab({ archives, onDelete, onAddToList, priceDB, onImport, onSavePrice, produitsRef = [], libelleVersNomProduit = {}, onLibelleResolu, estFrancois = false, onOuvrirHistoriqueTickets = null }) {
   // Chantier 1 — affichage seulement : si la ligne de ticket correspondante
   // est rattachée à un produit Core (résolu au chargement dans App, via
   // lignes_ticket.produit_id), on montre nom_reference à la place du libellé
@@ -6571,9 +6575,7 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
   // ticket. Les archives n'ayant pas de ticket_id, la date est la seule clé
   // disponible (même correspondance que trouverLignesTicket).
   const [comptesAConfirmer, setComptesAConfirmer] = useState(() => new Map());
-  const [pendingDeleteArc, setPendingDeleteArc] = useState(null);
   const [added, setAdded] = useState(new Set());
-  const [sort, setSort] = useState("produit");
   const [expandedProduct, setExpandedProduct] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const champRechercheRef = useRef(null); // Chantier 104c — refocus après effacement
@@ -6581,8 +6583,7 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
   const [filterPeriod, setFilterPeriod] = useState("all");
   const [showImport, setShowImport] = useState(false);
   const [showEntry, setShowEntry] = useState(false);
-  const [subTab, setSubTab] = useState("produit");
-  const [selectedMonth, setSelectedMonth] = useState(null);
+  const [subTab, setSubTab] = useState("tickets");
 
   // Chantier 2 — retrouve la (les) ligne(s) lignes_ticket correspondant à cet
   // article d'archive, via la même correspondance textuelle normalisée que le
@@ -6769,12 +6770,6 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
     });
   }, [archives, searchQuery, filterCategory, periodCutoff]);
 
-  const totalSpent = filteredArchives.reduce((a,arc)=>a+arc.total,0);
-  const FILTERS=[{id:"date",label:"Date ↓"},{id:"magasin",label:"Magasin"},{id:"produit",label:"Produit"},{id:"montant",label:"Montant"}];
-  const sorted=[...filteredArchives];
-  if(sort==="date")    sorted.reverse();
-  else if(sort==="magasin") sorted.sort((a,b)=>a.store.name.localeCompare(b.store.name,"fr"));
-  else if(sort==="montant") sorted.sort((a,b)=>b.total-a.total);
   const productList=useMemo(()=>{
     const seen=new Set(); const result=[];
     [...filteredArchives].reverse().forEach(arc=>arc.items.forEach(item=>{
@@ -6789,80 +6784,6 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
     return result.sort((a,b)=>a.product.localeCompare(b.product,"fr"));
   },[filteredArchives,priceDB]);
 
-  const now        = new Date();
-  const currentKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-
-  const months = useMemo(() => {
-    const map = {};
-    archives.forEach(arc => {
-      const d   = new Date(arc.date);
-      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-      if (!map[key]) map[key] = { key, year: d.getFullYear(), month: d.getMonth(), saving: 0, count: 0 };
-      map[key].saving += arc.potential_saving || 0;
-      map[key].count  += 1;
-    });
-    if (!map[currentKey])
-      map[currentKey] = { key: currentKey, year: now.getFullYear(), month: now.getMonth(), saving: 0, count: 0 };
-    return Object.values(map).sort((a, b) => b.key.localeCompare(a.key));
-  }, [archives]);
-
-  const monthLabel = (year, month) => {
-    const s = new Date(year, month, 1).toLocaleDateString('fr-FR', { month:'long', year:'numeric' });
-    return s.charAt(0).toUpperCase() + s.slice(1);
-  };
-
-  const monthArchives = useMemo(() => {
-    if (!selectedMonth) return [];
-    return archives
-      .filter(arc => {
-        const d = new Date(arc.date);
-        return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}` === selectedMonth;
-      })
-      .sort((a, b) => new Date(b.date) - new Date(a.date));
-  }, [archives, selectedMonth]);
-
-  if (selectedMonth) {
-    const info = months.find(m => m.key === selectedMonth) || {};
-    return (
-      <div style={{ padding:"16px 16px 110px" }}>
-        <button onClick={() => setSelectedMonth(null)} style={{ background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.blue, cursor:"pointer", padding:"0 0 16px", display:"flex", alignItems:"center", gap:6 }}>
-          ← {monthLabel(info.year, info.month)}
-        </button>
-        {monthArchives.length === 0 ? (
-          <div style={{ textAlign:"center", padding:"40px 0", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>
-            Aucun achat ce mois-ci
-          </div>
-        ) : (
-          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-            {monthArchives.map(arc => (
-              <div key={arc.id} style={{ background:C.white, borderRadius:14, border:`1px solid ${C.grayLight}`, padding:"14px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
-                <div>
-                  <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.text }}>{arc.store?.logo} {arc.store?.name}</div>
-                  <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, marginTop:2 }}>{new Date(arc.date).toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long' })}</div>
-                </div>
-                <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end" }}>
-                  <div style={{ background:C.blue, borderRadius:10, padding:"6px 14px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:18, color:C.white }}>
-                    {(arc.total || 0).toFixed(2)} €
-                  </div>
-                  {arc.potential_saving > 0 && (
-                    <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, fontWeight:800, color:C.green, marginTop:4 }}>
-                      Économie : {arc.potential_saving.toFixed(2)} €
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-        <button onClick={()=>setShowEntry(true)} style={{ position:"fixed", bottom:72, right:16, background:"linear-gradient(135deg,#CC0000,#FF1A1A)", border:"none", borderRadius:99, padding:"13px 18px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", gap:6, boxShadow:"0 6px 20px rgba(180,0,0,0.45)", zIndex:40 }}>
-          ✏️ Saisie manuelle
-        </button>
-        {showImport && <ImportTicketSheet onClose={()=>setShowImport(false)} onImport={onImport} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))} estFrancois={estFrancois}/>}
-        {showEntry  && <PriceEntrySheet  onClose={()=>setShowEntry(false)} onSave={onSavePrice}/>}
-      </div>
-    );
-  }
-
   return (
     <div style={{ padding:"16px 16px 110px" }}>
       {/* Chantier 118 — accès à l'historique des tickets (shadow François). */}
@@ -6871,30 +6792,21 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
           🧾 Mes tickets — identifier les produits <span style={{ float:"right" }}>›</span>
         </button>
       )}
-      {/* Chantier 128 — bascule sobre (même contrôle que dans Ma liste). */}
+      {/* Chantier 130 — l'écran s'ouvre sur la LISTE DES TICKETS (c'est son
+          nom). Les produits achetés passent en second. */}
       <div style={{ display:"flex", background:"#E8E8E4", borderRadius:12, padding:3, marginBottom:16 }}>
-        {[{id:"produit",label:"Par produit"},{id:"mois",label:"Par mois"}].map(t=>(
-          <button key={t.id} onClick={()=>{ setSubTab(t.id); if(t.id==="produit") setSort("produit"); }} aria-pressed={subTab===t.id}
+        {[{id:"tickets",label:"Mes tickets"},{id:"produit",label:"Produits achetés"}].map(t=>(
+          <button key={t.id} onClick={()=>setSubTab(t.id)} aria-pressed={subTab===t.id}
             style={{ flex:1, padding:"9px", border:"none", borderRadius:10, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, cursor:"pointer", background:subTab===t.id?"#fff":"transparent", color:subTab===t.id?C.text:C.textLight, boxShadow:subTab===t.id?"0 1px 3px rgba(0,0,0,0.12)":"none" }}>
             {t.label}
           </button>
         ))}
       </div>
-      {subTab === "mois" && (
-        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-          {months.map(m => (
-            <div key={m.key} onClick={() => setSelectedMonth(m.key)} style={{ background:C.white, borderRadius:14, border:`1px solid ${C.grayLight}`, padding:"16px 18px", display:"flex", alignItems:"center", justifyContent:"space-between", cursor:"pointer", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
-              <div>
-                <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:16, color:C.text }}>{monthLabel(m.year, m.month)}</div>
-                {m.count > 0 && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, marginTop:2 }}>{m.count} course{m.count>1?'s':''}</div>}
-              </div>
-              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                {m.saving > 0.01 && <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.green }}>−{m.saving.toFixed(2)} €</div>}
-                <span style={{ color:C.gray, fontSize:18 }}>›</span>
-              </div>
-            </div>
-          ))}
-        </div>
+      {subTab === "tickets" && (
+        <MesTickets archives={archives} nomAffiche={nomAffiche}
+          aConfirmer={arc => comptesAConfirmer.get(jourArchive(arc.date)) || 0}
+          onCorriger={(arc,item,j)=>setCorrectionCible({arc,item,cleLigne:`${arc.id}_${j}`})}
+          onAjouter={onAddToList} onSupprimer={onDelete} />
       )}
       {subTab === "produit" && (<>
       {/* Chantier 104c — filtrage purement local ici : vider la requête suffit
@@ -6914,29 +6826,14 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
         </div>
       ) : (
         <>
-          <div style={{ display:"flex", gap:10, marginBottom:16 }}>
-            <div style={{ flex:1, background:C.white, borderRadius:16, padding:"12px 14px", boxShadow:"0 1px 2px rgba(22,24,29,0.04), 0 6px 20px rgba(22,24,29,0.06)" }}>
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:800, color:C.gray }}>Courses</div>
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:24, color:C.text }}>{filteredArchives.length}</div>
-            </div>
-            <div style={{ flex:1, background:C.white, borderRadius:16, padding:"12px 14px", boxShadow:"0 1px 2px rgba(22,24,29,0.04), 0 6px 20px rgba(22,24,29,0.06)" }}>
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:800, color:C.gray }}>Total dépensé</div>
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:24, color:C.text }}>{totalSpent.toFixed(0)} €</div>
-            </div>
-          </div>
-          <div style={{ display:"flex", gap:8, overflowX:"auto", marginBottom:10, paddingBottom:2, WebkitOverflowScrolling:"touch" }}>
-            {FILTERS.map(f=>(
-              <button key={f.id} onClick={()=>{ setSort(f.id); setExpandedProduct(null); }} style={{ flexShrink:0, background:sort===f.id?C.blue:C.grayLight, color:sort===f.id?C.white:C.textLight, border:"none", borderRadius:99, padding:"6px 14px", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:12, cursor:"pointer", whiteSpace:"nowrap" }}>{f.label}</button>
-            ))}
-          </div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:14 }}>
             <select value={filterCategory} onChange={e=>setFilterCategory(e.target.value)}
-              style={{ padding:"9px 12px", borderRadius:10, border:`1.5px solid ${C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:700, color:C.text, background:C.white, outline:"none", cursor:"pointer", boxSizing:"border-box" }}>
+              style={{ padding:"9px 12px", borderRadius:10, border:`1.5px solid ${C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:700, color:C.text, background:C.white, outline:"none", cursor:"pointer", boxSizing:"border-box", minWidth:0, width:"100%" }}>
               <option value="all">Toutes catégories</option>
               {categories.map(cat=><option key={cat} value={cat}>{cat}</option>)}
             </select>
             <select value={filterPeriod} onChange={e=>setFilterPeriod(e.target.value)}
-              style={{ padding:"9px 12px", borderRadius:10, border:`1.5px solid ${C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:700, color:C.text, background:C.white, outline:"none", cursor:"pointer", boxSizing:"border-box" }}>
+              style={{ padding:"9px 12px", borderRadius:10, border:`1.5px solid ${C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:700, color:C.text, background:C.white, outline:"none", cursor:"pointer", boxSizing:"border-box", minWidth:0, width:"100%" }}>
               <option value="all">Toute période</option>
               <option value="week">Cette semaine</option>
               <option value="month">Ce mois</option>
@@ -6947,7 +6844,7 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
             <div style={{ textAlign:"center", padding:"24px 0", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight }}>
               Aucun résultat pour cette recherche
             </div>
-          ) : sort==="produit" ? (
+          ) : (
             <div style={{ display:"flex", flexDirection:"column" }}>
               {productList.map((item,i)=>{
                 const key=`pl_${normName(item.brand||"")}_${normName(item.product)}_${normName(item.format||"")}`; const done=added.has(key); const isOpen=expandedProduct===key;
@@ -6990,52 +6887,6 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
                   </div>
                 );
               })}
-            </div>
-          ) : (
-            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-              {sorted.map((arc,i)=>(
-                <div key={arc.id} style={{ background:C.white, borderRadius:14, border:`1px solid ${C.grayLight}`, overflow:"hidden", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", animation:`slideIn 0.25s ease ${i*0.06}s both` }}>
-                  <div style={{ background:C.blueLight, padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-                    <div>
-                      <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                        <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.blue }}>{arc.store?.logo} {arc.store?.name}</div>
-                        {(()=>{ const key=arc.store?.id&&arc.store.id!=='autre'?arc.store.id:(arc.store?.name||'autre'); const avg=storeRatings[key]; if(!avg) return null; const pct=(avg/5*100).toFixed(1)+'%'; return <div style={{ position:"relative", display:"inline-block", fontSize:13, lineHeight:1, letterSpacing:1, whiteSpace:"nowrap" }}><span style={{ color:"#D0D0D0" }}>★★★★★</span><span style={{ position:"absolute", top:0, left:0, width:pct, overflow:"hidden", color:"#F5C200" }}>★★★★★</span></div>; })()}
-                      </div>
-                      <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.textLight, marginTop:1 }}>{new Date(arc.date).toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}</div>
-                    </div>
-                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                      {/* Chantier 111 — combien de lignes de CE ticket attendent
-                          une confirmation. Ton neutre, jamais alarmiste : c'est
-                          un travail à faire, pas une panne. Absent quand il n'y
-                          a rien à confirmer. */}
-                      {(()=>{ const n = comptesAConfirmer.get(jourArchive(arc.date)) || 0; return n > 0 ? (
-                        <div style={{ background:"#F0F6FC", border:"1px solid #CFE0F0", borderRadius:99, padding:"4px 10px", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:11, color:"#3A6EA5", whiteSpace:"nowrap" }}>{n} à confirmer</div>
-                      ) : null; })()}
-                      <div style={{ background:C.blue, borderRadius:10, padding:"6px 14px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:18, color:C.white }}>{(arc.items?.reduce((s,i)=>{ const up=i.unit_price??i.price??0; return s+(up*(i.qty||1)); },0)||arc.total||0).toFixed(2)} €</div>
-                      {pendingDeleteArc === arc.id ? (
-                        <div style={{ display:"flex", gap:4 }}>
-                          <button onClick={()=>setPendingDeleteArc(null)} style={{ background:C.grayLight, border:"none", borderRadius:6, padding:"4px 9px", fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:11, cursor:"pointer", color:C.text }}>Non</button>
-                          <button onClick={()=>{ onDelete(arc); setPendingDeleteArc(null); }} style={{ background:C.red, border:"none", borderRadius:6, padding:"4px 9px", fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:11, cursor:"pointer", color:C.white }}>Oui</button>
-                        </div>
-                      ) : (
-                        <button onClick={()=>setPendingDeleteArc(arc.id)} style={{ background:"none", border:"none", fontSize:14, cursor:"pointer", color:C.gray, padding:"4px" }}>✕</button>
-                      )}
-                    </div>
-                  </div>
-                  <div style={{ padding:"10px 16px 14px", display:"flex", flexWrap:"wrap", gap:6 }}>
-                    {arc.items.map((item,j)=>(
-                      <span key={j} style={{ background:C.grayLight, borderRadius:99, padding:"4px 8px 4px 12px", fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:700, color:C.textLight, display:"inline-flex", alignItems:"center", gap:6 }}>
-                        <span onClick={()=>setCorrectionCible({arc,item,cleLigne:`${arc.id}_${j}`})} style={{ cursor:"pointer" }} title="Corriger le produit rattaché">
-                          {(()=>{ const up=item.unit_price??item.price??null; const qty=item.qty||1; const tot=up!=null?up*qty:null; return `${item.brand?item.brand+' · ':""}${nomAffiche(item)} ${item.format} | ×${qty} | ${up!=null?Number(up).toFixed(2).replace('.',','):"—"} € | = ${tot!=null?Number(tot).toFixed(2).replace('.',','):"—"} €`; })()}
-                        </span>
-                        {(()=>{ const key=`${arc.id}_${j}`; const done=added.has(key); return (
-                          <button onClick={()=>{ if(!done){ onAddToList(item); setAdded(prev=>new Set(prev).add(key)); } }} style={{ background:done?C.green:"#E8E8E8", border:"none", borderRadius:99, width:22, height:22, display:"inline-flex", alignItems:"center", justifyContent:"center", cursor:done?"default":"pointer", color:C.white, fontSize:12, fontWeight:900, padding:0, flexShrink:0 }}>{done?"✓":"🛒"}</button>
-                        );})()}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ))}
             </div>
           )}
         </>
@@ -9374,6 +9225,9 @@ export default function App() {
   useEffect(() => onNeedRefresh(() => setNeedRefresh(true)), []);
 
   const [tab, setTab]           = useState("home");
+  // Chantier 130 — chaque écran s'ouvre en haut : sans ça, on arrivait sur
+  // « Moi » déjà défilé parce que l'écran précédent l'était.
+  useEffect(() => { window.scrollTo(0, 0); }, [tab]);
   const [items, setItems]       = useState([]);
   // Chantier « Courses » Lot 1 (shadow estFrancois) — session de courses figée,
   // réhydratée depuis localStorage à l'init (survit au rechargement). Rendue
@@ -9562,7 +9416,7 @@ export default function App() {
   const [loaded, setLoaded]       = useState(false);
 
 
-  const [storeRatings, setStoreRatings] = useState({});
+  const [, setStoreRatings] = useState({});
   const [showSuccess, setShowSuccess] = useState(null);
   const [showRating,  setShowRating]  = useState(null);
   const [favorites, setFavorites] = useState([]);
@@ -11159,7 +11013,7 @@ export default function App() {
             setShowRating({id:data.id,store:newArc.store});
             return { ok:true };
           }} userId={session?.user?.id} produitsRef={produitsRef}/>}
-          {loaded && tab==="archive"   && <ArchiveTab   archives={archives} storeRatings={storeRatings} onDelete={deleteArchive} priceDB={priceDB} onImport={handleImportPrices} onSavePrice={handleSavePrice} produitsRef={produitsRef} libelleVersNomProduit={libelleVersNomProduit} onLibelleResolu={(cle,nom)=>setLibelleVersNomProduit(prev=>({...prev,[cle]:nom}))} estFrancois={estFrancois} onOuvrirHistoriqueTickets={estFrancois ? ()=>ouvrirHistoriqueTickets(null) : null} onAddToList={arcItem=>{
+          {loaded && tab==="archive"   && <ArchiveTab   archives={archives} onDelete={deleteArchive} priceDB={priceDB} onImport={handleImportPrices} onSavePrice={handleSavePrice} produitsRef={produitsRef} libelleVersNomProduit={libelleVersNomProduit} onLibelleResolu={(cle,nom)=>setLibelleVersNomProduit(prev=>({...prev,[cle]:nom}))} estFrancois={estFrancois} onOuvrirHistoriqueTickets={estFrancois ? ()=>ouvrirHistoriqueTickets(null) : null} onAddToList={arcItem=>{
             const newItem={id:Date.now()+Math.random(),product:arcItem.product,format:arcItem.format||"",brand:arcItem.brand||"",qty:arcItem.qty||1,checked:false};
             addItem(newItem);
             showAppToast(`✓ ${arcItem.product} ajouté à ta liste`);
