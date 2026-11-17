@@ -63,6 +63,7 @@ import ListeCourses from "./components/v2/ListeCourses";
 // Chantier 126 — produits de la liste en texte libre : fiches proposées.
 import ProduitsARelier from "./components/v2/ProduitsARelier";
 import ResultatComparaison from "./components/v2/ResultatComparaison";
+import EcranEconomies from "./components/v2/EcranEconomies";
 import { useLiaisonsProposees } from "./components/v2/useLiaisonsProposees";
 // Chantier 110 — correction d'association : remise à zéro entre deux lignes,
 // relecture avant d'appliquer, garde-fou de mots communs sur le texte BRUT.
@@ -4546,7 +4547,10 @@ function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab }) {
           )}
           {!catLoading && !catError && categories.length > 0 && (
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-              {categories.map((cat,i) => {
+              {/* Chantier 128 — « Import Drive » est un rayon technique (produits
+                  importés pas encore classés) : il reste en base, et ses produits
+                  restent trouvables par la recherche, mais il n'est plus proposé. */}
+              {categories.filter(cat => cat.slug !== 'import-drive').map((cat,i) => {
                 const pres = getCategoryPresentation(cat);
                 const count = categoryCounts[cat.id] || 0;
                 return (
@@ -5114,175 +5118,6 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
             </div>
           </div>
         </div>
-      )}
-    </div>
-  );
-}
-
-// ── ECONOMIES TAB ─────────────────────────────────────────────────────────────
-function EconomiesTab({ priceDB, archives, items, setTab }) {
-  const [selectedMonth, setSelectedMonth] = useState(null);
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-
-  const scannedArchives = useMemo(() =>
-    archives.filter(a => a.ticket_scanned && a.realized_saving != null),
-    [archives]
-  );
-
-  const cagnotte = useMemo(() => ({
-    total: scannedArchives.reduce((a, arc) => a + (arc.realized_saving || 0), 0),
-  }), [scannedArchives]);
-
-  const monthly = useMemo(() => {
-    const map = {};
-    scannedArchives.forEach(arc => {
-      const m = (arc.date||'').substring(0,7);
-      if (!m) return;
-      if (!map[m]) map[m] = { total:0, count:0 };
-      map[m].total += arc.realized_saving || 0;
-      map[m].count += 1;
-    });
-    return Object.entries(map)
-      .sort((a,b) => b[0].localeCompare(a[0]))
-      .map(([m,d]) => ({ month:m, ...d }));
-  }, [scannedArchives]);
-
-  const monthArchives = useMemo(() => {
-    if (!selectedMonth) return [];
-    return scannedArchives
-      .filter(arc => (arc.date||'').substring(0,7) === selectedMonth)
-      .sort((a, b) => new Date(b.date) - new Date(a.date));
-  }, [scannedArchives, selectedMonth]);
-
-  const years = useMemo(() => {
-    const set = new Set();
-    scannedArchives.forEach(arc => {
-      const y = parseInt((arc.date||'').substring(0,4));
-      if (y >= 2025) set.add(y);
-    });
-    return Array.from(set).sort((a,b) => b-a);
-  }, [scannedArchives]);
-
-  const bestMonth = useMemo(() => {
-    const map = {};
-    scannedArchives.forEach(arc => {
-      const m = (arc.date||'').substring(0,7);
-      if (!m) return;
-      map[m] = (map[m] || 0) + (arc.realized_saving || 0);
-    });
-    const best = Object.entries(map).sort((a,b) => b[1]-a[1])[0];
-    return (best && best[1] > 0) ? best[0] : null;
-  }, [scannedArchives]);
-
-  const thisMonthStr = `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`;
-
-  const fullMonthLabel = (yyyymm) => {
-    const [y, m] = yyyymm.split('-');
-    const s = new Date(parseInt(y), parseInt(m)-1, 1).toLocaleDateString('fr-FR', { month:'long', year:'numeric' });
-    return s.charAt(0).toUpperCase() + s.slice(1);
-  };
-
-  return (
-    <div style={{ padding:"16px 16px 110px" }}>
-
-      {scannedArchives.length === 0 ? (
-        <div style={{ background:"#F0FFF5", borderRadius:14, padding:"20px 16px", textAlign:"center", marginBottom:24, border:`2px dashed ${C.green}` }}>
-          <div style={{ fontSize:36, marginBottom:8 }}>🧾</div>
-          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight, lineHeight:1.6 }}>
-            Valide une liste, fais tes courses, scanne le ticket — tes économies vs le magasin alternatif s'accumuleront ici.
-          </div>
-        </div>
-      ) : (
-        <>
-          {/* Cagnotte totale — toujours affiché */}
-          <div style={{ background:"linear-gradient(135deg,#00B341,#00C850)", borderRadius:14, padding:"18px 20px", marginBottom:16 }}>
-            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:800, color:"rgba(255,255,255,0.7)", textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:4 }}>Cagnotte réalisée sur les prix moyens du marché</div>
-            <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:36, color:C.white, lineHeight:1 }}>
-              {cagnotte.total >= 0 ? "+" : ""}{cagnotte.total.toFixed(2)} €
-            </div>
-            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:6 }}>
-              {scannedArchives.length} course{scannedArchives.length>1?"s":""} analysée{scannedArchives.length>1?"s":""}
-            </div>
-            {bestMonth && (
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:"rgba(255,255,255,0.85)", marginTop:4 }}>
-                Meilleur mois : {fullMonthLabel(bestMonth)}
-              </div>
-            )}
-          </div>
-
-          {selectedMonth ? (
-            /* VUE DÉTAIL D'UN MOIS */
-            <>
-              <button onClick={() => setSelectedMonth(null)} style={{ background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.blue, cursor:"pointer", padding:"0 0 14px", display:"flex", alignItems:"center", gap:6 }}>
-                ← {fullMonthLabel(selectedMonth)}
-              </button>
-              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                {monthArchives.map((arc, i) => {
-                  const store = arc.store || {};
-                  const pos = (arc.realized_saving || 0) >= 0;
-                  return (
-                    <div key={arc.id||i} style={{ background:C.white, borderRadius:12, padding:"12px 14px", border:`1px solid ${C.grayLight}`, display:"flex", alignItems:"center", gap:10 }}>
-                      <span style={{ fontSize:20, flexShrink:0 }}>{store?.logo || "🏪"}</span>
-                      <div style={{ flex:1, minWidth:0 }}>
-                        <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                          {store?.name || "Courses"}
-                        </div>
-                        <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight }}>
-                          {new Date(arc.date).toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}
-                        </div>
-                      </div>
-                      <div style={{ textAlign:"right", flexShrink:0 }}>
-                        <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:pos?C.green:"#CC3300" }}>
-                          {pos?"+":""}{(arc.realized_saving||0).toFixed(2)} €
-                        </div>
-                        <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, color:C.textLight }}>vs prix moyen</div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          ) : (
-            /* VUE PRINCIPALE — navigation par mois */
-            <>
-              {years.length > 1 && (
-                <div style={{ display:"flex", gap:8, marginBottom:12, flexWrap:"wrap" }}>
-                  {years.map(y => (
-                    <button key={y} onClick={() => setSelectedYear(y)}
-                      style={{ borderRadius:20, padding:"6px 16px", fontSize:13, border:"none", cursor:"pointer", fontFamily:"'Nunito',sans-serif", fontWeight:y===selectedYear?900:400, background:y===selectedYear?C.red:C.grayLight, color:y===selectedYear?"#fff":C.textLight }}>
-                      {y}
-                    </button>
-                  ))}
-                </div>
-              )}
-              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                {monthly.filter(m => m.month.startsWith(`${selectedYear}-`)).map(m => {
-                  const isZero = m.total === 0;
-                  return (
-                    <div key={m.month} onClick={() => setSelectedMonth(m.month)}
-                      style={{ display:"flex", alignItems:"center", background:isZero?"#EBEBEB":m.month===thisMonthStr?"#F0FFF5":C.white, borderRadius:12, padding:"12px 14px", border:`1.5px solid ${isZero?C.grayLight:m.month===thisMonthStr?C.green:C.grayLight}`, cursor:"pointer" }}>
-                      <div style={{ flex:1 }}>
-                        <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:isZero?C.textLight:C.text, fontStyle:isZero?"italic":"normal" }}>{fullMonthLabel(m.month)}</div>
-                        <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:11, color:C.textLight, marginTop:2 }}>
-                          {m.count} course{m.count>1?"s":""}
-                        </div>
-                      </div>
-                      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                        <div style={{ textAlign:"right" }}>
-                          <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:isZero?C.gray:m.total>=0?C.green:"#CC3300" }}>
-                            {m.total>=0?"+":""}{m.total.toFixed(2)} €
-                          </div>
-                          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, color:C.textLight }}>vs prix moyen</div>
-                        </div>
-                        <span style={{ color:C.gray, fontSize:18, opacity:isZero?0.4:1 }}>›</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </>
       )}
     </div>
   );
@@ -7035,9 +6870,11 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
           🧾 Mes tickets — identifier les produits <span style={{ float:"right" }}>›</span>
         </button>
       )}
-      <div style={{ display:"flex", gap:8, marginBottom:16 }}>
+      {/* Chantier 128 — bascule sobre (même contrôle que dans Ma liste). */}
+      <div style={{ display:"flex", background:"#E8E8E4", borderRadius:12, padding:3, marginBottom:16 }}>
         {[{id:"produit",label:"Par produit"},{id:"mois",label:"Par mois"}].map(t=>(
-          <button key={t.id} onClick={()=>{ setSubTab(t.id); if(t.id==="produit") setSort("produit"); }} style={{ flex:1, padding:"10px", border:"none", borderRadius:10, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, cursor:"pointer", background:subTab===t.id?C.blue:C.grayLight, color:subTab===t.id?C.white:C.textLight }}>
+          <button key={t.id} onClick={()=>{ setSubTab(t.id); if(t.id==="produit") setSort("produit"); }} aria-pressed={subTab===t.id}
+            style={{ flex:1, padding:"9px", border:"none", borderRadius:10, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, cursor:"pointer", background:subTab===t.id?"#fff":"transparent", color:subTab===t.id?C.text:C.textLight, boxShadow:subTab===t.id?"0 1px 3px rgba(0,0,0,0.12)":"none" }}>
             {t.label}
           </button>
         ))}
@@ -7077,13 +6914,13 @@ function ArchiveTab({ archives, storeRatings = {}, onDelete, onAddToList, priceD
       ) : (
         <>
           <div style={{ display:"flex", gap:10, marginBottom:16 }}>
-            <div style={{ flex:1, background:C.blue, borderRadius:12, padding:"12px 14px" }}>
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:800, color:"rgba(255,255,255,0.65)", textTransform:"uppercase", letterSpacing:"0.06em" }}>Courses</div>
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:24, color:C.white }}>{filteredArchives.length}</div>
+            <div style={{ flex:1, background:C.white, borderRadius:16, padding:"12px 14px", boxShadow:"0 1px 2px rgba(22,24,29,0.04), 0 6px 20px rgba(22,24,29,0.06)" }}>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:800, color:C.gray }}>Courses</div>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:24, color:C.text }}>{filteredArchives.length}</div>
             </div>
-            <div style={{ flex:1, background:C.green, borderRadius:12, padding:"12px 14px" }}>
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:800, color:"rgba(255,255,255,0.65)", textTransform:"uppercase", letterSpacing:"0.06em" }}>Total dépensé</div>
-              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:24, color:C.white }}>{totalSpent.toFixed(0)} €</div>
+            <div style={{ flex:1, background:C.white, borderRadius:16, padding:"12px 14px", boxShadow:"0 1px 2px rgba(22,24,29,0.04), 0 6px 20px rgba(22,24,29,0.06)" }}>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:800, color:C.gray }}>Total dépensé</div>
+              <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:24, color:C.text }}>{totalSpent.toFixed(0)} €</div>
             </div>
           </div>
           <div style={{ display:"flex", gap:8, overflowX:"auto", marginBottom:10, paddingBottom:2, WebkitOverflowScrolling:"touch" }}>
@@ -11456,7 +11293,7 @@ export default function App() {
             addItem(newItem);
             showAppToast(`✓ ${arcItem.product} ajouté à ta liste`);
           }}/>}
-          {loaded && tab==="economies" && <EconomiesTab priceDB={priceDB} archives={archives} items={items} setTab={setTab}/>}
+          {loaded && tab==="economies" && <EcranEconomies archives={archives} onScanner={handleFlash}/>}
           {/* #56.3b — jamais rendu pour un non-admin, même si tab="rejets" traîne en state */}
           {loaded && isAdmin && tab==="rejets" && <AdminRejetsCorePanel modeCoreActif={modeCoreActif} onToggleModeCore={setModeCoreActif} coreActifGlobal={coreActifGlobal}/>}
           </TabErrorBoundary>
