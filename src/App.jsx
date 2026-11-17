@@ -64,6 +64,7 @@ import ListeCourses from "./components/v2/ListeCourses";
 import ProduitsARelier from "./components/v2/ProduitsARelier";
 import ResultatComparaison from "./components/v2/ResultatComparaison";
 import EcranEconomies from "./components/v2/EcranEconomies";
+import ChoixScan from "./components/v2/ChoixScan";
 import { useLiaisonsProposees } from "./components/v2/useLiaisonsProposees";
 // Chantier 110 — correction d'association : remise à zéro entre deux lignes,
 // relecture avant d'appliquer, garde-fou de mots communs sur le texte BRUT.
@@ -7846,135 +7847,6 @@ function MultiPhotoSheet({ onClose, refProducts, onSuccess }) {
   );
 }
 
-// ── SCAN CHOIX SHEET ─────────────────────────────────────────────────────────
-// Chantier 120 — onImporterFichier (null = bouton masqué) : import d'un ticket
-// dématérialisé (image longue, PDF, captures). Réservé à François pour l'instant.
-function ScanChoixSheet({ onClose, onUnePhoto, onPlusieursPhotos, onAutresOptions, onImporterFichier = null }) {
-  const F = "'Nunito',sans-serif";
-  return (
-    <div
-      style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex",
-               alignItems:"flex-end", zIndex:200, animation:"fadeIn 0.2s ease" }}
-      onClick={onClose}
-    >
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{ background:C.white, borderRadius:"20px 20px 0 0", width:"100%",
-                 animation:"slideUp 0.3s ease", overflow:"hidden" }}
-      >
-        <div style={{ background:C.orange, padding:"16px 20px", display:"flex",
-                      alignItems:"center", justifyContent:"space-between" }}>
-          <div style={{ fontFamily:F, fontWeight:900, fontSize:17, color:"#111" }}>
-            🧾 Scanner mon ticket
-          </div>
-          <button onClick={onClose}
-            style={{ background:"rgba(0,0,0,0.12)", border:"none", borderRadius:99,
-                     width:28, height:28, fontSize:14, cursor:"pointer", color:"#111" }}>
-            ✕
-          </button>
-        </div>
-
-        <div style={{ padding:"24px 20px 44px" }}>
-          <div style={{ display:"flex", gap:12, marginBottom:16 }}>
-            <button onClick={onUnePhoto}
-              style={{ flex:1, background:C.green, border:"none", borderRadius:16,
-                       padding:"20px 12px", cursor:"pointer", display:"flex",
-                       flexDirection:"column", alignItems:"center", gap:12 }}>
-              <img src="/scan-plusieurs-photos.png" alt=""
-                style={{ width:96, height:96, objectFit:"contain" }} />
-              <span style={{ fontFamily:F, fontWeight:900, fontSize:17, color:C.white }}>
-                Ticket court
-              </span>
-              <span style={{ fontFamily:F, fontSize:12, color:"rgba(255,255,255,0.85)", textAlign:"center", marginTop:4 }}>
-                Tient en une seule photo
-              </span>
-            </button>
-
-            <button onClick={onPlusieursPhotos}
-              style={{ flex:1, background:"#4A90D9", border:"none", borderRadius:16,
-                       padding:"20px 12px", cursor:"pointer", display:"flex",
-                       flexDirection:"column", alignItems:"center", gap:12 }}>
-              <img src="/scan-1-photo.png" alt=""
-                style={{ width:96, height:96, objectFit:"contain" }} />
-              <span style={{ fontFamily:F, fontWeight:900, fontSize:17, color:C.white }}>
-                Grand ticket
-              </span>
-              <span style={{ fontFamily:F, fontSize:12, color:"rgba(255,255,255,0.85)", textAlign:"center", marginTop:4 }}>
-                On le scanne en plusieurs fois
-              </span>
-            </button>
-          </div>
-
-          {onImporterFichier && (
-            <button onClick={onImporterFichier}
-              style={{ width:"100%", marginBottom:16, padding:"14px 16px", border:"2px solid #4A90D9", borderRadius:16,
-                       background:"#F2F7FF", cursor:"pointer", display:"flex", alignItems:"center", gap:12, textAlign:"left" }}>
-              <span style={{ fontSize:26 }}>📄</span>
-              <span style={{ flex:1 }}>
-                <span style={{ display:"block", fontFamily:F, fontWeight:900, fontSize:16, color:"#1F5FA8" }}>Importer un ticket</span>
-                <span style={{ display:"block", fontFamily:F, fontSize:12, color:C.textLight, marginTop:2 }}>Fichier, PDF ou captures d'écran (Lidl Plus, drive…)</span>
-              </span>
-            </button>
-          )}
-
-          <div style={{ fontFamily:F, fontSize:12, color:C.textLight,
-                        textAlign:"center", lineHeight:1.6, padding:"0 8px", marginBottom:16 }}>
-            💡 Commence toujours par l'en-tête du ticket — nom et adresse du magasin
-          </div>
-
-          <button onClick={onAutresOptions}
-            style={{ width:"100%", padding:"10px", border:"none", background:"none",
-                     fontFamily:F, fontWeight:700, fontSize:13, color:"#4A90D9", cursor:"pointer" }}>
-            Autres options
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── AUTRES OPTIONS SHEET ─────────────────────────────────────────────────────
-// Écran dédié ouvert depuis ScanChoixSheet ("Autres options"). Ne recrée
-// aucun mécanisme : "Saisie manuelle" rebranche sur le même PriceEntrySheet
-// que celui déjà utilisé ailleurs dans l'app (voir handleSavePrice), et
-// "Importer une photo" rebranche sur ImportTicketSheet via le prop additif
-// autoOpenGallery (voir plus haut) — même input galerie, aucune duplication.
-function AutresOptionsSheet({ onClose, onBack, onGalleryImport, onManualEntry }) {
-  const F = "'Nunito',sans-serif";
-  return (
-    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", zIndex:200, animation:"fadeIn 0.2s ease" }} onClick={onClose}>
-      <div onClick={e=>e.stopPropagation()} style={{ background:C.white, borderRadius:"20px 20px 0 0", width:"100%", animation:"slideUp 0.3s ease", overflow:"hidden" }}>
-        <div style={{ background:C.orange, padding:"16px 20px", display:"flex", alignItems:"center", gap:12 }}>
-          <button onClick={onBack} style={{ background:"rgba(0,0,0,0.12)", border:"none", borderRadius:99, width:28, height:28, fontSize:16, cursor:"pointer", color:"#111" }}>←</button>
-          <div style={{ fontFamily:F, fontWeight:900, fontSize:17, color:"#111", flex:1 }}>Autres options</div>
-          <button onClick={onClose} style={{ background:"rgba(0,0,0,0.12)", border:"none", borderRadius:99, width:28, height:28, fontSize:14, cursor:"pointer", color:"#111" }}>✕</button>
-        </div>
-
-        <div style={{ padding:"20px 20px 44px", display:"flex", flexDirection:"column", gap:12 }}>
-          <button onClick={onGalleryImport}
-            style={{ width:"100%", padding:"16px", border:"none", borderRadius:14, background:"#4A90D9", fontFamily:F, cursor:"pointer", display:"flex", alignItems:"center", gap:14, textAlign:"left" }}>
-            <span style={{ fontSize:26 }}>🖼️</span>
-            <div>
-              <div style={{ fontWeight:900, fontSize:15, color:"#fff" }}>Importer une photo</div>
-              <div style={{ fontSize:12, color:"rgba(255,255,255,0.85)", marginTop:2 }}>Depuis ta pellicule</div>
-            </div>
-          </button>
-
-          <button onClick={onManualEntry}
-            style={{ width:"100%", padding:"16px", border:"none", borderRadius:14, background:C.orange, fontFamily:F, cursor:"pointer", display:"flex", alignItems:"center", gap:14, textAlign:"left" }}>
-            <span style={{ fontSize:26 }}>✏️</span>
-            <div>
-              <div style={{ fontWeight:900, fontSize:15, color:"#fff" }}>Saisie manuelle</div>
-              <div style={{ fontSize:12, color:"rgba(255,255,255,0.85)", marginTop:2 }}>Sans ticket, tu tapes le prix</div>
-            </div>
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-
 // ── CHANTIER « MICRO » — LOT 4 : liaison d'un élément vocal au Catalogue ─────
 // Feuille de recherche : même RPC que l'onglet Catalogue
 // (rechercher_produits_catalogue) puis la MÊME fiche produit
@@ -9703,7 +9575,6 @@ export default function App() {
   const [showMultiPhoto, setShowMultiPhoto] = useState(false);
   // Chantier 120 — import d'un ticket depuis un fichier / PDF / captures (François).
   const [showImportFichier, setShowImportFichier] = useState(false);
-  const [showAutresOptions, setShowAutresOptions] = useState(false);
   const [showManualEntryFromScan, setShowManualEntryFromScan] = useState(false);
   const [showGalleryImportFromScan, setShowGalleryImportFromScan] = useState(false);
   const [autoImportResult, setAutoImportResult] = useState(null);
@@ -11394,13 +11265,16 @@ export default function App() {
         )}
         {showFaqSheet     && <FaqSheet     userId={session.user.id} pseudo={pseudo} onClose={()=>setShowFaqSheet(false)}/>}
         {showMesPrixSheet && <MesPrixSheet priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{ const {id:_id,...rest}=newArc; const {data,error}=await supabase.from('archives').insert({...rest,user_id:session?.user?.id}).select('id').single(); if(error){ showAppToast("⚠️ Archive non sauvegardée, vérifie ta connexion",false); } else { const {data:all}=await supabase.from('archives').select('*').order('date'); if(all) setArchives(all); setShowRating({id:data.id,store:newArc.store}); } }} userId={session?.user?.id} produitsRef={produitsRef} onClose={()=>setShowMesPrixSheet(false)}/>}
+        {/* Chantier 129 — une seule feuille pour toutes les façons d'ajouter un
+            ticket (l'ancienne feuille « Autres options » y est intégrée). */}
         {showScanChoix && (
-          <ScanChoixSheet
+          <ChoixScan
             onClose={() => setShowScanChoix(false)}
             onUnePhoto={handleFlashConfirmed}
             onPlusieursPhotos={() => { setShowScanChoix(false); setShowMultiPhoto(true); }}
-            onAutresOptions={() => { setShowScanChoix(false); setShowAutresOptions(true); }}
             onImporterFichier={estFrancois ? () => { setShowScanChoix(false); setShowImportFichier(true); } : null}
+            onPhotoPellicule={() => { setShowScanChoix(false); setShowGalleryImportFromScan(true); }}
+            onSaisieManuelle={() => { setShowScanChoix(false); setShowManualEntryFromScan(true); }}
           />
         )}
         {/* Chantier 120 — import d'un ticket dématérialisé : même aval que
@@ -11417,14 +11291,6 @@ export default function App() {
             onClose={() => setShowMultiPhoto(false)}
             refProducts={produitsRef.map(p => ({ nom: p.produit_generique, categorie: p.sous_categorie }))}
             onSuccess={(result) => { setShowMultiPhoto(false); setAutoImportResult(result); setTab("prices"); }}
-          />
-        )}
-        {showAutresOptions && (
-          <AutresOptionsSheet
-            onClose={() => setShowAutresOptions(false)}
-            onBack={() => { setShowAutresOptions(false); setShowScanChoix(true); }}
-            onGalleryImport={() => { setShowAutresOptions(false); setShowGalleryImportFromScan(true); }}
-            onManualEntry={() => { setShowAutresOptions(false); setShowManualEntryFromScan(true); }}
           />
         )}
         {showManualEntryFromScan && (
