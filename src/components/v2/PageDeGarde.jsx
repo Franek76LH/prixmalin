@@ -65,8 +65,12 @@ function Ticket({ ticket }) {
 // - connecté, à chaque ouverture de l'app (chantier 136) : un seul bouton, et
 //   la barre du bas reste visible par-dessus (`avecBarreDuBas`).
 export default function PageDeGarde({ onCommencer, onDejaUnCompte = null, libelleBouton = 'Commencer', avecBarreDuBas = false }) {
+  // Chantier 136 bis — sur iPhone, les icônes du bas ne répondaient pas tant
+  // que la page de garde était là. La page est donc enfermée dans sa propre
+  // couche, SOUS la barre du bas (`isolation` + `zIndex: 0`), et tout ce qui
+  // n'est pas un bouton laisse passer les appuis (`pointerEvents: 'none'`).
   return (
-    <div style={{ position: 'relative', minHeight: '100dvh', maxWidth: 430, margin: '0 auto', overflow: 'hidden', background: '#14060A' }}>
+    <div style={{ position: 'relative', zIndex: 0, isolation: 'isolate', minHeight: '100dvh', maxWidth: 430, margin: '0 auto', overflow: 'hidden', background: '#14060A' }}>
       <style>{`
         @keyframes pmChuteTickets { from { transform: translateY(-50%); } to { transform: translateY(0); } }
         .pm-colonne-tickets { animation: pmChuteTickets linear infinite; will-change: transform; }
@@ -74,7 +78,7 @@ export default function PageDeGarde({ onCommencer, onDejaUnCompte = null, libell
       `}</style>
 
       {/* Le décor : purement décoratif, invisible pour un lecteur d'écran. */}
-      <div aria-hidden="true" style={{ position: 'absolute', inset: 0, display: 'flex', gap: 10, padding: '0 10px' }}>
+      <div aria-hidden="true" style={{ position: 'absolute', inset: 0, display: 'flex', gap: 10, padding: '0 10px', pointerEvents: 'none' }}>
         {COLONNES.map((tickets, c) => (
           <div key={c} style={{ flex: 1, minWidth: 0 }}>
             <div className="pm-colonne-tickets" style={{ display: 'flex', flexDirection: 'column', gap: 14, animationDuration: `${DUREES[c % DUREES.length]}s` }}>
@@ -84,12 +88,12 @@ export default function PageDeGarde({ onCommencer, onDejaUnCompte = null, libell
           </div>
         ))}
       </div>
-      <div aria-hidden="true" style={{ position: 'absolute', inset: 0, background: 'rgba(20,6,10,0.66)' }} />
+      <div aria-hidden="true" style={{ position: 'absolute', inset: 0, background: 'rgba(20,6,10,0.66)', pointerEvents: 'none' }} />
 
-      <div style={{ position: 'relative', minHeight: '100dvh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: avecBarreDuBas ? '0 28px 96px' : '0 28px', textAlign: 'center', boxSizing: 'border-box' }}>
+      <div style={{ position: 'relative', minHeight: '100dvh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: avecBarreDuBas ? '0 28px 96px' : '0 28px', textAlign: 'center', boxSizing: 'border-box', pointerEvents: 'none' }}>
         {/* Un fond plus sombre juste derrière le texte : il reste lisible
             quel que soit le ticket qui passe dessous. */}
-        <div style={{ width: '100%', background: 'rgba(20,6,10,0.82)', borderRadius: 26, padding: '30px 20px 12px', boxSizing: 'border-box' }}>
+        <div style={{ width: '100%', background: 'rgba(20,6,10,0.82)', borderRadius: 26, padding: '30px 20px 12px', boxSizing: 'border-box', pointerEvents: 'auto' }}>
           <h1 style={{ margin: 0, fontFamily: T.police, fontWeight: 900, fontSize: 46, color: '#fff', letterSpacing: '-1.5px', lineHeight: 1 }}>
             Prix<span style={{ color: T.jaune }}>Malin</span>
           </h1>
