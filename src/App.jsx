@@ -68,7 +68,7 @@ import VerificationTicket from "./components/v2/VerificationTicket";
 import { archiveDejaPresente } from "./lib/ticketsCore";
 import { merciApresScan } from "./lib/communauteCore";
 import EcranEvolutionPrix from "./components/v2/EcranEvolutionPrix";
-import { produitsEnBaisse } from "./lib/evolutionPrixCore";
+import { alertesBaisse, avecExemple, exempleDemande } from "./lib/evolutionPrixCore";
 import ResultatComparaison from "./components/v2/ResultatComparaison";
 import EcranEconomies from "./components/v2/EcranEconomies";
 import ChoixScan from "./components/v2/ChoixScan";
@@ -10933,7 +10933,11 @@ export default function App() {
 
   // Chantier 145 — évolution du prix de mes produits (courbes + baisses).
   // Même rythme que les chiffres de la communauté. Échec : rien n'est affiché.
-  const [evolutionPrix, setEvolutionPrix] = useState(null);
+  const [evolutionPrixBrut, setEvolutionPrix] = useState(null);
+  // Chantier 146 — sur un serveur de test seulement, l'adresse « ?demo=baisse »
+  // ajoute un produit d'exemple en baisse, pour VOIR l'alerte verte sans rien
+  // écrire dans la base (qui est celle de la prod). Sans effet sur la prod.
+  const evolutionPrix = avecExemple(evolutionPrixBrut, exempleDemande(window.location.hostname, window.location.search));
   useEffect(() => {
     if (!utilisateurConnecte) return;
     let annule = false;
@@ -11028,7 +11032,7 @@ export default function App() {
                pour l'administrateur quand le réglage est coupé : sans ticket, un
                code-barres ne rapporte aucun prix (décision de François, 17/11). */
             microDisponible={estFrancois} contributionVisible={contributionCodesBarresActive} onContribuer={()=>setShowContributionCodeBarres(true)}/>}
-          {loaded && tab==="moi"       && <EcranMoi pseudo={pseudo} email={session?.user?.email} archives={archives} setTab={setTab} version={__APP_VERSION__} nbBaisses={produitsEnBaisse(evolutionPrix).length}
+          {loaded && tab==="moi"       && <EcranMoi pseudo={pseudo} email={session?.user?.email} archives={archives} setTab={setTab} version={__APP_VERSION__} nbBaisses={alertesBaisse(evolutionPrix).length}
             onProfil={profilVisible ? ()=>setShowProfilSheet(true) : null} onCercle={()=>setShowCircleSheet(true)} invitationsEnAttente={invitationsEnAttente}
             onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFavoris={()=>setShowFavorisSheet(true)} onAide={()=>setShowFaqSheet(true)}
             onDeconnexion={handleLogout} estAdmin={isAdmin}/>}

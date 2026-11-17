@@ -8,7 +8,7 @@ import { useState } from 'react';
 import { T } from './theme';
 import { IconeLoupe, IconeChevron, IconeMicro, IconeScanner } from './Icones';
 import DefiCommunaute from './DefiCommunaute';
-import { produitsEnBaisse, phraseBaisse, titreAlerteBaisse } from '../../lib/evolutionPrixCore';
+import { alertesBaisse, phraseBaisse, titreAlerteBaisse } from '../../lib/evolutionPrixCore';
 import {
   apercuListe, actionPrincipale, montrerModeDemploi, economiesConfirmees,
   ACTION_COMPARER, ACTION_COMMENCER_LISTE,
@@ -89,7 +89,8 @@ export default function AccueilSimple({
   const action = actionPrincipale({ items, sessionCourses });
   const confirmees = economiesConfirmees(archives);
   const prenom = (pseudo || '').trim();
-  const enBaisse = produitsEnBaisse(evolutionPrix);
+  // Seulement mes habitudes : un produit acheté au moins deux fois.
+  const enBaisse = alertesBaisse(evolutionPrix);
 
   return (
     <div style={{ background: T.fond, minHeight: '100vh', padding: '0 0 110px' }}>
@@ -142,7 +143,10 @@ export default function AccueilSimple({
           <Carte onClick={() => setTab('evolution')} style={{ display: 'flex', alignItems: 'center', gap: 14, background: T.vertPale, boxShadow: 'none', border: `1px solid ${T.vert}` }}>
             <span style={{ width: 42, height: 42, borderRadius: 13, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 21, flexShrink: 0 }}>📉</span>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontFamily: T.police, fontWeight: 900, fontSize: 15, color: T.vert }}>{titreAlerteBaisse(enBaisse)}</div>
+              <div style={{ fontFamily: T.police, fontWeight: 900, fontSize: 15, color: T.vert }}>
+                {titreAlerteBaisse(enBaisse)}
+                {enBaisse.some(p => p.exemple) && <span style={{ marginLeft: 8, background: T.jaune, color: T.texte, borderRadius: 6, padding: '1px 7px', fontSize: 10.5, fontWeight: 900, verticalAlign: 'middle' }}>EXEMPLE</span>}
+              </div>
               <div style={{ fontFamily: T.police, fontSize: 12.5, color: T.texteDoux, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {enBaisse.length === 1 ? phraseBaisse(enBaisse[0]) : `${enBaisse[0].produit} : ${phraseBaisse(enBaisse[0])}`}
               </div>

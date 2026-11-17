@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { produitsSuivis, produitsEnBaisse, libelleProduit, phraseBaisse, titreAlerteBaisse, resumeCourbe, traceCourbe } from './evolutionPrixCore';
+import {
+  produitsSuivis, produitsEnBaisse, libelleProduit, phraseBaisse, titreAlerteBaisse, resumeCourbe, traceCourbe,
+  magasinsDuProduit, pointsDuMagasin, magasinParDefaut, moinsCherAujourdhui, alertesBaisse,
+  exempleDemande, avecExemple, EXEMPLE_BAISSE,
+} from './evolutionPrixCore';
 
 const pt = (d, p, m = 'Netto') => ({ d, p, m });
 const produit = (plus = {}) => ({
@@ -71,5 +75,57 @@ describe('traceCourbe', () => {
   it('relevés le même jour : étalés au lieu d’être empilés', () => {
     const t = traceCourbe([pt('2026-09-01', 2), pt('2026-09-01', 3)], 280, 70, 8);
     expect(t.map(c => c.x)).toEqual([8, 272]);
+  });
+});
+
+describe('une courbe par magasin (chantier 146)', () => {
+  const points = [pt('2026-06-10', 1.89, 'Netto'), pt('2026-08-05', 2.05, 'Carrefour'), pt('2026-10-11', 1.95, 'Netto'), pt('2026-11-09', 1.64, 'Netto')];
+  it('liste les magasins, le plus relevé d’abord, avec son dernier prix', () => {
+    expect(magasinsDuProduit(points)).toMatchObject([{ nom: 'Netto', nb: 3, dernier: 1.64 }, { nom: 'Carrefour', nb: 1, dernier: 2.05 }]);
+  });
+  it('ne garde que les relevés du magasin demandé', () => {
+    expect(pointsDuMagasin(points, 'Netto').map(p => p.p)).toEqual([1.89, 1.95, 1.64]);
+    expect(pointsDuMagasin(points, 'Lidl')).toEqual([]);
+  });
+  it('magasin montré d’abord : celui de la baisse, sinon le plus relevé', () => {
+    expect(magasinParDefaut({ points })).toBe('Netto');
+    expect(magasinParDefaut({ points, baisse: { magasin: 'Carrefour' } })).toBe('Carrefour');
+    expect(magasinParDefaut({ points, baisse: { magasin: 'Inconnu au bataillon' } })).toBe('Netto');
+    expect(magasinParDefaut({ points: [] })).toBeNull();
+  });
+  it('dit où c’est le moins cher d’après le dernier relevé de chaque magasin', () => {
+    expect(moinsCherAujourdhui(points)).toEqual({ magasin: 'Netto', prix: 1.64 });
+  });
+  it('un seul magasin : rien à comparer', () => {
+    expect(moinsCherAujourdhui([pt('2026-06-10', 1.89, 'Netto'), pt('2026-07-10', 1.95, 'Netto')])).toBeNull();
+  });
+});
+
+describe('alerte de l’accueil : seulement les habitudes', () => {
+  const baisse = { avant: 2, apres: 1.6, pct: 20, magasin: 'Netto' };
+  it('un produit acheté une seule fois n’alerte pas', () => {
+    const liste = [produit({ variante_id: 'a', nb_achats: 1, baisse }), produit({ variante_id: 'b', produit: 'Café', nb_achats: 2, baisse })];
+    expect(alertesBaisse(liste).map(p => p.produit)).toEqual(['Café']);
+  });
+  it('nombre d’achats inconnu : pas d’alerte', () => {
+    expect(alertesBaisse([produit({ baisse })])).toEqual([]);
+  });
+});
+
+describe('exemple de démonstration', () => {
+  it('seulement sur un serveur de test, et seulement si l’adresse le demande', () => {
+    expect(exempleDemande('prixmalin-git-test-refonte-v2-x.vercel.app', '?demo=baisse')).toBe(true);
+    expect(exempleDemande('localhost', '?demo=baisse')).toBe(true);
+    expect(exempleDemande('prixmalin-git-test-refonte-v2-x.vercel.app', '')).toBe(false);
+  });
+  it('jamais sur la prod, même si l’adresse le demande', () => {
+    expect(exempleDemande('prixmalin-three.vercel.app', '?demo=baisse')).toBe(false);
+  });
+  it('s’ajoute en tête sans toucher aux vraies données', () => {
+    const vraies = [produit()];
+    expect(avecExemple(vraies, false)).toBe(vraies);
+    expect(avecExemple(vraies, true)).toEqual([EXEMPLE_BAISSE, vraies[0]]);
+    expect(avecExemple(null, true)).toEqual([EXEMPLE_BAISSE]);
+    expect(alertesBaisse(avecExemple(null, true))).toHaveLength(1);
   });
 });

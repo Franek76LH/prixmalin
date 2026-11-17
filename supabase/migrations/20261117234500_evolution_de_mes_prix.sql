@@ -23,8 +23,9 @@ as $f$
     where x.archive = false and x.statut_validation <> 'rejete'
       and x.variante_produit_id is not null and x.prix_total > 0
   ), miennes as (
-    -- relevés faits par la personne elle-même (ticket ou saisie), pas les imports
-    select distinct v from p where u = auth.uid() and src in ('ticket', 'manuel')
+    -- relevés faits par la personne elle-même (ticket ou saisie), pas les imports ;
+    -- nb_achats = combien de fois elle l'a relevé (sert à reconnaître une habitude)
+    select v, count(*) as nb_achats from p where u = auth.uid() and src in ('ticket', 'manuel') group by v
   ), s as (
     select p.v, p.m, p.px, p.d from p join miennes using (v)
   ), rangs as (
@@ -44,7 +45,7 @@ as $f$
       and d >= now() - interval '60 days'
     order by v, (1 - px / px_avant) desc
   ), compte as (
-    select v, count(*) as n from s group by v having count(*) >= 2
+    select s.v, count(*) as n, max(mi.nb_achats) as nb_achats from s join miennes mi on mi.v = s.v group by s.v having count(*) >= 2
   ), lignes as (
     select json_build_object(
       'variante_id', c.v,
@@ -54,6 +55,7 @@ as $f$
           coalesce(trim(to_char(vp.quantite_nette, 'FM999990.###'), '.') || ' ' || coalesce(vp.unite_quantite, ''), '')
           || case when coalesce(vp.nombre_unites, 1) > 1 then ' × ' || vp.nombre_unites else '' end), ''),
       'nb', c.n,
+      'nb_achats', c.nb_achats,
       'baisse', case when b.v is not null then json_build_object(
           'avant', b.avant, 'apres', b.apres, 'pct', b.pct, 'magasin', mg.nom, 'date', b.d) end,
       'points', (
