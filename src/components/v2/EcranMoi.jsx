@@ -37,7 +37,7 @@ function Groupe({ titre, children }) {
 }
 
 export default function EcranMoi({
-  pseudo, email, archives = [], setTab, version,
+  pseudo, email, archives = [], setTab, version, nbBaisses = 0,
   onProfil = null, onCercle, invitationsEnAttente = 0, onStats, onMesPrix, onFavoris, onAide, onDeconnexion,
   estAdmin = false,
 }) {
@@ -71,6 +71,7 @@ export default function EcranMoi({
 
       <Groupe titre="Mes courses">
         <Ligne pastille="🧾" libelle="Mes tickets" detail="Tous tes tickets scannés" onClick={() => setTab('archive')} />
+        <Ligne pastille="📈" libelle="Évolution de mes prix" detail="La courbe de tes produits, et ceux qui baissent" onClick={() => setTab('evolution')} pastilleRouge={nbBaisses} />
         <Ligne pastille="🏷️" libelle="Mes prix" detail="Les prix que tu as relevés" onClick={onMesPrix} />
         <Ligne pastille="❤️" libelle="Mes favoris" onClick={onFavoris} dernier />
       </Groupe>

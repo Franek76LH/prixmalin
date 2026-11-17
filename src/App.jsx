@@ -67,6 +67,8 @@ import PageDeGarde from "./components/v2/PageDeGarde";
 import VerificationTicket from "./components/v2/VerificationTicket";
 import { archiveDejaPresente } from "./lib/ticketsCore";
 import { merciApresScan } from "./lib/communauteCore";
+import EcranEvolutionPrix from "./components/v2/EcranEvolutionPrix";
+import { produitsEnBaisse } from "./lib/evolutionPrixCore";
 import ResultatComparaison from "./components/v2/ResultatComparaison";
 import EcranEconomies from "./components/v2/EcranEconomies";
 import ChoixScan from "./components/v2/ChoixScan";
@@ -10928,6 +10930,18 @@ export default function App() {
     });
     return () => { annule = true; };
   }, [utilisateurConnecte, nbArchives]);
+
+  // Chantier 145 — évolution du prix de mes produits (courbes + baisses).
+  // Même rythme que les chiffres de la communauté. Échec : rien n'est affiché.
+  const [evolutionPrix, setEvolutionPrix] = useState(null);
+  useEffect(() => {
+    if (!utilisateurConnecte) return;
+    let annule = false;
+    supabase.rpc('evolution_de_mes_prix').then(({ data, error }) => {
+      if (!annule && !error && Array.isArray(data)) setEvolutionPrix(data);
+    });
+    return () => { annule = true; };
+  }, [utilisateurConnecte, nbArchives]);
   const relierArticle = (item, proposition) => updateItem({
     id: item.id, product: proposition.produit_nom, qty: item.qty,
     produit_id: proposition.produit_id, variante_produit_id: null,
@@ -11007,14 +11021,14 @@ export default function App() {
           )}
           <TabErrorBoundary key={tab}>
           {loaded && tab==="home" && gardeOuverte && <PageDeGarde libelleBouton="C'est parti" onCommencer={()=>setGardeOuverte(false)} />}
-          {loaded && tab==="home" && !gardeOuverte && <AccueilV2 pseudo={pseudo} items={items} archives={archives} setTab={setTab} communaute={statsCommunaute} onScanner={handleFlash} onReprendreScan={handleResumeScan}
+          {loaded && tab==="home" && !gardeOuverte && <AccueilV2 pseudo={pseudo} items={items} archives={archives} setTab={setTab} communaute={statsCommunaute} evolutionPrix={evolutionPrix} onScanner={handleFlash} onReprendreScan={handleResumeScan}
             ticketAScanner={dernierTicketAScanner} onOuvrirTicket={scanApresTicketAccessible && dernierTicketAScanner ? ()=>ouvrirHistoriqueTickets(dernierTicketAScanner.ticket) : null}
             sessionCourses={sessionCoursesAccessible ? sessionCoursesActive : null} onReprendreCourses={()=>setTab("courses")} onAbandonnerCourses={abandonnerSessionCourses}
             /* Chantier 140 — le bouton « Aide à compléter la base » ne s'affiche plus
                pour l'administrateur quand le réglage est coupé : sans ticket, un
                code-barres ne rapporte aucun prix (décision de François, 17/11). */
             microDisponible={estFrancois} contributionVisible={contributionCodesBarresActive} onContribuer={()=>setShowContributionCodeBarres(true)}/>}
-          {loaded && tab==="moi"       && <EcranMoi pseudo={pseudo} email={session?.user?.email} archives={archives} setTab={setTab} version={__APP_VERSION__}
+          {loaded && tab==="moi"       && <EcranMoi pseudo={pseudo} email={session?.user?.email} archives={archives} setTab={setTab} version={__APP_VERSION__} nbBaisses={produitsEnBaisse(evolutionPrix).length}
             onProfil={profilVisible ? ()=>setShowProfilSheet(true) : null} onCercle={()=>setShowCircleSheet(true)} invitationsEnAttente={invitationsEnAttente}
             onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFavoris={()=>setShowFavorisSheet(true)} onAide={()=>setShowFaqSheet(true)}
             onDeconnexion={handleLogout} estAdmin={isAdmin}/>}
@@ -11050,6 +11064,7 @@ export default function App() {
             showAppToast(`✓ ${arcItem.product} ajouté à ta liste`);
           }}/>}
           {loaded && tab==="economies" && <EcranEconomies archives={archives} onScanner={handleFlash}/>}
+          {loaded && tab==="evolution" && <EcranEvolutionPrix evolution={evolutionPrix} onScanner={handleFlash}/>}
           {/* #56.3b — jamais rendu pour un non-admin, même si tab="rejets" traîne en state */}
           {loaded && isAdmin && tab==="rejets" && <AdminRejetsCorePanel modeCoreActif={modeCoreActif} onToggleModeCore={setModeCoreActif} coreActifGlobal={coreActifGlobal}/>}
           </TabErrorBoundary>

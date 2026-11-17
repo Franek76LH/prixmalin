@@ -8,20 +8,20 @@ const FAMILLES = {
   list: 'list', catalog: 'list', micro: 'list', courses: 'list',
   prices: 'scan',
   compare: 'compare',
-  moi: 'moi', archive: 'moi', economies: 'moi', rejets: 'moi',
+  moi: 'moi', archive: 'moi', economies: 'moi', rejets: 'moi', evolution: 'moi',
 };
 
 const TITRES = {
   list: 'Ma liste', catalog: 'Ajouter des produits', micro: 'Dicter ma liste', courses: 'Mes courses',
   compare: 'Où c\'est le moins cher ?', prices: 'Scanner un ticket',
-  moi: 'Mon espace', archive: 'Mes tickets', economies: 'Mes économies', rejets: 'Rejets',
+  moi: 'Mon espace', archive: 'Mes tickets', economies: 'Mes économies', rejets: 'Rejets', evolution: 'Évolution de mes prix',
 };
 
 // Écran vers lequel la flèche « retour » ramène. Absent = écran de premier
 // niveau (il a sa propre entrée dans la barre du bas), donc pas de flèche.
 const PARENTS = {
   catalog: 'list', micro: 'list', courses: 'list',
-  archive: 'moi', economies: 'moi', rejets: 'moi',
+  archive: 'moi', economies: 'moi', rejets: 'moi', evolution: 'moi',
   prices: 'home',
 };
 
