@@ -9201,7 +9201,13 @@ export default function App() {
   const [needRefresh, setNeedRefresh] = useState(false);
   useEffect(() => onNeedRefresh(() => setNeedRefresh(true)), []);
 
-  const [tab, setTab]           = useState("home");
+  const [tab, setTabBrut]       = useState("home");
+  // Chantier 136 — la page de garde (tickets qui glissent) s'affiche à chaque
+  // ouverture de l'app, barre du bas visible. Le moindre changement d'écran —
+  // une icône du bas, le scan, « C'est parti » — la referme jusqu'à la
+  // prochaine ouverture.
+  const [gardeOuverte, setGardeOuverte] = useState(true);
+  const setTab = useCallback((ecran) => { setGardeOuverte(false); setTabBrut(ecran); }, []);
   // Chantier 130 — chaque écran s'ouvre en haut : sans ça, on arrivait sur
   // « Moi » déjà défilé parce que l'écran précédent l'était.
   useEffect(() => { window.scrollTo(0, 0); }, [tab]);
@@ -10960,7 +10966,8 @@ export default function App() {
             </div>
           )}
           <TabErrorBoundary key={tab}>
-          {loaded && tab==="home"      && <AccueilV2 pseudo={pseudo} items={items} archives={archives} setTab={setTab} onScanner={handleFlash} onReprendreScan={handleResumeScan}
+          {loaded && tab==="home" && gardeOuverte && <PageDeGarde avecBarreDuBas libelleBouton="C'est parti" onCommencer={()=>setGardeOuverte(false)} />}
+          {loaded && tab==="home" && !gardeOuverte && <AccueilV2 pseudo={pseudo} items={items} archives={archives} setTab={setTab} onScanner={handleFlash} onReprendreScan={handleResumeScan}
             ticketAScanner={dernierTicketAScanner} onOuvrirTicket={estFrancois && dernierTicketAScanner ? ()=>ouvrirHistoriqueTickets(dernierTicketAScanner.ticket) : null}
             sessionCourses={sessionCoursesAccessible ? sessionCoursesActive : null} onReprendreCourses={()=>setTab("courses")} onAbandonnerCourses={abandonnerSessionCourses}
             microDisponible={estFrancois} contributionVisible={contributionCodesBarresActive || isAdmin} onContribuer={()=>setShowContributionCodeBarres(true)}/>}
@@ -11004,7 +11011,7 @@ export default function App() {
           {loaded && isAdmin && tab==="rejets" && <AdminRejetsCorePanel modeCoreActif={modeCoreActif} onToggleModeCore={setModeCoreActif} coreActifGlobal={coreActifGlobal}/>}
           </TabErrorBoundary>
         </div>
-        <BarreNavigation tab={tab} setTab={setTab} onScanner={handleFlash} nbListe={items.filter(i=>!i.checked).length} pastilleMoi={invitationsEnAttente>0}/>
+        <BarreNavigation tab={tab} setTab={setTab} onScanner={()=>{ setGardeOuverte(false); handleFlash(); }} nbListe={items.filter(i=>!i.checked).length} pastilleMoi={invitationsEnAttente>0}/>
         {/* Chantier #73 + "Scan code-barres" 3B — accès discrets réservés admin
             (isAdmin via la RPC est_administrateur() / app_metadata.role==='admin'),
             jamais dans la TabBar, invisibles pour tout autre utilisateur en prod.

@@ -60,7 +60,11 @@ function Ticket({ ticket }) {
   );
 }
 
-export default function PageDeGarde({ onCommencer, onDejaUnCompte }) {
+// Deux usages :
+// - pas connecté : « Commencer » (créer un compte) + « J'ai déjà un compte » ;
+// - connecté, à chaque ouverture de l'app (chantier 136) : un seul bouton, et
+//   la barre du bas reste visible par-dessus (`avecBarreDuBas`).
+export default function PageDeGarde({ onCommencer, onDejaUnCompte = null, libelleBouton = 'Commencer', avecBarreDuBas = false }) {
   return (
     <div style={{ position: 'relative', minHeight: '100dvh', maxWidth: 430, margin: '0 auto', overflow: 'hidden', background: '#14060A' }}>
       <style>{`
@@ -82,7 +86,7 @@ export default function PageDeGarde({ onCommencer, onDejaUnCompte }) {
       </div>
       <div aria-hidden="true" style={{ position: 'absolute', inset: 0, background: 'rgba(20,6,10,0.66)' }} />
 
-      <div style={{ position: 'relative', minHeight: '100dvh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 28px', textAlign: 'center', boxSizing: 'border-box' }}>
+      <div style={{ position: 'relative', minHeight: '100dvh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: avecBarreDuBas ? '0 28px 96px' : '0 28px', textAlign: 'center', boxSizing: 'border-box' }}>
         {/* Un fond plus sombre juste derrière le texte : il reste lisible
             quel que soit le ticket qui passe dessous. */}
         <div style={{ width: '100%', background: 'rgba(20,6,10,0.82)', borderRadius: 26, padding: '30px 20px 12px', boxSizing: 'border-box' }}>
@@ -93,11 +97,13 @@ export default function PageDeGarde({ onCommencer, onDejaUnCompte }) {
             Tes tickets de caisse te disent où ta liste coûte le moins cher.
           </p>
           <button onClick={onCommencer} style={{ width: '100%', border: 'none', background: T.rouge, color: '#fff', borderRadius: 16, padding: 16, fontFamily: T.police, fontWeight: 900, fontSize: 17, cursor: 'pointer' }}>
-            Commencer
+            {libelleBouton}
           </button>
-          <button onClick={onDejaUnCompte} style={{ border: 'none', background: 'none', color: '#fff', padding: '16px 12px', fontFamily: T.police, fontWeight: 800, fontSize: 15, cursor: 'pointer', textDecoration: 'underline', textUnderlineOffset: 4 }}>
-            J'ai déjà un compte
-          </button>
+{onDejaUnCompte ? (
+            <button onClick={onDejaUnCompte} style={{ border: 'none', background: 'none', color: '#fff', padding: '16px 12px', fontFamily: T.police, fontWeight: 800, fontSize: 15, cursor: 'pointer', textDecoration: 'underline', textUnderlineOffset: 4 }}>
+              J'ai déjà un compte
+            </button>
+          ) : <div style={{ height: 18 }} />}
         </div>
       </div>
     </div>
