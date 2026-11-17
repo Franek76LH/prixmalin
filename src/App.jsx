@@ -4432,7 +4432,7 @@ function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab }) {
       // garder la forme attendue par l'affichage et la navigation.
       const COLS = 'id, nom_reference, famille, sous_famille, sous_categorie_id, sous_categories(id, nom, categorie_id, categories(id, nom, slug, icone))';
       const { data: matches, error: errRpc } = await supabase
-        .rpc('rechercher_produits_catalogue', { p_terme: q });
+        .rpc('rechercher_produits_catalogue_v2', { p_terme: q });
       if (mySeq !== searchSeq.current) return; // réponse obsolète, ignorée
       if (errRpc) { setSearchError("Recherche impossible."); setSearching(false); return; }
       const ids = (matches || []).map(m => m.produit_id);
@@ -8447,7 +8447,7 @@ function MicroLienSheet({ element, onClose, onResolu, onIntrouvable }) {
     try {
       const COLS = 'id, nom_reference, famille, sous_famille, sous_categorie_id, sous_categories(id, nom, categorie_id, categories(id, nom, slug, icone))';
       const { data: matches, error: errRpc } = await supabase
-        .rpc('rechercher_produits_catalogue', { p_terme: q });
+        .rpc('rechercher_produits_catalogue_v2', { p_terme: q });
       if (mySeq !== seq.current) return;
       if (errRpc) { setSearchErr("Recherche impossible."); setSearching(false); return; }
       const ids = (matches || []).map(m => m.produit_id);
@@ -8626,7 +8626,7 @@ function MicroTab({ onAdd, setTab }) {
   // (renommé, relié à la main, marqué introuvable).
   const lierAutomatiquement = useCallback(async (elements) => {
     const chercher = async (terme) => {
-      const { data, error } = await supabase.rpc('rechercher_produits_catalogue', { p_terme: terme });
+      const { data, error } = await supabase.rpc('rechercher_produits_catalogue_v2', { p_terme: terme });
       if (error) throw error;
       return data || [];
     };
