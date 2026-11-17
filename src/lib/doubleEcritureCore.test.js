@@ -175,3 +175,21 @@ describe('envoyerTicketCore — montant_total = total imprimé (chantier 118)', 
     expect(montantTotalImprime(59.4300001)).toBe(59.43);
   });
 });
+
+// Chantier 120 — remise de ligne transmise telle quelle, seulement si elle existe.
+describe('envoyerTicketCore — remise de ligne (chantier 120)', () => {
+  beforeEach(() => vi.clearAllMocks());
+  it('remise > 0 transmise sur sa ligne ; sans remise, la clé est ABSENTE (scan photo inchangé)', async () => {
+    supabase.rpc.mockResolvedValue({ data: { statut: 'ok' }, error: null });
+    await envoyerTicketCore([
+      { id: 1, product: 'Lessive', libelle_ticket: 'LESSIVE X', qty: 1, price: 4.29, remise: 2.15 },
+      { id: 2, product: 'Pain', libelle_ticket: 'PAIN', qty: 1, price: 1.1 },
+      { id: 3, product: 'Eau', libelle_ticket: 'EAU', qty: 1, price: 0.5, remise: 0 },
+    ], { magasinId: 'm1', totalTicket: 3.74 });
+    const lignes = supabase.rpc.mock.calls[0][1].p_ticket.lignes;
+    expect(lignes[0].remise).toBe(2.15);
+    expect('remise' in lignes[1]).toBe(false);
+    expect('remise' in lignes[2]).toBe(false);
+    expect(lignes[0].prix_unitaire).toBe(4.29); // prix AVANT remise : la base calcule le net
+  });
+});

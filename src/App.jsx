@@ -40,7 +40,10 @@ import AdminRejetsCorePanel from "./components/admin/AdminRejetsCorePanel";
 // « À valider »), code et configuration inchangés.
 import BarcodeScannerSheet from "./components/BarcodeScannerSheet";
 // Chantier 108 — contrôle de cohérence de la lecture d'un ticket.
-import { controlerCoherenceTicket, controlerDateTicket, NIVEAU_BLOCAGE, NIVEAU_AVERTISSEMENT } from "./lib/coherenceTicket";
+import { controlerCoherenceTicket, controlerDateTicket, NIVEAU_BLOCAGE, NIVEAU_AVERTISSEMENT, DATE_TROP_ANCIENNE } from "./lib/coherenceTicket";
+// Chantier 120 — import de tickets dématérialisés (fichier, PDF, captures).
+import ImportFichierSheet from "./components/ImportFichierSheet";
+import { affichageRemise } from "./lib/importTicketFichier";
 import { EcranLectureRefusee, EcranLectureDouteuse, BandeauLectureIncomplete, ConfirmationDateTicket } from "./components/ControleLectureTicket";
 // Chantier 109 — lire la réponse de enregistrer_ticket_core au lieu de la jeter.
 import { interpreterResultatCore, NIVEAU_ECHEC, NIVEAU_INFO } from "./lib/resultatEcritureCore";
@@ -1381,6 +1384,11 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     try {
       controle = controlerCoherenceTicket(parsed);
       controleDate = controlerDateTicket(parsed?.date);
+      // Chantier 120 — un ticket IMPORTÉ a déjà passé le garde-fou des 6 mois
+      // (ImportFichierSheet) : un e-ticket de 4 mois (Leclerc Drive) est
+      // légitime, on ne propose pas de le redater à aujourd'hui. Une date
+      // FUTURE reste signalée comme avant.
+      if (parsed?.origine === 'import_fichier' && controleDate?.raison === DATE_TROP_ANCIENNE) controleDate = null;
     } catch (e) {
       console.error('[C108] contrôle de cohérence du ticket :', e);
       setAvertissementLecture(null);
@@ -1937,6 +1945,8 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
       store_address:storeLocation.trim(),
       store_id:     resolvedStoreId,
       price:        p.price,
+      // Chantier 120 — remise de la ligne (0 pour un scan photo / une v13).
+      remise:       Number(p.remise) > 0 ? Number(p.remise) : 0,
       date:         result?.date?new Date(result.date).toISOString():new Date().toISOString(),
       share:        idsToShare.has(p.id),
     }));
@@ -2268,6 +2278,12 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   on prévient, on n'empêche rien. Et une date invraisemblable
                   ne s'enregistre jamais en silence. */}
               <BandeauLectureIncomplete controle={avertissementLecture} />
+              {/* Chantier 120 — des captures n'ont pas pu être raccordées. */}
+              {result?.captures_peut_etre_incompletes === true && (
+                <div style={{ background:"#FFF8E1", border:"1px solid #F0DFA0", borderRadius:12, padding:"12px 14px", marginBottom:16, fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:800, color:"#7A6000" }}>
+                  ⚠️ Captures peut-être incomplètes — vérifie les lignes
+                </div>
+              )}
               <ConfirmationDateTicket
                 controleDate={dateAConfirmer}
                 onGarder={retenirDateTicket}
@@ -2716,6 +2732,12 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                   on prévient, on n'empêche rien. Et une date invraisemblable
                   ne s'enregistre jamais en silence. */}
               <BandeauLectureIncomplete controle={avertissementLecture} />
+              {/* Chantier 120 — des captures n'ont pas pu être raccordées. */}
+              {result?.captures_peut_etre_incompletes === true && (
+                <div style={{ background:"#FFF8E1", border:"1px solid #F0DFA0", borderRadius:12, padding:"12px 14px", marginBottom:16, fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:800, color:"#7A6000" }}>
+                  ⚠️ Captures peut-être incomplètes — vérifie les lignes
+                </div>
+              )}
               <ConfirmationDateTicket
                 controleDate={dateAConfirmer}
                 onGarder={retenirDateTicket}
@@ -2749,6 +2771,10 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                             <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:900, color:"#B25900", background:"#FFE7C2", borderRadius:99, padding:"2px 8px" }}>⚠ à vérifier</span>
                           ) : null}
                         </div>
+                        {/* Chantier 120 — remise rattachée à la ligne. */}
+                        {affichageRemise(Number(p.price) * Number(p.qty || 1), p.remise) && (
+                          <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:800, color:C.green, marginTop:2 }}>{affichageRemise(Number(p.price) * Number(p.qty || 1), p.remise)}</div>
+                        )}
                       </div>
                       <input type="number" step="0.01" min="0" value={p.price} onChange={e=>updatePrice(p.id,e.target.value)}
                         style={{ width:68, padding:"6px 8px", textAlign:"right", borderRadius:8, border:`2px solid ${C.orange}`, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.orange, outline:"none" }} />
@@ -2829,6 +2855,10 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                               <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:900, color:"#B25900", background:"#FFE7C2", borderRadius:99, padding:"2px 8px" }}>⚠ à vérifier</span>
                             ) : null}
                           </div>
+                          {/* Chantier 120 — remise rattachée à la ligne. */}
+                          {affichageRemise(Number(p.price) * Number(p.qty || 1), p.remise) && (
+                            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:800, color:C.green, marginTop:2 }}>{affichageRemise(Number(p.price) * Number(p.qty || 1), p.remise)}</div>
+                          )}
                         </div>
                         <div style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0 }}>
                           <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.orange }}>{p.price.toFixed(2)} €</div>
@@ -8117,7 +8147,9 @@ function MultiPhotoSheet({ onClose, refProducts, onSuccess }) {
 }
 
 // ── SCAN CHOIX SHEET ─────────────────────────────────────────────────────────
-function ScanChoixSheet({ onClose, onUnePhoto, onPlusieursPhotos, onAutresOptions }) {
+// Chantier 120 — onImporterFichier (null = bouton masqué) : import d'un ticket
+// dématérialisé (image longue, PDF, captures). Réservé à François pour l'instant.
+function ScanChoixSheet({ onClose, onUnePhoto, onPlusieursPhotos, onAutresOptions, onImporterFichier = null }) {
   const F = "'Nunito',sans-serif";
   return (
     <div
@@ -8172,6 +8204,18 @@ function ScanChoixSheet({ onClose, onUnePhoto, onPlusieursPhotos, onAutresOption
               </span>
             </button>
           </div>
+
+          {onImporterFichier && (
+            <button onClick={onImporterFichier}
+              style={{ width:"100%", marginBottom:16, padding:"14px 16px", border:"2px solid #4A90D9", borderRadius:16,
+                       background:"#F2F7FF", cursor:"pointer", display:"flex", alignItems:"center", gap:12, textAlign:"left" }}>
+              <span style={{ fontSize:26 }}>📄</span>
+              <span style={{ flex:1 }}>
+                <span style={{ display:"block", fontFamily:F, fontWeight:900, fontSize:16, color:"#1F5FA8" }}>Importer un ticket</span>
+                <span style={{ display:"block", fontFamily:F, fontSize:12, color:C.textLight, marginTop:2 }}>Fichier, PDF ou captures d'écran (Lidl Plus, drive…)</span>
+              </span>
+            </button>
+          )}
 
           <div style={{ fontFamily:F, fontSize:12, color:C.textLight,
                         textAlign:"center", lineHeight:1.6, padding:"0 8px", marginBottom:16 }}>
@@ -9957,6 +10001,8 @@ export default function App() {
   const [autoOpenCamera, setAutoOpenCamera] = useState(false);
   const [showScanChoix, setShowScanChoix]  = useState(false);
   const [showMultiPhoto, setShowMultiPhoto] = useState(false);
+  // Chantier 120 — import d'un ticket depuis un fichier / PDF / captures (François).
+  const [showImportFichier, setShowImportFichier] = useState(false);
   const [showAutresOptions, setShowAutresOptions] = useState(false);
   const [showManualEntryFromScan, setShowManualEntryFromScan] = useState(false);
   const [showGalleryImportFromScan, setShowGalleryImportFromScan] = useState(false);
@@ -11640,6 +11686,16 @@ export default function App() {
             onUnePhoto={handleFlashConfirmed}
             onPlusieursPhotos={() => { setShowScanChoix(false); setShowMultiPhoto(true); }}
             onAutresOptions={() => { setShowScanChoix(false); setShowAutresOptions(true); }}
+            onImporterFichier={estFrancois ? () => { setShowScanChoix(false); setShowImportFichier(true); } : null}
+          />
+        )}
+        {/* Chantier 120 — import d'un ticket dématérialisé : même aval que
+            « Grand ticket » (résultat -> onglet Prix -> ImportTicketSheet). */}
+        {showImportFichier && estFrancois && (
+          <ImportFichierSheet
+            onClose={() => setShowImportFichier(false)}
+            refProducts={produitsRef.map(p => ({ nom: p.produit_generique, categorie: p.sous_categorie }))}
+            onSuccess={(result) => { setShowImportFichier(false); setAutoImportResult(result); setTab("prices"); }}
           />
         )}
         {showMultiPhoto && (

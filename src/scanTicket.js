@@ -293,6 +293,32 @@ export const MESSAGES_SCAN = {
   service_indisponible: "Le service de lecture est momentanément indisponible — ta photo n'y est pour rien. Réessaie dans un instant, ou passe en saisie manuelle.",
 };
 
+// Chantier 120 — lecture d'un ticket IMPORTÉ (fichier, PDF, captures). Une
+// seule image -> scanTicketRobuste, appel strictement identique au scan photo
+// (champ imageBase64). Plusieurs -> champ imagesBase64, avec le même réessai
+// automatique et les mêmes statuts honnêtes que le chantier 98. Ne throw jamais.
+// Intégration 120 + 121 : une image importée seule passe par la MÊME vérification
+// du sens que la photo (une photo de la galerie peut être couchée) ; `redresser`
+// est injectable pour les tests, comme dans scanTicketRobuste.
+export async function scanTicketsImportes(imagesBase64, refProducts = [], { essais = 2, redresser } = {}) {
+  const images = (imagesBase64 || []).filter(Boolean);
+  if (images.length === 0) return { statut: 'service_indisponible', message: MESSAGES_SCAN.service_indisponible };
+  if (images.length === 1) return scanTicketRobuste(images[0], refProducts, redresser ? { essais, redresser } : { essais });
+  let dernierResultat = null;
+  for (let i = 0; i < essais; i++) {
+    try {
+      const resultat = await scanMultipleTicketsWithClaude(images, refProducts);
+      dernierResultat = resultat;
+      if (filtrerProduitsExploitables(resultat?.products).length > 0) return { statut: 'ok', resultat };
+    } catch (e) {
+      console.error('[C120] lecture des images importées :', e?.message || e);
+    }
+  }
+  return dernierResultat
+    ? { statut: 'lecture_vide', resultat: dernierResultat }
+    : { statut: 'service_indisponible', message: MESSAGES_SCAN.service_indisponible };
+}
+
 export async function scanMultipleTicketsWithClaude(imagesBase64, refProducts = []) {
   return appelerScanTicket({ imagesBase64, refProducts });
 }

@@ -172,6 +172,11 @@ export default defineConfig(({ command, mode }) => ({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        // Chantier 120 — pdfjs (lecture des tickets PDF importés) n'est chargé
+        // qu'à la demande : on ne le met PAS dans le cache hors ligne, sinon
+        // chaque utilisateur le téléchargerait (~400 Ko) pour une fonction
+        // réservée. Le précache reste celui d'avant le chantier.
+        globIgnores: ['**/assets/pdf-*.js', '**/assets/pdf.worker*'],
       },
     }),
   ],
