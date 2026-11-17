@@ -42,7 +42,14 @@ async function enrichirAvecReferenceMarche(prixRows) {
   const comparables = await chargerPrixComparables(produitIds, { staleCutoffISO: cutoffISO });
 
   return prixRows.map(p => {
-    const alternatives = comparables.filter(c => c.produit_id === p.produit_id && c.magasin_id !== p.magasin_id);
+    // Chantier 131 — on ne compare QUE le même produit dans le même format
+    // (même variante). Avant, tous les formats d'un produit étaient mélangés :
+    // une canette payée 1,95 € comparée à des packs donnait « 18,30 €
+    // d'économie ». Format inconnu = pas de référence, donc pas d'économie
+    // affichée (jamais un chiffre inventé).
+    const alternatives = p.variante_produit_id == null ? [] : comparables.filter(c =>
+      c.produit_id === p.produit_id && c.magasin_id !== p.magasin_id
+      && c.variante_produit_id === p.variante_produit_id);
     const prixReferenceMarche = alternatives.length
       ? alternatives.reduce((somme, c) => somme + Number(c.prix_total), 0) / alternatives.length
       : null;
@@ -64,7 +71,7 @@ export async function chargerEtCalculerEconomiesConfirmeesCore({ lignesInjectees
 
   const { data: prixTicket, error } = await supabase
     .from('prix')
-    .select('produit_id, magasin_id, prix_total, ligne_ticket_id')
+    .select('produit_id, variante_produit_id, magasin_id, prix_total, ligne_ticket_id')
     .eq('source', 'ticket');
 
   if (error || !prixTicket?.length) {
@@ -100,7 +107,7 @@ export async function calculerRealizedSavingTicket({ utilisateurId }) {
 
   const { data: prixTicket, error } = await supabase
     .from('prix')
-    .select('produit_id, magasin_id, prix_total, ligne_ticket_id')
+    .select('produit_id, variante_produit_id, magasin_id, prix_total, ligne_ticket_id')
     .in('ligne_ticket_id', ligneIds);
   if (error || !prixTicket?.length) return { total: 0, lignes: [], simule: false };
 

@@ -63,3 +63,18 @@ export function euros(n) {
   const [entier, cents] = Math.abs(Number(n) || 0).toFixed(2).split('.');
   return `${n < 0 ? '−' : ''}${entier.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')},${cents} €`;
 }
+
+// Chantier 131 — ce ticket est-il déjà dans l'historique ? Même jour, même
+// magasin, même total, déjà marqué « ticket scanné ». Sert à ne pas créer une
+// deuxième ligne quand on rescanne un ticket (17 doublons retirés le 17/11).
+export function archiveDejaPresente(archives, nouvelle) {
+  const jour = String(nouvelle?.date || '').substring(0, 10);
+  const magasin = sansAccents(nouvelle?.store?.name).trim();
+  const total = Number(nouvelle?.total);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(jour) || !magasin || !(total > 0)) return null;
+  return (archives || []).find(a =>
+    a?.ticket_scanned
+    && String(a.date || '').substring(0, 10) === jour
+    && sansAccents(a.store?.name).trim() === magasin
+    && Math.abs(Number(a.total) - total) < 0.005) || null;
+}

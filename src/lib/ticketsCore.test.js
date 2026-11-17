@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { totalTicket, totalLigne, ticketCorrespond, ticketsParMois, bilanTickets, euros } from './ticketsCore';
+import { archiveDejaPresente, totalTicket, totalLigne, ticketCorrespond, ticketsParMois, bilanTickets, euros } from './ticketsCore';
 
 const t = (id, date, total, items = [], nom = 'Netto') => ({ id, date, total, items, store: { name: nom } });
 
@@ -67,5 +67,25 @@ describe('euros', () => {
   it('virgule et espace des milliers', () => {
     expect(euros(2745)).toBe('2 745,00 €');
     expect(euros(3.5)).toBe('3,50 €');
+  });
+});
+
+describe('archiveDejaPresente (chantier 131)', () => {
+  const dansHistorique = [{ id: 122, date: '2026-11-09T00:00:00+00:00', total: 24.84, ticket_scanned: true, store: { name: 'Netto' } }];
+  const nouveau = (plus = {}) => ({ date: '2026-11-09T15:14:17.507Z', total: 24.84, store: { name: 'netto' }, ...plus });
+  it('reconnaît le même ticket rescanné (même jour, même magasin, même total)', () => {
+    expect(archiveDejaPresente(dansHistorique, nouveau())?.id).toBe(122);
+  });
+  it('un autre total, un autre jour ou un autre magasin : ce n’est pas le même ticket', () => {
+    expect(archiveDejaPresente(dansHistorique, nouveau({ total: 24.85 }))).toBeNull();
+    expect(archiveDejaPresente(dansHistorique, nouveau({ date: '2026-11-10T08:00:00Z' }))).toBeNull();
+    expect(archiveDejaPresente(dansHistorique, nouveau({ store: { name: 'Utile' } }))).toBeNull();
+  });
+  it('une liste validée sans ticket scanné ne compte pas', () => {
+    expect(archiveDejaPresente([{ ...dansHistorique[0], ticket_scanned: false }], nouveau())).toBeNull();
+  });
+  it('ticket sans total ou sans date : on ne conclut rien', () => {
+    expect(archiveDejaPresente(dansHistorique, nouveau({ total: 0 }))).toBeNull();
+    expect(archiveDejaPresente(dansHistorique, { store: { name: 'Netto' }, total: 24.84 })).toBeNull();
   });
 });

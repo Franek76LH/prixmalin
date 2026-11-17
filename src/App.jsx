@@ -63,6 +63,7 @@ import ListeCourses from "./components/v2/ListeCourses";
 // Chantier 126 — produits de la liste en texte libre : fiches proposées.
 import ProduitsARelier from "./components/v2/ProduitsARelier";
 import MesTickets from "./components/v2/MesTickets";
+import { archiveDejaPresente } from "./lib/ticketsCore";
 import ResultatComparaison from "./components/v2/ResultatComparaison";
 import EcranEconomies from "./components/v2/EcranEconomies";
 import ChoixScan from "./components/v2/ChoixScan";
@@ -5290,8 +5291,12 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
       // Chantier 112 — création vérifiée : si elle échoue, le ticket est bien
       // enregistré côté Core mais il n'apparaîtra pas dans les archives, et il
       // faut le dire.
-      const creation = await onCreateArchive?.(newArc);
-      if (creation && creation.ok === false) archiveOk = false;
+      // Chantier 131 — ticket rescanné : il est déjà dans l'historique (même
+      // jour, même magasin, même total). On n'ajoute pas une deuxième ligne.
+      if (!archiveDejaPresente(archives, newArc)) {
+        const creation = await onCreateArchive?.(newArc);
+        if (creation && creation.ok === false) archiveOk = false;
+      }
     }
 
     let updated = [...priceDB];
@@ -10832,6 +10837,8 @@ export default function App() {
         realized_saving:  0,
         ticket_scanned:   true,
       };
+      // Chantier 131 — ticket rescanné déjà dans l'historique : pas de doublon.
+      if (!archiveDejaPresente(archives, newArc)) {
       // Chantier 112 — la création est ATTENDUE (elle était lancée sans être
       // suivie : son échec ne produisait qu'un toast, pendant que le message de
       // succès s'affichait juste après). Son résultat décide du message final.
@@ -10844,6 +10851,7 @@ export default function App() {
         const {data:all}=await supabase.from('archives').select('*').order('date');
         if(all) setArchives(all);
         setShowRating({id:creee.id,store:newArc.store});
+      }
       }
     }
     let updated = [...priceDB];

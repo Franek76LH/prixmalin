@@ -86,16 +86,16 @@ describe('calculerRealizedSavingTicket (#56.6 — scopé à un seul ticket)', ()
       if (table === 'lignes_ticket') return creerBuilder({ data: [{ id: 'l1' }, { id: 'l2' }], error: null });
       if (table === 'prix') return creerBuilder({
         data: [
-          { produit_id: 'p1', magasin_id: 'm1', prix_total: 0.95, ligne_ticket_id: 'l1' },
-          { produit_id: 'p2', magasin_id: 'm1', prix_total: 4.80, ligne_ticket_id: 'l2' },
+          { produit_id: 'p1', variante_produit_id: 'v1', magasin_id: 'm1', prix_total: 0.95, ligne_ticket_id: 'l1' },
+          { produit_id: 'p2', variante_produit_id: 'v2', magasin_id: 'm1', prix_total: 4.80, ligne_ticket_id: 'l2' },
         ],
         error: null,
       });
       throw new Error(`table inattendue : ${table}`);
     });
     chargerPrixComparables.mockResolvedValue([
-      { produit_id: 'p1', magasin_id: 'm2', prix_total: 1.15 },
-      { produit_id: 'p2', magasin_id: 'm2', prix_total: 4.20 },
+      { produit_id: 'p1', variante_produit_id: 'v1', magasin_id: 'm2', prix_total: 1.15 },
+      { produit_id: 'p2', variante_produit_id: 'v2', magasin_id: 'm2', prix_total: 4.20 },
     ]);
 
     const resultat = await calculerRealizedSavingTicket({ utilisateurId: 'u1' });
@@ -103,5 +103,29 @@ describe('calculerRealizedSavingTicket (#56.6 — scopé à un seul ticket)', ()
     expect(resultat.total).toBeCloseTo(-0.40); // +0.20 (lait) - 0.60 (café)
     expect(resultat.lignes).toHaveLength(2);
     expect(supabase.from).toHaveBeenCalledWith('prix');
+  });
+
+  // Chantier 131 — une canette à 1,95 € comparée à un pack donnait « 18,30 €
+  // d'économie ». On ne compare que le même format (même variante).
+  it('ne compare jamais deux formats différents du même produit', async () => {
+    supabase.from.mockImplementation((table) => {
+      if (table === 'tickets') return creerBuilder({ data: { id: 't1' }, error: null });
+      if (table === 'lignes_ticket') return creerBuilder({ data: [{ id: 'l1' }, { id: 'l2' }], error: null });
+      if (table === 'prix') return creerBuilder({
+        data: [
+          { produit_id: 'cola', variante_produit_id: 'canette', magasin_id: 'm1', prix_total: 1.95, ligne_ticket_id: 'l1' },
+          { produit_id: 'riz', variante_produit_id: null, magasin_id: 'm1', prix_total: 1.34, ligne_ticket_id: 'l2' },
+        ],
+        error: null,
+      });
+      throw new Error(`table inattendue : ${table}`);
+    });
+    chargerPrixComparables.mockResolvedValue([
+      { produit_id: 'cola', variante_produit_id: 'pack24', magasin_id: 'm2', prix_total: 20.25 },
+      { produit_id: 'riz', variante_produit_id: 'kilo', magasin_id: 'm2', prix_total: 2.58 },
+    ]);
+    const resultat = await calculerRealizedSavingTicket({ utilisateurId: 'u1' });
+    expect(resultat.total).toBe(0);
+    expect(resultat.lignes.every(l => l.economie === null)).toBe(true);
   });
 });
