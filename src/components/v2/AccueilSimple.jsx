@@ -185,6 +185,18 @@ export default function AccueilSimple({
           )}
         </Carte>
 
+        {/* Chantier 134 — le catalogue a son entrée à lui sur l'accueil : sans
+            elle, on ne le trouvait qu'en passant par « Ajouter des produits ». */}
+        <Carte onClick={() => setTab('catalog')} style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <span style={{ width: 46, height: 46, borderRadius: 14, background: T.jaunePale, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 23, flexShrink: 0 }}>🛒</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontFamily: T.police, fontWeight: 900, fontSize: 15, color: T.texte }}>Parcourir les rayons</div>
+            <div style={{ fontFamily: T.police, fontSize: 12.5, color: T.texteDoux, marginTop: 2 }}>Tout le catalogue, rayon par rayon, avec les prix.</div>
+            <div aria-hidden="true" style={{ fontSize: 17, letterSpacing: 5, marginTop: 6 }}>🥦🥩🐟🥛🧂🍫🥤</div>
+          </div>
+          <IconeChevron width={20} height={20} style={{ color: T.texteLeger, flexShrink: 0 }} />
+        </Carte>
+
         {/* Scanner un ticket : ce qui nourrit les prix */}
         <Carte onClick={onScanner} style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <span style={{ width: 46, height: 46, borderRadius: 14, background: T.rougePale, color: T.rouge, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
