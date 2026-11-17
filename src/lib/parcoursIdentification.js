@@ -25,6 +25,7 @@ import {
   libelleProduitCree, RECHERCHE_CONNU, RECHERCHE_INCONNU, SOURCE_AUCUNE, normaliserCode,
   marquerSansCodeBarres,
 } from './scanDepuisHistorique';
+import { divergenceAssociation } from './coherenceAssociation';
 
 export const PHASE_CAMERA = 'camera';
 export const PHASE_RECHERCHE = 'recherche';
@@ -42,6 +43,19 @@ export const DUREE_SUCCES_MS = 1000;
 // une fiche fantôme. Quand personne ne connaît le code (« aucune info »), il
 // faut donc une SECONDE LECTURE IDENTIQUE avant de pouvoir créer.
 export const AVERTISSEMENT_AUCUNE_INFO = 'Produit inconnu partout. Vérifie que le code affiché est bien celui imprimé sous les barres du produit.';
+
+// Chantier 142 — garde-fou « ce produit ne ressemble pas à la ligne ».
+// Le code-barres prouve le PRODUIT, pas qu'il correspond à la LIGNE du ticket :
+// le 09/11, une bière scannée en face de « CHOU FLEUR PIECE » a été acceptée.
+// On compare donc le texte de caisse au nom et à la marque du produit trouvé
+// (même comparaison que les chantiers 105, 107 et 110). Aucun mot en commun :
+// on avertit, on n'interdit pas — une abréviation de caisse peut être très
+// éloignée du vrai nom. Rien à comparer : on se tait (une absence n'est pas
+// un désaccord).
+export function avertissementLigneDifferente(texteCaisse, fiche) {
+  if (!fiche || !divergenceAssociation({ libelleTicket: texteCaisse, nomProduit: fiche.nom, marque: fiche.marque })) return null;
+  return `Ce produit ne ressemble pas à la ligne du ticket « ${String(texteCaisse).trim()} ». Vérifie bien avant de confirmer.`;
+}
 
 export function doubleLectureRequise(recherche) {
   return recherche?.statut === RECHERCHE_INCONNU && recherche?.fiche?.source === SOURCE_AUCUNE;

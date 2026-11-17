@@ -11,7 +11,7 @@ import { useCallback, useEffect, useState } from 'react';
 import BarcodeScannerSheet from './BarcodeScannerSheet';
 import { cloudinaryFetch } from '../lib/photosProduits';
 import {
-  creerParcoursIdentification, PHRASE_ENGAGEMENT, AVERTISSEMENT_AUCUNE_INFO, doubleLectureRequise,
+  creerParcoursIdentification, PHRASE_ENGAGEMENT, AVERTISSEMENT_AUCUNE_INFO, doubleLectureRequise, avertissementLigneDifferente,
   PHASE_CAMERA, PHASE_RECHERCHE, PHASE_VERIFICATION, PHASE_REFUS, PHASE_ECRITURE, PHASE_SUCCES, PHASE_FIN,
 } from '../lib/parcoursIdentification';
 import { DUREE_ANNULATION_MS, SOURCE_BASE, SOURCE_OFF, SCAN_POIDS_VARIABLE, SCAN_ARCHIVE } from '../lib/scanDepuisHistorique';
@@ -187,6 +187,8 @@ export default function IdentifierProduitPlein({ lignes, ligneDepartId, deps, on
     // lecture identique du code (correctif du 09/11, 11128663 lu sur le rumsteck).
     const aucuneInfo = doubleLectureRequise(e.recherche);
     const relu = aucuneInfo && e.doubleLecture?.relu === true;
+    // Chantier 142 — produit sans rapport apparent avec la ligne du ticket.
+    const ligneDifferente = aucuneInfo ? null : avertissementLigneDifferente(p.texteCaisse(), f);
     corps = (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <PhotoVerification key={e.recherche?.code || 'x'} urlOff={f.photoOff} />
@@ -203,6 +205,11 @@ export default function IdentifierProduitPlein({ lignes, ligneDepartId, deps, on
           <div style={{ fontFamily: F, fontSize: 14, fontWeight: 800, color: '#FFD27A', background: 'rgba(255,176,32,0.12)', border: '1px solid rgba(255,176,32,0.4)', borderRadius: 12, padding: '10px 12px', lineHeight: 1.4 }}>
             ⚠ {AVERTISSEMENT_AUCUNE_INFO}
             {relu && <div style={{ marginTop: 6, color: '#9FE3B4' }}>✓ Code relu à l'identique.</div>}
+          </div>
+        )}
+        {ligneDifferente && (
+          <div role="alert" style={{ fontFamily: F, fontSize: 14, fontWeight: 800, color: '#FFD27A', background: 'rgba(255,176,32,0.12)', border: '1px solid rgba(255,176,32,0.4)', borderRadius: 12, padding: '10px 12px', lineHeight: 1.4 }}>
+            ⚠ {ligneDifferente}
           </div>
         )}
         {e.message && (

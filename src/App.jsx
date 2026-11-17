@@ -9198,9 +9198,16 @@ export default function App() {
   useEffect(() => {
     if (!idPourReglageScan) return;
     let annule = false;
-    supabase.from('parametres_globaux').select('valeur').eq('cle', 'scan_apres_ticket_ouvert').maybeSingle()
-      .then(({ data, error }) => { if (!annule) setScanApresTicketOuvert(!error && data?.valeur === 'true'); },
-            () => { if (!annule) setScanApresTicketOuvert(false); });
+    // Deux réglages : « ouvert à tous » ('true'), ou une liste de testeurs
+    // (`scan_apres_ticket_testeurs` : identifiants de comptes séparés par des
+    // virgules). Chantier 142 : ouverture à Nico et Boucheman d'abord.
+    supabase.from('parametres_globaux').select('cle, valeur').in('cle', ['scan_apres_ticket_ouvert', 'scan_apres_ticket_testeurs'])
+      .then(({ data, error }) => {
+        if (annule) return;
+        const reglages = Object.fromEntries((!error && Array.isArray(data) ? data : []).map(r => [r.cle, r.valeur]));
+        const testeurs = String(reglages.scan_apres_ticket_testeurs || '').split(',').map(t => t.trim()).filter(Boolean);
+        setScanApresTicketOuvert(reglages.scan_apres_ticket_ouvert === 'true' || testeurs.includes(idPourReglageScan));
+      }, () => { if (!annule) setScanApresTicketOuvert(false); });
     return () => { annule = true; };
   }, [idPourReglageScan]);
   // Chantier 94 Lot 10 — flag gamification_visible (même principe) : le

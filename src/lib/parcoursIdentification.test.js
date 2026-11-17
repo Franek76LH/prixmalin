@@ -504,3 +504,22 @@ describe('lignes « sans code-barres » : hors de tous les compteurs', () => {
     expect(fileDepuis([RUMSTECK, { ...BANANE, sans_code_barres: true }, CHOU], 'l-rum').map(l => l.id)).toEqual(['l-rum', 'l-chou']);
   });
 });
+
+// Chantier 142 — garde-fou « ce produit ne ressemble pas à la ligne ».
+import { avertissementLigneDifferente } from './parcoursIdentification';
+describe('avertissementLigneDifferente (chantier 142)', () => {
+  it('avertit quand le produit n’a aucun mot en commun avec la ligne (la bière sur le chou-fleur du 09/11)', () => {
+    const message = avertissementLigneDifferente('CHOU FLEUR PIECE', { nom: 'Bière blonde', marque: '8.6' });
+    expect(message).toMatch(/ne ressemble pas/);
+    expect(message).toContain('CHOU FLEUR PIECE');
+  });
+  it('se tait quand un mot correspond (nom ou marque)', () => {
+    expect(avertissementLigneDifferente('MPG MOUSSE CAFE', { nom: 'Mousse au café', marque: 'Monoprix Gourmet' })).toBeNull();
+    expect(avertissementLigneDifferente('4*35,5 CL RED BULL R', { nom: 'Boisson énergisante', marque: 'Red Bull' })).toBeNull();
+  });
+  it('se tait quand il n’y a rien à comparer', () => {
+    expect(avertissementLigneDifferente('', { nom: 'Bière blonde' })).toBeNull();
+    expect(avertissementLigneDifferente('CHOU FLEUR', null)).toBeNull();
+    expect(avertissementLigneDifferente('CHOU FLEUR', {})).toBeNull();
+  });
+});
