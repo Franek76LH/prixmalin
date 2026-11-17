@@ -10966,7 +10966,7 @@ export default function App() {
             </div>
           )}
           <TabErrorBoundary key={tab}>
-          {loaded && tab==="home" && gardeOuverte && <PageDeGarde avecBarreDuBas libelleBouton="C'est parti" onCommencer={()=>setGardeOuverte(false)} />}
+          {loaded && tab==="home" && gardeOuverte && <PageDeGarde libelleBouton="C'est parti" onCommencer={()=>setGardeOuverte(false)} />}
           {loaded && tab==="home" && !gardeOuverte && <AccueilV2 pseudo={pseudo} items={items} archives={archives} setTab={setTab} onScanner={handleFlash} onReprendreScan={handleResumeScan}
             ticketAScanner={dernierTicketAScanner} onOuvrirTicket={estFrancois && dernierTicketAScanner ? ()=>ouvrirHistoriqueTickets(dernierTicketAScanner.ticket) : null}
             sessionCourses={sessionCoursesAccessible ? sessionCoursesActive : null} onReprendreCourses={()=>setTab("courses")} onAbandonnerCourses={abandonnerSessionCourses}
@@ -11011,7 +11011,9 @@ export default function App() {
           {loaded && isAdmin && tab==="rejets" && <AdminRejetsCorePanel modeCoreActif={modeCoreActif} onToggleModeCore={setModeCoreActif} coreActifGlobal={coreActifGlobal}/>}
           </TabErrorBoundary>
         </div>
-        <BarreNavigation tab={tab} setTab={setTab} onScanner={()=>{ setGardeOuverte(false); handleFlash(); }} nbListe={items.filter(i=>!i.checked).length} pastilleMoi={invitationsEnAttente>0}/>
+        {/* Chantier 137 — tant que la page de garde est là, pas de barre du
+            bas : on n'entre dans l'app qu'en appuyant sur « C'est parti ». */}
+        {!(gardeOuverte && tab==="home") && <BarreNavigation tab={tab} setTab={setTab} onScanner={()=>{ setGardeOuverte(false); handleFlash(); }} nbListe={items.filter(i=>!i.checked).length} pastilleMoi={invitationsEnAttente>0}/>}
         {/* Chantier #73 + "Scan code-barres" 3B — accès discrets réservés admin
             (isAdmin via la RPC est_administrateur() / app_metadata.role==='admin'),
             jamais dans la TabBar, invisibles pour tout autre utilisateur en prod.

@@ -97,8 +97,15 @@ export default function PageDeGarde({ onCommencer, onDejaUnCompte = null, libell
           <h1 style={{ margin: 0, fontFamily: T.police, fontWeight: 900, fontSize: 46, color: '#fff', letterSpacing: '-1.5px', lineHeight: 1 }}>
             Prix<span style={{ color: T.jaune }}>Malin</span>
           </h1>
-          <p style={{ fontFamily: T.police, fontWeight: 700, fontSize: 17, color: '#F1EFE8', margin: '14px 0 30px', lineHeight: 1.45 }}>
-            Tes tickets de caisse te disent où ta liste coûte le moins cher.
+{/* Chantier 137 — l'ancien message (« Tes tickets de caisse te disent
+              où ta liste coûte le moins cher ») laissait croire qu'il fallait
+              déjà avoir ses propres tickets. On dit d'abord ce que l'app fait
+              pour toi, puis d'où viennent les prix : de tout le monde. */}
+          <p style={{ fontFamily: T.police, fontWeight: 800, fontSize: 16, color: '#fff', margin: '16px 0 8px', lineHeight: 1.4 }}>
+            Fais ta liste de courses.<br />On te dit où elle coûte le moins cher.
+          </p>
+          <p style={{ fontFamily: T.police, fontWeight: 700, fontSize: 14, color: '#D3D1C7', margin: '0 0 26px', lineHeight: 1.45 }}>
+            Les prix viennent des tickets de caisse scannés par tous les utilisateurs.
           </p>
           <button onClick={onCommencer} style={{ width: '100%', border: 'none', background: T.rouge, color: '#fff', borderRadius: 16, padding: 16, fontFamily: T.police, fontWeight: 900, fontSize: 17, cursor: 'pointer' }}>
             {libelleBouton}
