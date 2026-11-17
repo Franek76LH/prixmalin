@@ -11,29 +11,47 @@
 //   l'animation s'arrête si le téléphone demande « moins d'animations ».
 import { T } from './theme';
 
-const ENSEIGNES = ['Leclerc', 'Carrefour', 'Lidl', 'Intermarché', 'Netto', 'Auchan', 'Super U', 'Monoprix', 'Aldi', 'Casino'];
+// Chantier 138 — les grandes enseignes NATIONALES, pas seulement celles déjà
+// scannées dans l'app : la page de garde parle à tout le monde, partout en France.
+const ENSEIGNES = [
+  'E.Leclerc', 'Carrefour', 'Intermarché', 'Super U', 'Auchan', 'Lidl', 'Aldi', 'Netto', 'Casino',
+  'Monoprix', 'Franprix', 'Carrefour Market', 'Carrefour City', 'Hyper U', 'U Express', 'Picard',
+  'Biocoop', 'Grand Frais', 'Naturalia', 'La Vie Claire', 'Match', 'Colruyt', 'Spar', 'G20',
+  'Costco', 'Leader Price', 'Vival',
+];
 const PRODUITS = ['Lait 1L', 'Pâtes 500g', 'Beurre', 'Emmental', 'Riz 1kg', 'Café', 'Yaourts x12', 'Bananes', 'Jambon', 'Œufs x6', 'Huile 1L', 'Farine', 'Tomates', 'Chocolat', 'Eau 6x1L'];
-const DUREES = [26, 19, 31]; // secondes pour un tour complet, par colonne
+const DUREES = [34, 25, 40]; // secondes pour un tour complet, par colonne
 
 const prix = (n) => n.toFixed(2).replace('.', ',');
 
 // Tirage toujours identique (pas de hasard à l'affichage).
-function fabriquerColonnes(nbColonnes = 3, ticketsParColonne = 7) {
+function fabriquerColonnes(nbColonnes = 3, ticketsParColonne = 9) {
   let graine = 7;
   const alea = () => { graine = (graine * 9301 + 49297) % 233280; return graine / 233280; };
+  // Les enseignes sont mélangées puis distribuées une à une : chacune apparaît
+  // (27 enseignes pour 27 tickets), au lieu d'en tirer au sort avec des redites.
+  const melange = [...ENSEIGNES];
+  for (let i = melange.length - 1; i > 0; i--) {
+    const j = Math.floor(alea() * (i + 1));
+    [melange[i], melange[j]] = [melange[j], melange[i]];
+  }
+  let rang = 0;
   const colonnes = [];
   for (let c = 0; c < nbColonnes; c++) {
     const tickets = [];
     for (let k = 0; k < ticketsParColonne; k++) {
       const nb = 3 + Math.floor(alea() * 4);
-      const enseigne = ENSEIGNES[Math.floor(alea() * ENSEIGNES.length)];
+      const enseigne = melange[rang++ % melange.length];
       const bonPrix = Math.floor(alea() * nb);
       const lignes = [];
       let total = 0;
       for (let i = 0; i < nb; i++) {
         const montant = Math.round((0.6 + alea() * 4.2) * 100) / 100;
         total += montant;
-        lignes.push({ nom: PRODUITS[Math.floor(alea() * PRODUITS.length)], montant, bonPrix: i === bonPrix });
+        // Jamais deux fois le même produit sur un ticket.
+        let nom = PRODUITS[Math.floor(alea() * PRODUITS.length)];
+        while (lignes.some(l => l.nom === nom)) nom = PRODUITS[(PRODUITS.indexOf(nom) + 1) % PRODUITS.length];
+        lignes.push({ nom, montant, bonPrix: i === bonPrix });
       }
       tickets.push({ enseigne, lignes, total: Math.round(total * 100) / 100 });
     }
