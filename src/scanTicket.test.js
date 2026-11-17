@@ -305,17 +305,17 @@ describe('scanTicketsImportes', () => {
   beforeEach(() => vi.clearAllMocks());
   const OK = { store: 'Lidl', products: [{ name: 'Lait', price: 1.2 }] };
 
-  it('une seule image -> appel IDENTIQUE au scan photo (champ imageBase64)', async () => {
+  it('une seule image -> même parcours que le scan photo (champ imageBase64), avec le drapeau importFichier', async () => {
     supabase.functions.invoke.mockResolvedValue({ data: OK, error: null });
     const r = await scanTicketsImportes(['b64'], [], SANS_SENS);
     expect(r.statut).toBe('ok');
-    expect(supabase.functions.invoke).toHaveBeenCalledWith('scan-ticket', { body: { imageBase64: 'b64', refProducts: [] } });
+    expect(supabase.functions.invoke).toHaveBeenCalledWith('scan-ticket', { body: { imageBase64: 'b64', refProducts: [], importFichier: true } });
   });
 
   it('plusieurs images -> champ imagesBase64, dans l\'ordre', async () => {
     supabase.functions.invoke.mockResolvedValue({ data: OK, error: null });
     await scanTicketsImportes(['p1', 'p2', 'p3'], []);
-    expect(supabase.functions.invoke).toHaveBeenCalledWith('scan-ticket', { body: { imagesBase64: ['p1', 'p2', 'p3'], refProducts: [] } });
+    expect(supabase.functions.invoke).toHaveBeenCalledWith('scan-ticket', { body: { imagesBase64: ['p1', 'p2', 'p3'], refProducts: [], importFichier: true } });
   });
 
   it('plusieurs images : réessai automatique puis statut honnête, jamais d\'exception', async () => {

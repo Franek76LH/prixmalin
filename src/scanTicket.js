@@ -247,7 +247,9 @@ function rangCoherence(resultat) {
 // 'sens_incertain' / 'service_indisponible'). `onEtape('sens')` puis
 // `onEtape('lecture')` permettent à l'écran d'afficher le bon message
 // d'attente. `redresser` est injectable pour les tests.
-export async function scanTicketRobuste(imageBase64, refProducts = [], { essais = 2, onEtape = null, redresser = redresserPhoto } = {}) {
+// `importFichier` (chantier 120) : ajoute `importFichier: true` à la demande —
+// absent pour un scan photo, dont la demande reste exactement celle d'avant.
+export async function scanTicketRobuste(imageBase64, refProducts = [], { essais = 2, onEtape = null, redresser = redresserPhoto, importFichier = false } = {}) {
   const signaler = (etape) => { try { onEtape?.(etape); } catch { /* affichage seulement */ } };
   signaler('sens');
   const sens = await redresser(imageBase64);
@@ -257,7 +259,10 @@ export async function scanTicketRobuste(imageBase64, refProducts = [], { essais 
 
   const tentatives = await Promise.all(
     Array.from({ length: essais }, () =>
-      scanTicketWithClaude(imageBase64, refProducts).then(
+      (importFichier
+        ? appelerScanTicket({ imageBase64, refProducts, importFichier: true })
+        : scanTicketWithClaude(imageBase64, refProducts)
+      ).then(
         resultat => ({ ok: true, resultat }),
         erreur => ({ ok: false, erreur }),
       ),
@@ -303,11 +308,11 @@ export const MESSAGES_SCAN = {
 export async function scanTicketsImportes(imagesBase64, refProducts = [], { essais = 2, redresser } = {}) {
   const images = (imagesBase64 || []).filter(Boolean);
   if (images.length === 0) return { statut: 'service_indisponible', message: MESSAGES_SCAN.service_indisponible };
-  if (images.length === 1) return scanTicketRobuste(images[0], refProducts, redresser ? { essais, redresser } : { essais });
+  if (images.length === 1) return scanTicketRobuste(images[0], refProducts, redresser ? { essais, redresser, importFichier: true } : { essais, importFichier: true });
   let dernierResultat = null;
   for (let i = 0; i < essais; i++) {
     try {
-      const resultat = await scanMultipleTicketsWithClaude(images, refProducts);
+      const resultat = await appelerScanTicket({ imagesBase64: images, refProducts, importFichier: true });
       dernierResultat = resultat;
       if (filtrerProduitsExploitables(resultat?.products).length > 0) return { statut: 'ok', resultat };
     } catch (e) {

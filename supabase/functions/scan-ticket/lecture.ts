@@ -17,6 +17,15 @@
 //   3. des journaux qui disent la taille de l'image reçue et l'hébergeur qui
 //      a réellement répondu.
 
+// Intégration du chantier 120 (import de tickets : PDF, image longue, captures).
+// Les consignes v14 sont dans prompt.ts (sans dépendance). Elles ne sont
+// ajoutées QUE si la demande porte `importFichier: true` — un scan photo
+// ordinaire reçoit le texte d'avant, au caractère près (vérifié par empreinte
+// dans lecture.test.ts), et sa réponse n'est pas retouchée.
+import {
+  CONSIGNE_V14_RECOLLAGE, CONSIGNE_V14_CHAMPS, CONSIGNE_V14_REMISES, CONSIGNE_V14_LIGNES, normaliserSortieV14,
+} from "./prompt.ts";
+
 export type ProduitRef = { nom: string; categorie: string };
 
 export const MODELE = "anthropic/claude-sonnet-4-5";
@@ -66,7 +75,10 @@ export function construirePromptTicket({
   isMulti,
   refProducts = [],
   antiInvention = true,
-}: { nbImages: number; isMulti: boolean; refProducts?: ProduitRef[]; antiInvention?: boolean }): string {
+  consignesImport = false,
+}: { nbImages: number; isMulti: boolean; refProducts?: ProduitRef[]; antiInvention?: boolean; consignesImport?: boolean }): string {
+  // Ajouts v14 : chaîne vide hors import, donc texte inchangé pour un scan photo.
+  const v14 = (texte: string) => (consignesImport ? texte : "");
   const images = { length: nbImages };
   const refSection = refProducts.length > 0
     ? `\n\nCatalogue de référence (${refProducts.length} produits génériques) :\n` +
@@ -75,7 +87,7 @@ export function construirePromptTicket({
     : `\nNormalise les noms abrégés (ex: LT DEMI ECR → Lait demi-écrémé).`;
   const ajout = antiInvention ? CONSIGNES_ANTI_INVENTION : "";
   return `${isMulti
-                ? `Ces ${images.length} images sont des morceaux successifs d'UN SEUL ticket de caisse, pris dans l'ordre de haut en bas. Les photos peuvent se CHEVAUCHER : un même produit peut apparaître en bas d'une photo et en haut de la suivante. Tu dois reconstituer UNE SEULE liste de produits, dans l'ordre, en supprimant les doublons dus au chevauchement (ne compte chaque produit qu'une seule fois). Le magasin et la date sont en général sur la première image.\n\n`
+                ? `Ces ${images.length} images sont des morceaux successifs d'UN SEUL ticket de caisse, pris dans l'ordre de haut en bas. Les photos peuvent se CHEVAUCHER : un même produit peut apparaître en bas d'une photo et en haut de la suivante. Tu dois reconstituer UNE SEULE liste de produits, dans l'ordre, en supprimant les doublons dus au chevauchement (ne compte chaque produit qu'une seule fois). Le magasin et la date sont en général sur la première image.\n\n` + v14(CONSIGNE_V14_RECOLLAGE)
                 : ""}Analyse ce ticket de caisse et extrait les informations suivantes en JSON uniquement, sans texte avant ou après :
 {
   "store": "nom du magasin",
@@ -87,7 +99,7 @@ export function construirePromptTicket({
   "products": [
     { "brand": "marque ou vide", "name": "nom du produit normalisé", "libelle_ticket": "texte du ticket recopié tel quel", "confiance": "haute", "format": "format ou vide", "quantite_nette": null, "unite_quantite": null, "nombre_unites": null, "qty": 1, "unit_price": 0.00, "price": 0.00, "total": 0.00 }
   ]
-}
+}${v14(CONSIGNE_V14_CHAMPS)}
 CONTRÔLE DE COHÉRENCE DU TICKET (champs "total_ticket" et "nombre_articles") :
 - "total_ticket" (nombre) : le MONTANT TOTAL PAYÉ tel qu'il est IMPRIMÉ sur le ticket (ligne "TOTAL", "TOTAL A PAYER", "NET A PAYER", "MONTANT DU"). C'est le total du ticket, PAS la somme que tu calculerais toi-même à partir des lignes.
 - "nombre_articles" (nombre entier) : le NOMBRE D'ARTICLES tel qu'il est IMPRIMÉ sur le ticket (ligne "NOMBRE D'ARTICLES", "NB ARTICLES", "TOTAL ARTICLES"). Là encore, c'est le chiffre imprimé, PAS le nombre de lignes que tu as extraites.
@@ -96,7 +108,7 @@ CONTRÔLE DE COHÉRENCE DU TICKET (champs "total_ticket" et "nombre_articles") :
   - Si le ticket ne comporte AUCUNE remise ni promotion : mets 0.
   - Si un total de remises est imprimé : recopie-le.
   - Si des remises apparaissent (lignes "2+1", "REMISE 50%", "OFFRE") mais QU'AUCUN total de remises n'est imprimé : mets null. NE LES ADDITIONNE PAS toi-même — un total calculé serait une donnée inventée, et mieux vaut renoncer à vérifier que vérifier faux.
-  - Les remises ne sont JAMAIS des lignes de "products". Elles ne figurent que dans ce champ.
+  - Les remises ne sont JAMAIS des lignes de "products". Elles ne figurent que dans ce champ.${v14(CONSIGNE_V14_REMISES)}
 DATE — même exigence : "date" doit être la date IMPRIMÉE du passage en caisse. Ne la déduis JAMAIS d'un autre nombre du ticket : un numéro de téléphone, un numéro de caisse, un code TVA ou un numéro de ticket ne sont PAS des dates. Si aucune date de passage en caisse n'est lisible, mets null plutôt qu'une date reconstituée.
 Pour chaque ligne article, retourne aussi libelle_ticket : le texte tel qu'il est imprimé sur le ticket, recopié au plus proche, sans correction, sans reformulation, sans interprétation produit. Si le texte exact est partiellement illisible, conserve ce qui est visible et n'invente pas.
 CONFIANCE (champ "confiance", obligatoire, valeur "haute" ou "faible") :
@@ -119,7 +131,7 @@ Règles pour qty, unit_price, price et total (IMPORTANT — lis chaque ligne ent
 - Un multiplicateur peut s'écrire "x" OU "×" (signe multiplication), avec ou sans espaces : "1,95x2", "1,29 × 2", "10,13 x2". Le nombre À GAUCHE du x/× est le PRIX UNITAIRE (le prix d'UN seul article). Le nombre À DROITE du x/× est la QUANTITÉ.
 - Quand il y a un multiplicateur : qty = le nombre à droite, unit_price = price = le montant à gauche, total = unit_price × qty. Sur la même ligne, un montant plus élevé imprimé en fin de ligne est le TOTAL de la ligne (= unit_price × qty), ce n'est JAMAIS le prix unitaire. Exemple concret : "Soda cola 1,29 ×2 ... 2,58" → qty=2, unit_price=1,29, price=1,29, total=2,58 (surtout PAS qty=1 / unit_price=2,58).
 - Si pas de multiplicateur : qty = 1, unit_price = price = total = le montant affiché sur la ligne.
-- CONTRÔLE DE COHÉRENCE obligatoire sur chaque ligne : total doit être égal à unit_price × qty. Si un total est imprimé et qu'un multiplicateur est présent, déduis unit_price = total ÷ qty ; ne mets jamais le total dans unit_price.
+- CONTRÔLE DE COHÉRENCE obligatoire sur chaque ligne : total doit être égal à unit_price × qty. Si un total est imprimé et qu'un multiplicateur est présent, déduis unit_price = total ÷ qty ; ne mets jamais le total dans unit_price.${v14(CONSIGNE_V14_LIGNES)}
 Ignore uniquement les lignes non-produits : total, sous-total, TVA, remises globales, modes de paiement, points fidélité.
 RÈGLE ABSOLUE : extraire CHAQUE article du ticket sans exception.
 - Parcours le ticket de haut en bas, ligne par ligne, sans en sauter aucune.
@@ -189,7 +201,7 @@ export function infosImages(images: string[]): Array<{ ko: number; largeur: numb
 }
 
 // ── Corps de la requête OpenRouter ─────────────────────────────────────────
-export function construireCorpsOpenRouter({ images, isMulti, refProducts = [] }: { images: string[]; isMulti: boolean; refProducts?: ProduitRef[] }) {
+export function construireCorpsOpenRouter({ images, isMulti, refProducts = [], consignesImport = false }: { images: string[]; isMulti: boolean; refProducts?: ProduitRef[]; consignesImport?: boolean }) {
   return {
     model: MODELE,
     // Correctif anti-invention — un seul hébergeur, sans repli (voir FOURNISSEUR).
@@ -208,7 +220,7 @@ export function construireCorpsOpenRouter({ images, isMulti, refProducts = [] }:
           type: "image_url",
           image_url: { url: `data:image/jpeg;base64,${b64}` },
         })),
-        { type: "text", text: construirePromptTicket({ nbImages: images.length, isMulti, refProducts }) },
+        { type: "text", text: construirePromptTicket({ nbImages: images.length, isMulti, refProducts, consignesImport }) },
       ],
     }],
   };
@@ -227,7 +239,7 @@ export async function lireTicket({
   journal = console,
   prefixe = "[scan-ticket]",
 }: {
-  corps: { imageBase64?: unknown; imagesBase64?: unknown; refProducts?: unknown } | null;
+  corps: { imageBase64?: unknown; imagesBase64?: unknown; refProducts?: unknown; importFichier?: unknown } | null;
   apiKey: string | undefined;
   fetchFn: typeof fetch;
   journal?: Journal;
@@ -237,6 +249,8 @@ export async function lireTicket({
   if (images.length === 0) throw new Error("imageBase64 ou imagesBase64 manquant");
   const refProducts = (Array.isArray(corps?.refProducts) ? corps!.refProducts : []) as ProduitRef[];
   if (!apiKey) throw new Error("OPENROUTER_API_KEY non configurée côté serveur");
+  // Import de ticket (chantier 120) : seul `importFichier: true` l'active.
+  const consignesImport = corps?.importFichier === true;
 
   const tailles = infosImages(images);
 
@@ -246,7 +260,7 @@ export async function lireTicket({
       "Content-Type": "application/json",
       "Authorization": `Bearer ${apiKey}`,
     },
-    body: JSON.stringify(construireCorpsOpenRouter({ images, isMulti, refProducts })),
+    body: JSON.stringify(construireCorpsOpenRouter({ images, isMulti, refProducts, consignesImport })),
   });
 
   // deno-lint-ignore no-explicit-any
@@ -280,6 +294,9 @@ export async function lireTicket({
   } catch (_e) {
     throw new Error("Réponse du modèle incomplète (ticket trop long ?), réessaie");
   }
+  // Import : champs v14 garantis (remise >= 0 par ligne, captures_peut_etre_
+  // incompletes booléen). Hors import, la réponse est rendue telle quelle.
+  if (consignesImport) parsed = normaliserSortieV14(parsed);
 
   // Chantier 98 — observabilité des succès. Correctif anti-invention :
   // + taille des images reçues, hébergeur et modèle qui ont réellement répondu.
@@ -293,6 +310,7 @@ export async function lireTicket({
     fournisseur: data?.provider ?? null,
     modele: data?.model ?? null,
     version: VERSION_LECTURE,
+    import_fichier: consignesImport,
     finish_reason: data.choices?.[0]?.finish_reason ?? null,
   }));
 

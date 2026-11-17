@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 import {
   construirePromptTicket, construireCorpsOpenRouter, CONSIGNES_ANTI_INVENTION, FOURNISSEUR, MODELE,
   dimensionsJpeg, infosImages, lireImagesRequete, lireTicket,
@@ -253,5 +254,55 @@ describe('verifierOrientation — deux questions en ordres opposés', () => {
     const fetchLecture = vi.fn().mockResolvedValue(reponseOpenRouter({ store: 'A', products: [] }));
     expect(await traiterRequeteScan({ corps: { imageBase64: 'x' }, apiKey: 'k', fetchFn: fetchLecture, journal: journal() })).toEqual({ store: 'A', products: [] });
     expect(JSON.parse(fetchLecture.mock.calls[0][1].body).model).toBe('anthropic/claude-sonnet-4-5');
+  });
+});
+
+// Intégration du chantier 120 — les consignes d'import ne touchent PAS le scan
+// photo ordinaire. Les empreintes ci-dessous ont été calculées sur le code du
+// chantier 121 (commit 11857fc), AVANT l'ajout : si l'une d'elles change, le
+// texte envoyé pour un scan photo a changé, et ce n'était pas voulu.
+describe('import de ticket (chantier 120) — sans effet sur le scan photo', () => {
+  const empreinte = (t: string) => createHash('sha256').update(t).digest('hex');
+  const refs = [{ nom: 'Lait demi-écrémé', categorie: 'Crèmerie' }, { nom: 'Pâtes', categorie: 'Épicerie' }];
+
+  it('scan photo : consignes identiques au caractère près à celles du chantier 121', () => {
+    expect(empreinte(construirePromptTicket({ nbImages: 1, isMulti: false }))).toBe('78afc88d3f3119441b9fc462c1d7f17450051a9c22d9798716d9a1da2eaee4bd');
+    expect(empreinte(construirePromptTicket({ nbImages: 1, isMulti: false, refProducts: refs }))).toBe('bfcb924e98a980882edba220a429e68385f7cbaab34493dd5b7bc4dd20bb088f');
+    expect(empreinte(construirePromptTicket({ nbImages: 3, isMulti: true, refProducts: refs }))).toBe('64957fc9283c6d9d54e42e1896c3ee4cf42cb2c527e7267ab088191f240e7d30');
+    expect(empreinte(JSON.stringify(construireCorpsOpenRouter({ images: ['AAAA'], isMulti: false, refProducts: refs })))).toBe('5fb3c662d1a4ff1cafdf737384f835db6742eff9fb61fa1135bad72af0cf1bf6');
+  });
+
+  it('import : les quatre ajouts v14 sont présents, et rien du texte d\'origine n\'est retiré', () => {
+    const sans = construirePromptTicket({ nbImages: 3, isMulti: true, refProducts: refs });
+    const avec = construirePromptTicket({ nbImages: 3, isMulti: true, refProducts: refs, consignesImport: true });
+    for (const marque of ['RECOLLAGE DES MORCEAUX', 'CHAMPS SUPPLÉMENTAIRES', 'Bon immédiat', 'REMISE SOUS UNE LIGNE', 'À IGNORER COMPLÈTEMENT']) {
+      expect(avec).toContain(marque);
+      expect(sans).not.toContain(marque);
+    }
+    expect(avec).toContain(CONSIGNES_ANTI_INVENTION);
+    expect(avec.length).toBeGreaterThan(sans.length);
+    // une seule image importée : pas de consigne de recollage
+    expect(construirePromptTicket({ nbImages: 1, isMulti: false, consignesImport: true })).not.toContain('RECOLLAGE DES MORCEAUX');
+  });
+
+  it('lireTicket : seul importFichier === true active l\'import (réponse normalisée, journal)', async () => {
+    const lu = { store: 'Carrefour', products: [{ libelle_ticket: 'LAIT', price: 4.29, remise: '-2,15' }, { libelle_ticket: 'PAIN', price: 1 }] };
+    const journal = { log: vi.fn(), error: vi.fn() };
+    const fetchFn = vi.fn(async () => reponseOpenRouter(lu));
+    // deno-lint-ignore no-explicit-any
+    const r: any = await lireTicket({ corps: { imageBase64: 'AAAA', importFichier: true }, apiKey: 'k', fetchFn: fetchFn as unknown as typeof fetch, journal });
+    expect(r.products.map((p: { remise: number }) => p.remise)).toEqual([2.15, 0]);
+    expect(r.captures_peut_etre_incompletes).toBe(false);
+    expect(JSON.parse(fetchFn.mock.calls[0][1].body).messages[0].content.at(-1).text).toContain('REMISE SOUS UNE LIGNE');
+    expect(JSON.parse(journal.log.mock.calls[0][1]).import_fichier).toBe(true);
+
+    for (const valeur of [undefined, false, 'true', 1]) {
+      fetchFn.mockClear(); journal.log.mockClear();
+      // deno-lint-ignore no-explicit-any
+      const r2: any = await lireTicket({ corps: { imageBase64: 'AAAA', importFichier: valeur }, apiKey: 'k', fetchFn: fetchFn as unknown as typeof fetch, journal });
+      expect(r2).toEqual(lu); // réponse rendue telle quelle
+      expect(JSON.parse(fetchFn.mock.calls[0][1].body).messages[0].content.at(-1).text).not.toContain('REMISE SOUS UNE LIGNE');
+      expect(JSON.parse(journal.log.mock.calls[0][1]).import_fichier).toBe(false);
+    }
   });
 });
