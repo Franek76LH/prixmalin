@@ -6074,7 +6074,7 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
     <>
       {userPos && (
         <button onClick={()=>setZoneEditOpen(false)} style={{ background:"none", border:"none", padding:0, marginBottom:14, fontFamily:F, fontWeight:700, fontSize:13, color:C.textLight, cursor:"pointer" }}>
-          ← Annuler
+          ← Retour
         </button>
       )}
       <div style={{ fontSize:44, textAlign:"center", marginBottom:10 }}>📍</div>
@@ -6129,6 +6129,11 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
               }}>{r} km</button>
             ))}
           </div>
+          {/* Chantier 133 — après avoir changé le rayon, la seule sortie
+              s'appelait « Annuler » : on croyait perdre son réglage. */}
+          <button onClick={()=>setZoneEditOpen(false)} style={{ width:"100%", marginTop:20, padding:"14px", border:"none", borderRadius:14, background:"#16181D", fontFamily:F, fontWeight:900, fontSize:15, color:"#fff", cursor:"pointer" }}>
+            Terminé
+          </button>
         </div>
       )}
     </>
@@ -10919,12 +10924,13 @@ export default function App() {
   return (
     <>
       {globalStyle}
-      {/* #65 — bandeau non bloquant, jamais au-dessus de la TabBar (bottom)
-          ni du bouton Flasher (centre HomeTab) : ancré en haut du viewport. */}
+      {/* #65 / Chantier 133 — bandeau non bloquant. Il était collé en haut et
+          recouvrait le titre de l'écran : c'est maintenant une pastille
+          flottante juste au-dessus de la barre du bas, qui ne cache rien. */}
       {needRefresh && (
-        <div style={{ position:"fixed", top:0, left:0, right:0, zIndex:600, display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, padding:"10px 16px", background:C.blue, boxShadow:"0 2px 10px rgba(0,0,0,0.25)" }}>
-          <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, color:"#fff" }}>🔄 Nouvelle version disponible</span>
-          <button onClick={() => applyUpdate()} style={{ padding:"6px 14px", borderRadius:20, border:"none", background:"#fff", color:C.blue, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:12, cursor:"pointer", flexShrink:0 }}>
+        <div role="status" style={{ position:"fixed", left:"50%", transform:"translateX(-50%)", bottom:"calc(96px + env(safe-area-inset-bottom, 0px))", width:"calc(100% - 32px)", maxWidth:398, zIndex:600, display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, padding:"10px 10px 10px 16px", background:"#16181D", borderRadius:16, boxShadow:"0 8px 28px rgba(0,0,0,0.28)" }}>
+          <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13.5, color:"#fff" }}>Nouvelle version disponible</span>
+          <button onClick={() => applyUpdate()} style={{ padding:"8px 14px", borderRadius:11, border:"none", background:"#fff", color:"#16181D", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, cursor:"pointer", flexShrink:0 }}>
             Mettre à jour
           </button>
         </div>
