@@ -59,3 +59,15 @@ returns json language sql stable security definer set search_path to 'pg_catalog
 $f$;
 revoke all on function public.deviner_rayon_off(jsonb) from public, anon;
 grant execute on function public.deviner_rayon_off(jsonb) to authenticated;
+
+-- ── Lot 2 (bascule du 18/11/2026 à 20h06, feu vert écrit de François) ──────────────────────────────
+-- creer_produit_depuis_code_barres lit en plus la proposition de la fonction en ligne ranger-produit
+-- (p_off.ia : produit_id, nom_generique, sous_categorie_id, marque) et la revérifie. Écrite directement
+-- en base à partir de la version du lot 1 (9 remplacements) : sa définition se lit avec pg_get_functiondef.
+-- Versions conservées, sans droit d'appel : creer_produit_depuis_code_barres_avant_152 (lot 1) et
+-- creer_produit_depuis_code_barres_avant_151 (origine).
+-- Retour arrière du lot 2 :
+--   alter function public.creer_produit_depuis_code_barres(uuid, text, jsonb) rename to creer_produit_depuis_code_barres_v152;
+--   revoke all on function public.creer_produit_depuis_code_barres_v152(uuid, text, jsonb) from public, anon, authenticated;
+--   alter function public.creer_produit_depuis_code_barres_avant_152(uuid, text, jsonb) rename to creer_produit_depuis_code_barres;
+--   grant execute on function public.creer_produit_depuis_code_barres(uuid, text, jsonb) to authenticated;
