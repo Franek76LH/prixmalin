@@ -68,6 +68,7 @@ import VerificationTicket from "./components/v2/VerificationTicket";
 import { archiveDejaPresente, totalPayeTicket } from "./lib/ticketsCore";
 import { merciApresScan } from "./lib/communauteCore";
 import { conserverLectureApresImport } from "./lib/lectureTicketConservee";
+import { enregistrerOffresApresImport } from "./lib/offresTicketCore";
 import EcranEvolutionPrix from "./components/v2/EcranEvolutionPrix";
 import { alertesBaisse, avecExemple, exempleDemande } from "./lib/evolutionPrixCore";
 import ResultatComparaison from "./components/v2/ResultatComparaison";
@@ -2024,6 +2025,9 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     // Chantier 149 — on garde ce que le lecteur a lu (lignes, prix, remises), en
     // texte, pour pouvoir le régler plus tard. Pas la photo. Jamais bloquant.
     conserverLectureApresImport(ecritureCorePromise, result);
+    // Chantier 148 — les promotions constatées sur ce ticket vont dans le carnet
+    // des offres (jamais dans les prix). Jamais bloquant.
+    enregistrerOffresApresImport(ecritureCorePromise, result);
     // Chantier 94 Lot 10 — notification légère de Points Malin après import
     // (uniquement quand la gamification est visible : onPointsCredites câblé).
     // Fire & forget avec filets : jamais bloquant pour le flux d'import.
