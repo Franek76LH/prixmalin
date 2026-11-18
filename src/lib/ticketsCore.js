@@ -64,6 +64,20 @@ export function euros(n) {
   return `${n < 0 ? '−' : ''}${entier.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')},${cents} €`;
 }
 
+// Chantier 148 — le total d'un ticket scanné, pour l'historique : ce que le
+// client a PAYÉ, donc la somme des lignes MOINS les remises rattachées aux
+// lignes. Constat du 18/11 (Carrefour, « 2+1 » sur des pots) : l'historique
+// affichait 32,60 € (somme des lignes avant remise) au lieu des 30,33 € payés.
+// Une remise absente, illisible ou négative vaut 0 ; jamais de total négatif.
+export function totalPayeTicket(entrees) {
+  const somme = (entrees || []).reduce((s, e) => {
+    const ligne = (Number(e?.price) || 0) * (Number(e?.qty) || 1);
+    const remise = Number(e?.remise) > 0 ? Number(e.remise) : 0;
+    return s + Math.max(0, ligne - remise);
+  }, 0);
+  return Math.round(somme * 100) / 100;
+}
+
 // Chantier 131 — ce ticket est-il déjà dans l'historique ? Même jour, même
 // magasin, même total, déjà marqué « ticket scanné ». Sert à ne pas créer une
 // deuxième ligne quand on rescanne un ticket (17 doublons retirés le 17/11).

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { archiveDejaPresente, totalTicket, totalLigne, ticketCorrespond, ticketsParMois, bilanTickets, euros } from './ticketsCore';
+import { archiveDejaPresente, totalPayeTicket, totalTicket, totalLigne, ticketCorrespond, ticketsParMois, bilanTickets, euros } from './ticketsCore';
 
 const t = (id, date, total, items = [], nom = 'Netto') => ({ id, date, total, items, store: { name: nom } });
 
@@ -87,5 +87,40 @@ describe('archiveDejaPresente (chantier 131)', () => {
   it('ticket sans total ou sans date : on ne conclut rien', () => {
     expect(archiveDejaPresente(dansHistorique, nouveau({ total: 0 }))).toBeNull();
     expect(archiveDejaPresente(dansHistorique, { store: { name: 'Netto' }, total: 24.84 })).toBeNull();
+  });
+});
+
+describe('totalPayeTicket (chantier 148) — ce qui a été payé, remises de ligne déduites', () => {
+  // Ticket Carrefour de François du 18/11 : 32,60 € avant remises, 30,33 € payés.
+  const carrefour = [
+    { product: 'X36 DOSETTE DOUX N', price: 5.55, qty: 1, remise: 0 },
+    { product: '4X100G PPC VAN LL', price: 2.27, qty: 3, remise: 2.27 },
+    { product: '350G TAJINE BOEUF', price: 4.09, qty: 1, remise: 0 },
+    { product: '300G PARMENTIER CA', price: 4.49, qty: 1, remise: 0 },
+    { product: 'HACHE 15% X2 BIO', price: 6.15, qty: 1, remise: 0 },
+    { product: 'BIERE EXTREME 8.6', price: 2.09, qty: 1, remise: 0 },
+    { product: 'PEPSI ZERO SUCRES', price: 1.29, qty: 1, remise: 0 },
+    { product: 'PET 1,5L COLA REGU', price: 0.54, qty: 1, remise: 0 },
+    { product: 'BTE 50CL 8,6 ORIG', price: 1.59, qty: 1, remise: 0 },
+  ];
+  it('le ticket du 18/11 : 30,33 € et non 32,60 €', () => {
+    expect(totalPayeTicket(carrefour)).toBe(30.33);
+  });
+  it('sans remise : la somme des lignes, comme avant', () => {
+    expect(totalPayeTicket(carrefour.map(e => ({ product: e.product, price: e.price, qty: e.qty })))).toBe(32.6);
+    expect(totalPayeTicket([{ price: 1.29, qty: 2 }, { price: 0.54 }])).toBe(3.12);
+  });
+  it('remise illisible ou négative : ignorée ; jamais de ligne négative', () => {
+    expect(totalPayeTicket([{ price: 2, qty: 1, remise: 'abc' }, { price: 3, qty: 1, remise: -1 }])).toBe(5);
+    expect(totalPayeTicket([{ price: 2, qty: 1, remise: 5 }])).toBe(0);
+  });
+  it('liste vide ou absente : 0', () => {
+    expect(totalPayeTicket([])).toBe(0);
+    expect(totalPayeTicket(null)).toBe(0);
+  });
+  it('un rescan du même ticket retrouve son entrée d\'historique (même total payé)', () => {
+    const archive = { id: 127, ticket_scanned: true, date: '2026-11-18T15:53:19Z', store: { name: 'Carrefour' }, total: 30.33 };
+    const nouvelle = { date: '2026-11-18T16:19:00Z', store: { name: 'Carrefour' }, total: totalPayeTicket(carrefour) };
+    expect(archiveDejaPresente([archive], nouvelle)?.id).toBe(127);
   });
 });

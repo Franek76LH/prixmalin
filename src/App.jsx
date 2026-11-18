@@ -65,7 +65,7 @@ import ProduitsARelier from "./components/v2/ProduitsARelier";
 import MesTickets from "./components/v2/MesTickets";
 import PageDeGarde from "./components/v2/PageDeGarde";
 import VerificationTicket from "./components/v2/VerificationTicket";
-import { archiveDejaPresente } from "./lib/ticketsCore";
+import { archiveDejaPresente, totalPayeTicket } from "./lib/ticketsCore";
 import { merciApresScan } from "./lib/communauteCore";
 import { conserverLectureApresImport } from "./lib/lectureTicketConservee";
 import EcranEvolutionPrix from "./components/v2/EcranEvolutionPrix";
@@ -5260,7 +5260,7 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
       const storeInfo = storeId === "autre"
         ? { id:"autre", name: entries[0]?.store_name || "Autre", logo:"🏪" }
         : storeObj || { id:"autre", name: entries[0]?.store_name || "Autre", logo:"🏪" };
-      const total = Math.round(entries.reduce((s,e) => s + (e.price||0) * (e.qty||1), 0) * 100) / 100;
+      const total = totalPayeTicket(entries); // chantier 148 : remises de ligne déduites
       const newArc = {
         date:    entries[0]?.date || new Date().toISOString(),
         store:   storeInfo,
@@ -10847,7 +10847,7 @@ export default function App() {
     } else {
       const storeId = entries[0]?.storeId || "autre";
       const storeInfo = STORES.find(s => s.id === storeId) || { id:"autre", name: entries[0]?.store_name || "Autre", logo:"🏪" };
-      const total = Math.round(entries.reduce((s,e) => s + (e.price||0) * (e.qty||1), 0) * 100) / 100;
+      const total = totalPayeTicket(entries); // chantier 148 : remises de ligne déduites
       const newArc = {
         date:    entries[0]?.date || new Date().toISOString(),
         store:   storeInfo,
