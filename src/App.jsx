@@ -1190,7 +1190,31 @@ function MesPrixSheet({ priceDB, setPriceDB, archives, updateArchive, onTicketVa
 
 // ── HEADER ────────────────────────────────────────────────────────────────────
 // ── TOAST ─────────────────────────────────────────────────────────────────────
-function Toast({ msg, ok = true }) {
+// Chantier 153 — un message qui RESTE (onFermer fourni) attend qu'on touche sa
+// croix : il ne disparaît plus tout seul avant d'avoir été lu. Sans onFermer,
+// rien ne change : message bref, qui ne capte aucun toucher.
+function Toast({ msg, ok = true, onFermer = null }) {
+  if (onFermer) {
+    return (
+      <div role="status" style={{
+        position:"fixed", bottom:76, left:"50%", transform:"translateX(-50%)",
+        background:ok?C.green:C.red, color:C.white,
+        padding:"10px 8px 10px 18px", borderRadius:18,
+        fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, lineHeight:1.35,
+        zIndex:500, animation:"popIn 0.3s ease",
+        boxShadow:"0 4px 16px rgba(0,0,0,0.2)",
+        display:"flex", alignItems:"center", gap:8,
+        width:"max-content", maxWidth:"calc(100vw - 32px)", boxSizing:"border-box",
+      }}>
+        <span style={{ flex:1, minWidth:0 }}>{msg}</span>
+        <button type="button" onClick={onFermer} aria-label="Fermer le message" style={{
+          flexShrink:0, width:36, height:36, borderRadius:99, border:"none",
+          background:"rgba(255,255,255,0.25)", color:C.white,
+          fontSize:18, fontWeight:900, lineHeight:1, cursor:"pointer", padding:0,
+        }}>✕</button>
+      </div>
+    );
+  }
   return (
     <div style={{
       position:"fixed", bottom:76, left:"50%", transform:"translateX(-50%)",
@@ -5154,7 +5178,14 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
   const [toast,         setToast]         = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
 
-  const showToast = (msg, ok=true) => { setToast({msg,ok}); setTimeout(()=>setToast(null),2500); };
+  // Chantier 153 — `reste` : le message attend sa croix. Le minuteur du message
+  // précédent est annulé, sinon il effacerait celui qui vient d'arriver.
+  const minuteurToast = useRef(null);
+  const showToast = (msg, ok=true, reste=false) => {
+    clearTimeout(minuteurToast.current);
+    setToast({msg,ok,reste});
+    if (!reste) minuteurToast.current = setTimeout(()=>setToast(null),2500);
+  };
   const savePrice = entry => {
     const updated=[...priceDB.filter(p=>priceKey(p)!==priceKey(entry)),{...entry,id:Date.now()}];
     setPriceDB(updated);
@@ -5322,7 +5353,7 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
     // visible dans l'onglet Archives : le dire est le minimum, se taire
     // reproduirait le défaut du 18/08.
     if (!archiveOk) {
-      showToast(`⚠️ ${MESSAGE_ARCHIVE_MANQUANTE}`, false);
+      showToast(`⚠️ ${MESSAGE_ARCHIVE_MANQUANTE}`, false, true);
       return;
     }
     const savingMsg = realizedSaving !== null
@@ -5331,7 +5362,7 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
     // Chantier 139 — le merci communautaire remplace « N prix importés ».
     showToast(`✓ ${merciApresScan(entries.length)}${savingMsg}`);
     if (bilanCore?.niveau === NIVEAU_INFO && bilanCore.detail) {
-      setTimeout(() => showToast(`ℹ️ ${bilanCore.detail}`), 2600);
+      setTimeout(() => showToast(`ℹ️ ${bilanCore.detail}`, true, true), 2600);
     }
   };
   const deletePrice = async (entry) => {
@@ -5603,7 +5634,7 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
 
       {showImport    && <ImportTicketSheet onClose={()=>{setShowImport(false);setResumeDraft(null);setScanDraft(lireScanDraft());onAutoOpenConsumed?.();onInitialScanConsumed?.();onScanSessionFerme?.();}} onImport={importPrices} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))} directCamera={autoOpenCamera} onManualEntry={()=>{ setShowImport(false); setShowEntry(true); }} initialResult={capturedResult} resumeDraft={resumeDraft} estFrancois={estFrancois} magasinSession={magasinSession} onVoirTicketExistant={onVoirTicketExistant} onDoublonTardif={()=>showToast("🧾 Ce ticket a déjà été scanné (doublon détecté)", false)} onPointsCredites={notifierPoints ? (msg)=>showToast(msg) : null}/>}
       {showEntry     && <PriceEntrySheet  onClose={()=>{setShowEntry(false);setEditPrice(null);}} onSave={savePrice} existingPrice={editPrice}/>}
-      {toast && <Toast msg={toast.msg} ok={toast.ok}/>}
+      {toast && <Toast msg={toast.msg} ok={toast.ok} onFermer={toast.reste ? () => setToast(null) : null}/>}
     </div>
   );
 }
@@ -9570,7 +9601,12 @@ export default function App() {
   const listRowId = useRef(null);
   const favRowId  = useRef(null);
   const [appToast, setAppToast] = useState(null);
-  const showAppToast = (msg, ok=true) => { setAppToast({msg,ok}); setTimeout(()=>setAppToast(null),3000); };
+  const minuteurAppToast = useRef(null);
+  const showAppToast = (msg, ok=true, reste=false) => {
+    clearTimeout(minuteurAppToast.current);
+    setAppToast({msg,ok,reste});
+    if (!reste) minuteurAppToast.current = setTimeout(()=>setAppToast(null),3000);
+  };
 
   // Auth — écoute la session Supabase
   useEffect(()=>{
@@ -10907,7 +10943,7 @@ export default function App() {
 
     // Chantier 112 — même règle qu'en haut : pas de succès plein sans archive.
     if (!archiveOk) {
-      showAppToast(`⚠️ ${MESSAGE_ARCHIVE_MANQUANTE}`, false);
+      showAppToast(`⚠️ ${MESSAGE_ARCHIVE_MANQUANTE}`, false, true);
       return;
     }
     const savingMsg = realizedSaving !== null
@@ -10915,7 +10951,7 @@ export default function App() {
       : '';
     showAppToast(`✓ ${merciApresScan(entries.length)}${savingMsg}`);
     if (bilanCore?.niveau === NIVEAU_INFO && bilanCore.detail) {
-      setTimeout(() => showAppToast(`ℹ️ ${bilanCore.detail}`), 2600);
+      setTimeout(() => showAppToast(`ℹ️ ${bilanCore.detail}`, true, true), 2600);
     }
   };
 
@@ -11163,7 +11199,7 @@ export default function App() {
         {echecEcritureCore && (
           <AlerteEcritureCore resultat={echecEcritureCore} onFermer={()=>setEchecEcritureCore(null)} />
         )}
-        {appToast && <Toast msg={appToast.msg} ok={appToast.ok}/>}
+        {appToast && <Toast msg={appToast.msg} ok={appToast.ok} onFermer={appToast.reste ? () => setAppToast(null) : null}/>}
         {showCircleSheet  && <CircleSheet  circles={circles} userId={session.user.id} userEmail={session.user.email} profileMap={profileMap} pseudo={pseudo} archives={archives} onClose={()=>setShowCircleSheet(false)} onInvite={inviteByPseudo} onUpdateStatus={updateCircleStatus}/>}
         {showStatsSheet   && <StatsSheet   userId={session.user.id} archives={archives} onClose={()=>setShowStatsSheet(false)}/>}
         {showFavorisSheet && <FavorisSheet userId={session?.user?.id} onClose={()=>setShowFavorisSheet(false)}/>}
