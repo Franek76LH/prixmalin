@@ -67,6 +67,7 @@ import PageDeGarde from "./components/v2/PageDeGarde";
 import VerificationTicket from "./components/v2/VerificationTicket";
 import { archiveDejaPresente } from "./lib/ticketsCore";
 import { merciApresScan } from "./lib/communauteCore";
+import { conserverLectureApresImport } from "./lib/lectureTicketConservee";
 import EcranEvolutionPrix from "./components/v2/EcranEvolutionPrix";
 import { alertesBaisse, avecExemple, exempleDemande } from "./lib/evolutionPrixCore";
 import ResultatComparaison from "./components/v2/ResultatComparaison";
@@ -2019,6 +2020,9 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     // filets internes) ; une course entre deux scans simultanés (23505) est
     // signalée comme doublon via onDoublonTardif, jamais un plantage.
     poserEmpreinteApresImport(ecritureCorePromise, empreinte, { onDoublonTardif: onDoublonTardif ?? undefined });
+    // Chantier 149 — on garde ce que le lecteur a lu (lignes, prix, remises), en
+    // texte, pour pouvoir le régler plus tard. Pas la photo. Jamais bloquant.
+    conserverLectureApresImport(ecritureCorePromise, result);
     // Chantier 94 Lot 10 — notification légère de Points Malin après import
     // (uniquement quand la gamification est visible : onPointsCredites câblé).
     // Fire & forget avec filets : jamais bloquant pour le flux d'import.
