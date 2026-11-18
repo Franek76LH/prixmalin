@@ -67,12 +67,15 @@ function LienDiscret({ children, onClick }) {
 
 // Chantier 151 — liste des rayons, ouverte seulement si l'utilisateur touche la
 // ligne « Rayon ». Aucune étape imposée : fermer = garder le rayon proposé.
-function ChoixRayon({ rayons, onChoisir, onFermer }) {
+function ChoixRayon({ rayons, actuel = null, onChoisir, onFermer }) {
   const liste = rayons || [];
   return (
     <div role="dialog" aria-label="Choisir le rayon" style={{ position: 'fixed', inset: 0, zIndex: 640, background: FOND, display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: 'calc(14px + env(safe-area-inset-top, 0px)) 18px 12px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-        <div style={{ flex: 1, fontFamily: F, fontWeight: 900, fontSize: 18, color: '#fff' }}>Dans quel rayon ?</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontFamily: F, fontWeight: 900, fontSize: 18, color: '#fff' }}>Changer de rayon</div>
+          <div style={{ fontFamily: F, fontSize: 12, color: GRIS_TEXTE, marginTop: 2 }}>{actuel ? `Rayon proposé : ${actuel}. Touche un autre rayon pour le changer.` : 'Touche le rayon de ce produit.'}</div>
+        </div>
         <button onClick={onFermer} aria-label="Fermer" style={{ background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: 99, width: 36, height: 36, color: '#fff', fontSize: 18, cursor: 'pointer' }}>✕</button>
       </div>
       <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '8px 18px calc(18px + env(safe-area-inset-bottom, 0px))' }}>
@@ -83,9 +86,9 @@ function ChoixRayon({ rayons, onChoisir, onFermer }) {
           return (
             <div key={r.id}>
               {titre && <div style={{ fontFamily: F, fontSize: 11, fontWeight: 900, color: GRIS_TEXTE, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '14px 0 6px' }}>{titre}</div>}
-              <button onClick={() => onChoisir(r)}
-                style={{ width: '100%', textAlign: 'left', padding: '13px 14px', marginBottom: 6, borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: 'rgba(255,255,255,0.06)', color: '#fff', fontFamily: F, fontWeight: 800, fontSize: 15, cursor: 'pointer' }}>
-                {r.nom}
+              <button onClick={() => onChoisir(r)} aria-pressed={r.nom === actuel}
+                style={{ width: '100%', textAlign: 'left', padding: '13px 14px', marginBottom: 6, borderRadius: 12, border: r.nom === actuel ? `2px solid ${VERT}` : '1px solid rgba(255,255,255,0.14)', background: r.nom === actuel ? 'rgba(0,179,65,0.18)' : 'rgba(255,255,255,0.06)', color: '#fff', fontFamily: F, fontWeight: 800, fontSize: 15, cursor: 'pointer' }}>
+                {r.nom === actuel ? `✓ ${r.nom} (rayon actuel)` : r.nom}
               </button>
             </div>
           );
@@ -312,7 +315,7 @@ export default function IdentifierProduitPlein({ lignes, ligneDepartId, deps, on
     <div style={{ position: 'fixed', inset: 0, background: FOND, zIndex: 620, display: 'flex', flexDirection: 'column', overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
       <style>{STYLE_ANIM}</style>
       {choixRayonOuvert && (
-        <ChoixRayon rayons={rayons} onFermer={() => setChoixRayonOuvert(false)}
+        <ChoixRayon rayons={rayons} actuel={e.recherche?.fiche?.rayon || null} onFermer={() => setChoixRayonOuvert(false)}
           onChoisir={(r) => { p.choisirRayon(r); setChoixRayonOuvert(false); }} />
       )}
       <div style={{ padding: 'calc(14px + env(safe-area-inset-top, 0px)) 18px 14px', display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.08)', flexShrink: 0 }}>
