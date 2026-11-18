@@ -99,6 +99,7 @@ import ValidationScanSheet from "./components/admin/ValidationScanSheet";
 import ContributionCodeBarresSheet from "./components/ContributionCodeBarresSheet";
 // Chantier 118 — historique des tickets + identification par code-barres (shadow François).
 import HistoriqueTicketsSheet from "./components/HistoriqueTicketsSheet";
+import { rappelTicketVisible, lireTicketsEcartes, ecarterTicket } from './lib/rappelTicketCore';
 import { chargerDernierTicketAIdentifier } from "./lib/historiqueTicketsCore";
 import { resumeDernierTicket } from "./lib/scanDepuisHistorique";
 import PropositionsCodesBarresSheet from "./components/admin/PropositionsCodesBarresSheet";
@@ -4206,7 +4207,7 @@ function FamilleDepliee({ membres, items, onAdd, onUpdate, onRemove, modeRayon =
   );
 }
 
-function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab }) {
+function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab, onDicter = null }) {
   const [categories,      setCategories]      = useState([]);
   const [catLoading,      setCatLoading]      = useState(true);
   const [catError,        setCatError]        = useState(null);
@@ -4421,7 +4422,10 @@ function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab }) {
           d'un texte trop court (séquence invalidée, résultats vidés, message
           d'erreur et spinner éteints) : vider l'affichage sans réinitialiser
           l'état laisserait un « aucun résultat » orphelin à l'écran. */}
-      <div style={{ position:"relative", marginBottom:16 }}>
+      {/* Chantier 150 — « Dicter » quitte l'accueil : le micro vit à côté de la
+          recherche, là où l'on ajoute des produits. */}
+      <div style={{ display:"flex", gap:8, alignItems:"stretch", marginBottom:16 }}>
+      <div style={{ position:"relative", flex:1, minWidth:0 }}>
         <input ref={champRechercheRef} value={searchQuery} onChange={e=>{
             const val = e.target.value;
             setSearchQuery(val);
@@ -4444,6 +4448,10 @@ function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab }) {
             setSearching(false);
           }}
         />
+      </div>
+      {onDicter && (
+        <button onClick={onDicter} aria-label="Dicter des produits" style={{ flexShrink:0, width:48, border:"1.5px solid #E8E8E4", background:C.white, borderRadius:14, cursor:"pointer", fontSize:20 }}>🎙️</button>
+      )}
       </div>
 
       {/* Résultats de recherche */}
@@ -9479,7 +9487,10 @@ export default function App() {
     chargerDernierTicketAIdentifier(session?.user?.id).then(r => {
       if (annule || r == null) return;
       const resume = resumeDernierTicket(r.ticket, r.n);
-      setDernierTicketAScanner(resume ? { ...resume, ticket: r.ticket } : null);
+      // Chantier 150 — le rappel s'éteint tout seul au bout de quelques jours
+      // (les produits ne sont plus sous la main) ou dès qu'on l'écarte.
+      const visible = resume && rappelTicketVisible(r.ticket, { ecartes: lireTicketsEcartes() });
+      setDernierTicketAScanner(visible ? { ...resume, ticket: r.ticket } : null);
     });
     return () => { annule = true; };
   }, [scanApresTicketAccessible, loaded, tab, showHistoriqueTickets, session?.user?.id]);
@@ -11030,12 +11041,13 @@ export default function App() {
           <TabErrorBoundary key={tab}>
           {loaded && tab==="home" && gardeOuverte && <PageDeGarde libelleBouton="C'est parti" onCommencer={()=>setGardeOuverte(false)} />}
           {loaded && tab==="home" && !gardeOuverte && <AccueilV2 pseudo={pseudo} items={items} archives={archives} setTab={setTab} communaute={statsCommunaute} evolutionPrix={evolutionPrix} onScanner={handleFlash} onReprendreScan={handleResumeScan}
+            onEcarterTicket={()=>{ ecarterTicket(dernierTicketAScanner?.ticket?.id); setDernierTicketAScanner(null); }}
             ticketAScanner={dernierTicketAScanner} onOuvrirTicket={scanApresTicketAccessible && dernierTicketAScanner ? ()=>ouvrirHistoriqueTickets(dernierTicketAScanner.ticket) : null}
             sessionCourses={sessionCoursesAccessible ? sessionCoursesActive : null} onReprendreCourses={()=>setTab("courses")} onAbandonnerCourses={abandonnerSessionCourses}
             /* Chantier 140 — le bouton « Aide à compléter la base » ne s'affiche plus
                pour l'administrateur quand le réglage est coupé : sans ticket, un
                code-barres ne rapporte aucun prix (décision de François, 17/11). */
-            microDisponible={estFrancois} contributionVisible={contributionCodesBarresActive} onContribuer={()=>setShowContributionCodeBarres(true)}/>}
+            contributionVisible={contributionCodesBarresActive} onContribuer={()=>setShowContributionCodeBarres(true)}/>}
           {loaded && tab==="moi"       && <EcranMoi pseudo={pseudo} email={session?.user?.email} archives={archives} setTab={setTab} version={__APP_VERSION__} nbBaisses={alertesBaisse(evolutionPrix).length}
             onProfil={profilVisible ? ()=>setShowProfilSheet(true) : null} onCercle={()=>setShowCircleSheet(true)} invitationsEnAttente={invitationsEnAttente}
             onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFavoris={()=>setShowFavorisSheet(true)} onAide={()=>setShowFaqSheet(true)}
@@ -11051,7 +11063,7 @@ export default function App() {
               même si tab="courses" traîne en state. */}
           {loaded && tab==="courses" && sessionCoursesAccessible && sessionCoursesActive && <CoursesTab session={sessionCoursesActive} onChangerEtat={changerEtatArticleSession} onAjouterNote={ajouterNoteCourses} onSupprimerNote={supprimerNoteCourses} onTerminer={demanderTerminerCourses} onPasserEnCaisse={()=>setCaisseCourses(true)} syncEchec={syncCoursesEchec}/>}
           {loaded && tab==="list"      && <ListTab liaisonsProposees={liaisonsProposees} onRelier={relierArticle}      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} onSetMarquePref={setMarquePrefItem} itemsReportes={itemsReportes} onReactiverReporte={reactiverReporte} onSupprimerReporte={supprimerReporte}/>}
-          {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab}/>}
+          {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab} onDicter={estFrancois ? ()=>setTab("micro") : null}/>}
           {loaded && tab==="compare"   && <CompareTab liaisonsProposees={liaisonsProposees} onRelier={relierArticle}   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix} sessionCoursesAccessible={sessionCoursesAccessible}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
           {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} estFrancois={estFrancois} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} magasinSession={scanCaisse?.magasin ?? null} onImportSession={rattacherTicketScanSession} onScanSessionFerme={()=>definirScanCaisse(null)} onVoirTicketExistant={()=>setTab("archive")} notifierPoints={profilVisible} onEchecEcritureCore={setEchecEcritureCore} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{

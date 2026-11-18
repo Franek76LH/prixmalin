@@ -1,20 +1,20 @@
-// Chantier 123 — nouvel accueil.
-//
-// Un seul fil : chercher un produit -> faire sa liste -> voir où c'est le
-// moins cher -> scanner son ticket. Tout le reste (cagnotte, badges, cercle,
-// statistiques) vit dans l'espace « Moi ». L'écran ne décide rien : ce qu'il
-// montre vient de lib/accueilCore.js.
+// Chantier 123 — nouvel accueil. Chantier 150 — rangé en trois zones, une
+// seule porte par geste :
+//   1. le catalogue (bandeau rouge : chercher, ou parcourir les rayons) ;
+//   2. ma liste (un aperçu, un seul gros bouton) ;
+//   3. ce qui me concerne (seulement s'il y a du nouveau), puis la communauté.
+// « Scanner » vit dans le bouton rouge du bas, « Dicter » à côté de la
+// recherche du catalogue, « Mes économies » dans l'espace « Moi ».
+// L'écran ne décide rien : ce qu'il montre vient de lib/accueilCore.js.
 import { useState } from 'react';
 import { T } from './theme';
-import { IconeLoupe, IconeChevron, IconeMicro, IconeScanner } from './Icones';
+import { IconeLoupe, IconeChevron } from './Icones';
 import DefiCommunaute from './DefiCommunaute';
 import { alertesBaisse, phraseBaisse, titreAlerteBaisse } from '../../lib/evolutionPrixCore';
 import {
-  apercuListe, actionPrincipale, montrerModeDemploi, economiesConfirmees,
+  apercuListe, actionPrincipale, montrerModeDemploi,
   ACTION_COMPARER, ACTION_COMMENCER_LISTE,
 } from '../../lib/accueilCore';
-
-const euros = (n) => `${Number(n).toFixed(2).replace('.', ',')} €`;
 
 function Carte({ children, style, onClick }) {
   return (
@@ -79,15 +79,14 @@ const ETAPES = [
 export default function AccueilSimple({
   pseudo, items = [], archives = [], setTab, onScanner,
   scanEnCours = null, onReprendreScan, onAbandonnerScan,
-  ticketAScanner = null, onOuvrirTicket = null,
+  ticketAScanner = null, onOuvrirTicket = null, onEcarterTicket = null,
   sessionCourses = null, progressionCourses = null, joursCourses = 0, onReprendreCourses, onAbandonnerCourses,
-  microDisponible = false, contributionVisible = false, onContribuer,
+  contributionVisible = false, onContribuer,
   communaute = null, evolutionPrix = null,
 }) {
   const [confirme, setConfirme] = useState(null); // 'scan' | 'courses' | null
   const liste = apercuListe(items);
   const action = actionPrincipale({ items, sessionCourses });
-  const confirmees = economiesConfirmees(archives);
   const prenom = (pseudo || '').trim();
   // Seulement mes habitudes : un produit acheté au moins deux fois.
   const enBaisse = alertesBaisse(evolutionPrix);
@@ -105,13 +104,21 @@ export default function AccueilSimple({
             {prenom ? `Bonjour ${prenom}` : 'Bonjour'}
           </div>
         </div>
-        <button onClick={() => setTab('catalog')} aria-label="Chercher un produit" style={{
-          width: '100%', border: 'none', background: '#fff', borderRadius: 14, padding: '13px 14px', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', gap: 10, color: T.texteLeger, boxShadow: '0 4px 14px rgba(0,0,0,0.12)',
-        }}>
-          <IconeLoupe width={20} height={20} />
-          <span style={{ fontFamily: T.police, fontWeight: 700, fontSize: 15 }}>Chercher un produit, une marque…</span>
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => setTab('catalog')} aria-label="Chercher un produit" style={{
+            flex: 1, minWidth: 0, border: 'none', background: '#fff', borderRadius: 14, padding: '13px 14px', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: 10, color: T.texteLeger, boxShadow: '0 4px 14px rgba(0,0,0,0.12)',
+          }}>
+            <IconeLoupe width={20} height={20} style={{ flexShrink: 0 }} />
+            <span style={{ fontFamily: T.police, fontWeight: 700, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Chercher un produit…</span>
+          </button>
+          <button onClick={() => setTab('catalog')} aria-label="Parcourir les rayons" style={{
+            flexShrink: 0, border: 'none', background: T.jaune, color: T.texte, borderRadius: 14, padding: '13px 14px', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: 6, fontFamily: T.police, fontWeight: 900, fontSize: 14, boxShadow: '0 4px 14px rgba(0,0,0,0.12)',
+          }}>
+            <span aria-hidden="true" style={{ fontSize: 16 }}>🛒</span> Rayons
+          </button>
+        </div>
       </div>
 
       <div style={{ padding: '16px 16px 0', display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -127,7 +134,8 @@ export default function AccueilSimple({
           />
         )}
         {onOuvrirTicket && ticketAScanner && (
-          <Rappel pastille="🧾" titre={ticketAScanner.titre} detail={ticketAScanner.sousTitre} action="Compléter" onAction={onOuvrirTicket} />
+          <Rappel pastille="🧾" titre={ticketAScanner.titre} detail={ticketAScanner.sousTitre} action="Compléter" onAction={onOuvrirTicket}
+            onFermer={onEcarterTicket} libelleFermer="Je ne les ai plus" />
         )}
         {scanEnCours && (
           <Rappel
@@ -155,7 +163,7 @@ export default function AccueilSimple({
           </Carte>
         )}
 
-        {/* Ma liste — le cœur de l'accueil */}
+        {/* Ma liste — le cœur de l'accueil : un aperçu, un seul gros bouton */}
         <Carte>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: liste.total > 0 ? 10 : 6 }}>
             <div style={{ fontFamily: T.police, fontWeight: 900, fontSize: 18, color: T.texte }}>Ma liste de courses</div>
@@ -173,14 +181,7 @@ export default function AccueilSimple({
                   ? 'Tout est coché. Ajoute ce qu\'il te manque pour la prochaine fois.'
                   : 'Ajoute ce qu\'il te faut : la communauté te dira où ta liste coûte le moins cher.'}
               </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <Bouton onClick={() => setTab('catalog')} style={{ flex: 1 }}>Ajouter des produits</Bouton>
-                {microDisponible && (
-                  <Bouton onClick={() => setTab('micro')} plein={false} style={{ width: 'auto', flexShrink: 0 }}>
-                    <IconeMicro width={18} height={18} /> Dicter
-                  </Bouton>
-                )}
-              </div>
+              <Bouton onClick={() => setTab('catalog')}>Ajouter des produits</Bouton>
             </>
           ) : (
             <>
@@ -191,59 +192,17 @@ export default function AccueilSimple({
                 {liste.reste > 0 && (
                   <span style={{ borderRadius: 99, padding: '6px 10px', fontFamily: T.police, fontWeight: 800, fontSize: 13, color: T.texteLeger }}>+ {liste.reste} autre{liste.reste > 1 ? 's' : ''}</span>
                 )}
+                <button onClick={() => setTab('catalog')} style={{ border: `1.5px dashed ${T.rouge}`, background: 'none', color: T.rouge, borderRadius: 99, padding: '5px 12px', fontFamily: T.police, fontWeight: 900, fontSize: 13, cursor: 'pointer' }}>+ Ajouter</button>
               </div>
               {action === ACTION_COMPARER && (
                 <Bouton onClick={() => setTab('compare')}>Où c'est le moins cher ?</Bouton>
               )}
-              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                <Bouton onClick={() => setTab('catalog')} plein={false} style={{ flex: 1, padding: '11px 12px', fontSize: 14 }}>Ajouter des produits</Bouton>
-                {microDisponible && (
-                  <Bouton onClick={() => setTab('micro')} plein={false} style={{ width: 'auto', flexShrink: 0, padding: '11px 14px', fontSize: 14 }}>
-                    <IconeMicro width={18} height={18} /> Dicter
-                  </Bouton>
-                )}
-              </div>
             </>
           )}
         </Carte>
 
-        {/* Chantier 134 — le catalogue a son entrée à lui sur l'accueil : sans
-            elle, on ne le trouvait qu'en passant par « Ajouter des produits ». */}
-        <Carte onClick={() => setTab('catalog')} style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <span style={{ width: 46, height: 46, borderRadius: 14, background: T.jaunePale, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 23, flexShrink: 0 }}>🛒</span>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontFamily: T.police, fontWeight: 900, fontSize: 15, color: T.texte }}>Parcourir les rayons</div>
-            <div style={{ fontFamily: T.police, fontSize: 12.5, color: T.texteDoux, marginTop: 2 }}>Tout le catalogue, rayon par rayon, avec les prix.</div>
-            <div aria-hidden="true" style={{ fontSize: 17, letterSpacing: 5, marginTop: 6 }}>🥦🥩🐟🥛🧂🍫🥤</div>
-          </div>
-          <IconeChevron width={20} height={20} style={{ color: T.texteLeger, flexShrink: 0 }} />
-        </Carte>
-
-        {/* Scanner un ticket : ce qui nourrit les prix */}
-        <Carte onClick={onScanner} style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <span style={{ width: 46, height: 46, borderRadius: 14, background: T.rougePale, color: T.rouge, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <IconeScanner width={24} height={24} />
-          </span>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontFamily: T.police, fontWeight: 900, fontSize: 15, color: T.texte }}>Scanner un ticket de caisse</div>
-            <div style={{ fontFamily: T.police, fontSize: 12.5, color: T.texteDoux, marginTop: 2 }}>Une photo, et tes prix sont à jour.</div>
-          </div>
-          <IconeChevron width={20} height={20} style={{ color: T.texteLeger, flexShrink: 0 }} />
-        </Carte>
-
         {/* Chantier 139 — le défi de la communauté (pilier communautaire). */}
         <DefiCommunaute stats={communaute} onScanner={onScanner} />
-
-        {/* Économies confirmées : seulement quand il y en a */}
-        {confirmees > 0 && (
-          <Carte onClick={() => setTab('economies')} style={{ display: 'flex', alignItems: 'center', gap: 14, background: T.vertPale, boxShadow: 'none' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontFamily: T.police, fontSize: 12.5, fontWeight: 800, color: T.vert }}>Économisé grâce à tes tickets</div>
-              <div style={{ fontFamily: T.police, fontWeight: 900, fontSize: 24, color: T.vert, marginTop: 1 }}>{euros(confirmees)}</div>
-            </div>
-            <IconeChevron width={20} height={20} style={{ color: T.vert, flexShrink: 0 }} />
-          </Carte>
-        )}
 
         {/* Mode d'emploi : pour un nouveau seulement */}
         {montrerModeDemploi({ archives, items }) && (
