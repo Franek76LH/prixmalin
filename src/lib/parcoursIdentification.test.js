@@ -123,7 +123,7 @@ describe('(2) après ✓, la bonne RPC selon le cas', () => {
     const d = deps({ chercherOff: vi.fn().mockRejectedValue(new Error('offline')) });
     const p = parcours(d);
     await p.codeLu('3017620422003');
-    expect(p.etat().recherche.fiche).toEqual({ nom: 'CHOU FLEUR PIECE', marque: null, format: null, photoOff: null, source: SOURCE_AUCUNE });
+    expect(p.etat().recherche.fiche).toEqual({ nom: 'CHOU FLEUR PIECE', marque: null, format: null, photoOff: null, source: SOURCE_AUCUNE, rayon: null });
     p.rescannerPourConfirmer();
     await p.codeLu('3017620422003');
     await p.confirmer();
@@ -521,5 +521,87 @@ describe('avertissementLigneDifferente (chantier 142)', () => {
     expect(avertissementLigneDifferente('', { nom: 'Bière blonde' })).toBeNull();
     expect(avertissementLigneDifferente('CHOU FLEUR', null)).toBeNull();
     expect(avertissementLigneDifferente('CHOU FLEUR', {})).toBeNull();
+  });
+});
+
+// Chantier 151 — le rayon de la fiche à créer : proposé par la base à partir
+// des catégories Open Food Facts, corrigeable d'un toucher, jamais imposé.
+describe('chantier 151 — rayon proposé et rayon choisi', () => {
+  const OFF_TAJINE = { product_name: 'La Tajine de Boeuf et ses Légumes du Soleil', brands: 'Fleury Michon', quantity: '350 g', categories_tags: ['fr:repas', 'fr:plats-avec-viande', 'fr:tajine'] };
+  const PLATS = { id: 'sc-plats', nom: 'Plats cuisinés' };
+  const SURGELES = { id: 'sc-surg', nom: 'Surgelés salés' };
+
+  it('produit inconnu : le rayon déduit des catégories est affiché sur la fiche, sans rien écrire', async () => {
+    const d = deps({ chercherOff: vi.fn().mockResolvedValue(OFF_TAJINE), devinerRayon: vi.fn().mockResolvedValue(PLATS) });
+    const p = parcours(d);
+    await p.codeLu('3302740368103');
+    expect(d.devinerRayon).toHaveBeenCalledWith(OFF_TAJINE.categories_tags);
+    expect(p.etat().phase).toBe(PHASE_VERIFICATION);
+    expect(p.etat().recherche.fiche.rayon).toBe('Plats cuisinés');
+    expect(p.etat().recherche.rayonChoisi).toBeNull();
+    expect(d.creerDepuisCode).not.toHaveBeenCalled();
+  });
+
+  it('confirmer sans rien toucher : les catégories partent à la base, aucun rayon imposé', async () => {
+    const d = deps({ chercherOff: vi.fn().mockResolvedValue(OFF_TAJINE), devinerRayon: vi.fn().mockResolvedValue(PLATS) });
+    const p = parcours(d);
+    await p.codeLu('3302740368103');
+    await p.confirmer();
+    const envoye = d.creerDepuisCode.mock.calls[0][0].off;
+    expect(envoye.categories_tags).toEqual(OFF_TAJINE.categories_tags);
+    expect(envoye.rayon_choisi).toBeUndefined();
+  });
+
+  it('l\'utilisateur corrige le rayon : la fiche l\'affiche et il part sous rayon_choisi', async () => {
+    const d = deps({ chercherOff: vi.fn().mockResolvedValue(OFF_TAJINE), devinerRayon: vi.fn().mockResolvedValue(PLATS) });
+    const p = parcours(d);
+    await p.codeLu('3302740368103');
+    p.choisirRayon(SURGELES);
+    expect(p.etat().recherche.fiche.rayon).toBe('Surgelés salés');
+    expect(p.etat().phase).toBe(PHASE_VERIFICATION);
+    await p.confirmer();
+    expect(d.creerDepuisCode.mock.calls[0][0].off.rayon_choisi).toBe('sc-surg');
+  });
+
+  it('la base ne sait pas, ou l\'accès échoue : rayon vide, le parcours continue', async () => {
+    for (const devinerRayon of [vi.fn().mockResolvedValue(null), vi.fn().mockRejectedValue(new Error('réseau')), undefined]) {
+      const d = deps({ chercherOff: vi.fn().mockResolvedValue(OFF_TAJINE), ...(devinerRayon ? { devinerRayon } : {}) });
+      const p = parcours(d);
+      await p.codeLu('3302740368103');
+      expect(p.etat().phase).toBe(PHASE_VERIFICATION);
+      expect(p.etat().recherche.fiche.rayon).toBeNull();
+      await p.confirmer();
+      expect(d.creerDepuisCode).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('sans catégories Open Food Facts, la base n\'est même pas interrogée', async () => {
+    const d = deps({ chercherOff: vi.fn().mockResolvedValue({ product_name: 'Café n 5 doux' }), devinerRayon: vi.fn() });
+    const p = parcours(d);
+    await p.codeLu('3667461000108');
+    expect(d.devinerRayon).not.toHaveBeenCalled();
+    expect(p.etat().recherche.fiche.rayon).toBeNull();
+  });
+
+  it('choisirRayon est sans effet pour un produit déjà connu, hors fiche, ou avec un rayon incomplet', async () => {
+    const d = deps({ ...connu(), devinerRayon: vi.fn() });
+    const p = parcours(d);
+    expect(p.choisirRayon(SURGELES).phase).toBe(PHASE_CAMERA); // pas encore de fiche
+    await p.codeLu('8714800038669');
+    p.choisirRayon(SURGELES);
+    expect(p.etat().recherche.rayonChoisi).toBeUndefined();
+    expect(d.devinerRayon).not.toHaveBeenCalled();
+    const d2 = deps({ chercherOff: vi.fn().mockResolvedValue(OFF_TAJINE) });
+    const p2 = parcours(d2);
+    await p2.codeLu('3302740368103');
+    p2.choisirRayon({ id: 'x' });
+    p2.choisirRayon(null);
+    expect(p2.etat().recherche.rayonChoisi).toBeNull();
+  });
+
+  it('offPourCreation : rayon choisi ajouté, même quand Open Food Facts est muet', () => {
+    expect(offPourCreation({}, SURGELES)).toEqual({ rayon_choisi: 'sc-surg' });
+    expect(offPourCreation({ product_name: 'X' }, null)).toEqual({ product_name: 'X' });
+    expect(offPourCreation({}, null)).toEqual({});
   });
 });

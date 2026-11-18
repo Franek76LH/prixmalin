@@ -159,6 +159,16 @@ export function creerParcoursIdentification({
       return publier({ phase: PHASE_REFUS, recherche, message: recherche.message });
     },
 
+    // Chantier 151 — l'utilisateur corrige le rayon proposé pour un produit
+    // INCONNU (la fiche sera créée dans ce rayon). N'écrit rien. Sans effet
+    // hors de la fiche de vérification, ou pour un produit déjà dans notre base.
+    choisirRayon(rayon) {
+      if (etat.phase !== PHASE_VERIFICATION || etat.recherche?.statut !== RECHERCHE_INCONNU) return etat;
+      if (!rayon?.id || !rayon?.nom) return etat;
+      const choisi = { id: String(rayon.id), nom: String(rayon.nom) };
+      return publier({ recherche: { ...etat.recherche, rayonChoisi: choisi, fiche: { ...etat.recherche.fiche, rayon: choisi.nom } } });
+    },
+
     // « ✓ C'est bien ça » — SEUL geste qui écrit.
     async confirmer() {
       if (etat.phase !== PHASE_VERIFICATION || !etat.recherche) return etat;

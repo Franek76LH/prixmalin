@@ -72,3 +72,24 @@ describe('RPC marquer_ligne_sans_code_barres', () => {
     expect(supabase.rpc).toHaveBeenLastCalledWith('marquer_ligne_sans_code_barres', { p_ligne_ticket_id: 'l-chou', p_valeur: false });
   });
 });
+
+// Chantier 151 — rayons proposés quand l'utilisateur veut corriger le rayon.
+import { rayonsPourChoix } from './historiqueTicketsCore';
+describe('rayonsPourChoix (chantier 151)', () => {
+  it('trie par catégorie puis par nom, écarte « À reclasser », les catégories masquées et les lignes incomplètes', () => {
+    const lignes = [
+      { id: 'b', nom: 'Vins', categories: { nom: 'Boissons alcoolisées', visible: true } },
+      { id: 'a', nom: 'Bières', categories: { nom: 'Boissons alcoolisées', visible: true } },
+      { id: 'c', nom: 'Plats cuisinés', categories: { nom: 'Plats préparés & traiteur', visible: true } },
+      { id: 'cba4251f-28b5-4f0d-bfb6-70af5c802205', nom: 'À reclasser (import Drive)', categories: { nom: 'Import Drive', visible: true } },
+      { id: 'd', nom: 'Caché', categories: { nom: 'Zzz', visible: false } },
+      { id: 'e' }, null,
+    ];
+    expect(rayonsPourChoix(lignes)).toEqual([
+      { id: 'a', nom: 'Bières', categorie: 'Boissons alcoolisées' },
+      { id: 'b', nom: 'Vins', categorie: 'Boissons alcoolisées' },
+      { id: 'c', nom: 'Plats cuisinés', categorie: 'Plats préparés & traiteur' },
+    ]);
+    expect(rayonsPourChoix(null)).toEqual([]);
+  });
+});

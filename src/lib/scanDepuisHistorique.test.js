@@ -136,7 +136,7 @@ describe('Open Food Facts', () => {
   it('demande exactement les champs du contrat', async () => {
     const fetchImpl = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ status: 1, product: { product_name: 'X' } }) });
     await chercherOffPourCreation('3250392881917', { fetchImpl });
-    expect(fetchImpl.mock.calls[0][0]).toBe('https://world.openfoodfacts.org/api/v2/product/3250392881917.json?fields=product_name,brands,quantity,product_quantity,product_quantity_unit,image_front_small_url');
+    expect(fetchImpl.mock.calls[0][0]).toBe('https://world.openfoodfacts.org/api/v2/product/3250392881917.json?fields=product_name,brands,quantity,product_quantity,product_quantity_unit,image_front_small_url,categories_tags,generic_name_fr');
   });
 });
 

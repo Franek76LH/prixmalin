@@ -158,12 +158,14 @@ export function codePourCreation(code) {
 
 // ── Open Food Facts ────────────────────────────────────────────────────────
 export const DELAI_OFF_MS = 4000;
-export const champsOffCreation = 'product_name,brands,quantity,product_quantity,product_quantity_unit,image_front_small_url';
+// Chantier 151 — on demande AUSSI les catégories et le nom générique : la base
+// en déduit le rayon de la fiche créée (au lieu de « À reclasser »).
+export const champsOffCreation = 'product_name,brands,quantity,product_quantity,product_quantity_unit,image_front_small_url,categories_tags,generic_name_fr';
 export const urlOffCreation = (ean, champs = champsOffCreation) =>
   `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(ean)}.json?fields=${champs}`;
 // Chantier 119 — l'écran de vérification veut AUSSI le nom français et la
 // grande photo (montrée en plein écran).
-export const champsOffIdentification = 'product_name,product_name_fr,brands,quantity,product_quantity,product_quantity_unit,image_front_url,image_front_small_url';
+export const champsOffIdentification = 'product_name,product_name_fr,brands,quantity,product_quantity,product_quantity_unit,image_front_url,image_front_small_url,categories_tags,generic_name_fr';
 
 // Ne garde que les champs demandés, non vides. {} quand OFF ne sait rien.
 export function extraireOff(json, champs = champsOffCreation) {
@@ -272,7 +274,9 @@ export function nomOff(off) {
 
 // Ce que l'écran de vérification montre. `photoOff` = URL OFF brute (grande
 // de préférence), à passer par Cloudinary ; null = cadre gris.
-export function ficheVerification({ statut, variante = null, off = {}, ligne = null }) {
+// Chantier 151 — `rayon` : { id, nom } déduit des catégories OFF ou choisi à
+// l'écran ; null = l'app ne sait pas (la fiche ira dans la file de relecture).
+export function ficheVerification({ statut, variante = null, off = {}, ligne = null, rayon = null }) {
   const photoOff = off?.image_front_url || off?.image_front_small_url || null;
   if (statut === RECHERCHE_CONNU) {
     return {
@@ -290,18 +294,35 @@ export function ficheVerification({ statut, variante = null, off = {}, ligne = n
     format: formatOff(off),
     photoOff,
     source: offParle ? SOURCE_OFF : SOURCE_AUCUNE,
+    rayon: rayon?.nom ? String(rayon.nom) : null,
   };
 }
 
 // JSON envoyé à creer_produit_depuis_code_barres : celui d'OFF, avec
 // product_name = le nom AFFICHÉ (français d'abord) — la fiche créée porte
 // exactement le nom que l'utilisateur a confirmé. {} si OFF est muet.
-export function offPourCreation(off) {
-  if (!off || typeof off !== 'object' || Object.keys(off).length === 0) return {};
-  const out = { ...off };
+// Chantier 151 — `rayonChoisi` ({ id }) : le rayon que l'utilisateur a corrigé
+// à l'écran ; il part sous la clé rayon_choisi et la base le prend en priorité.
+export function offPourCreation(off, rayonChoisi = null) {
+  const choisi = rayonChoisi?.id ? { rayon_choisi: String(rayonChoisi.id) } : {};
+  if (!off || typeof off !== 'object' || Object.keys(off).length === 0) return { ...choisi };
+  const out = { ...off, ...choisi };
   const nom = nomOff(off);
   if (nom) out.product_name = nom;
   return out;
+}
+
+// Rayon { id, nom } déduit des catégories OFF par la base (deps.devinerRayon,
+// facultatif). Rien à deviner, accès absent ou en échec : null, jamais d'exception.
+export async function devinerRayonOff(off, deps) {
+  const tags = Array.isArray(off?.categories_tags) ? off.categories_tags : [];
+  if (tags.length === 0 || typeof deps?.devinerRayon !== 'function') return null;
+  try {
+    const r = await deps.devinerRayon(tags);
+    return r && r.id && r.nom ? { id: String(r.id), nom: String(r.nom) } : null;
+  } catch {
+    return null;
+  }
 }
 
 // TEMPS 1 — recherche seule. deps : chercherVarianteParCode, chercherOff.
@@ -344,7 +365,8 @@ export async function rechercherScanLigne({ ligne, codeBrut, deps, photoPourConn
 
   let off = {};
   try { off = (await deps.chercherOff(codePourCreation(code))) || {}; } catch { off = {}; }
-  return { statut: RECHERCHE_INCONNU, ecrit: false, code, off, fiche: ficheVerification({ statut: RECHERCHE_INCONNU, off, ligne }) };
+  const rayon = await devinerRayonOff(off, deps);
+  return { statut: RECHERCHE_INCONNU, ecrit: false, code, off, rayon, rayonChoisi: null, fiche: ficheVerification({ statut: RECHERCHE_INCONNU, off, ligne, rayon }) };
 }
 
 // TEMPS 2 — écriture, uniquement sur une recherche RÉUSSIE (connu/inconnu).
@@ -382,7 +404,7 @@ export async function ecrireScanLigne({ ligne, recherche, deps }) {
   const off = r.off || {};
   let rep;
   try {
-    rep = await deps.creerDepuisCode({ ligneId: ligne.id, code: codePourCreation(code), off: offPourCreation(off) });
+    rep = await deps.creerDepuisCode({ ligneId: ligne.id, code: codePourCreation(code), off: offPourCreation(off, r.rayonChoisi) });
   } catch (e) {
     rep = { error: e || true };
   }

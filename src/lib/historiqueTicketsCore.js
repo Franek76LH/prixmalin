@@ -223,7 +223,39 @@ export const depsScanLigne = {
       p_off: off || {},
     });
   },
+  // Chantier 151 — rayon déduit des catégories Open Food Facts (lecture seule).
+  // { id, nom } ou null ; fonction absente ou en échec : null.
+  async devinerRayon(tags) {
+    try {
+      const { data, error } = await supabase.rpc('deviner_rayon_off', { p_tags: Array.isArray(tags) ? tags : [] });
+      return error ? null : (data || null);
+    } catch {
+      return null;
+    }
+  },
+  // Chantier 151 — les rayons proposés quand l'utilisateur veut corriger :
+  // [{ id, nom, categorie }], triés par catégorie puis par nom. [] en cas d'échec.
+  async chargerRayons() {
+    try {
+      const { data, error } = await supabase
+        .from('sous_categories')
+        .select('id, nom, categories(nom, visible)')
+        .eq('actif', true);
+      if (error) return [];
+      return rayonsPourChoix(data);
+    } catch {
+      return [];
+    }
+  },
 };
+
+// Pure — rayons proposables : catégorie visible, hors « À reclasser », triés.
+export function rayonsPourChoix(lignes) {
+  return (Array.isArray(lignes) ? lignes : [])
+    .filter(r => r?.id && r?.nom && r.id !== SOUS_CATEGORIE_A_RECLASSER_ID && r.categories?.visible !== false)
+    .map(r => ({ id: String(r.id), nom: String(r.nom), categorie: String(r.categories?.nom || '') }))
+    .sort((a, b) => a.categorie.localeCompare(b.categorie, 'fr') || a.nom.localeCompare(b.nom, 'fr'));
+}
 
 // Étape 4 (lecture seule) — produits créés au scan restés incomplets : voir
 // estProduitACompleter (code source 'scan' ET (quantité non fiable OU fiche

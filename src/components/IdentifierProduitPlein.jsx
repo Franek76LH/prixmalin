@@ -14,7 +14,7 @@ import {
   creerParcoursIdentification, PHRASE_ENGAGEMENT, AVERTISSEMENT_AUCUNE_INFO, doubleLectureRequise, avertissementLigneDifferente,
   PHASE_CAMERA, PHASE_RECHERCHE, PHASE_VERIFICATION, PHASE_REFUS, PHASE_ECRITURE, PHASE_SUCCES, PHASE_FIN,
 } from '../lib/parcoursIdentification';
-import { DUREE_ANNULATION_MS, SOURCE_BASE, SOURCE_OFF, SCAN_POIDS_VARIABLE, SCAN_ARCHIVE } from '../lib/scanDepuisHistorique';
+import { DUREE_ANNULATION_MS, SOURCE_BASE, SOURCE_OFF, SCAN_POIDS_VARIABLE, SCAN_ARCHIVE, RECHERCHE_INCONNU } from '../lib/scanDepuisHistorique';
 
 const F = "'Nunito',sans-serif";
 const FOND = '#121417';
@@ -65,6 +65,36 @@ function LienDiscret({ children, onClick }) {
   );
 }
 
+// Chantier 151 — liste des rayons, ouverte seulement si l'utilisateur touche la
+// ligne « Rayon ». Aucune étape imposée : fermer = garder le rayon proposé.
+function ChoixRayon({ rayons, onChoisir, onFermer }) {
+  const liste = rayons || [];
+  return (
+    <div role="dialog" aria-label="Choisir le rayon" style={{ position: 'fixed', inset: 0, zIndex: 640, background: FOND, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ padding: 'calc(14px + env(safe-area-inset-top, 0px)) 18px 12px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+        <div style={{ flex: 1, fontFamily: F, fontWeight: 900, fontSize: 18, color: '#fff' }}>Dans quel rayon ?</div>
+        <button onClick={onFermer} aria-label="Fermer" style={{ background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: 99, width: 36, height: 36, color: '#fff', fontSize: 18, cursor: 'pointer' }}>✕</button>
+      </div>
+      <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '8px 18px calc(18px + env(safe-area-inset-bottom, 0px))' }}>
+        {rayons === null && <div style={{ fontFamily: F, fontSize: 14, color: GRIS_TEXTE, padding: '16px 0' }}>Chargement des rayons…</div>}
+        {rayons && rayons.length === 0 && <div style={{ fontFamily: F, fontSize: 14, color: GRIS_TEXTE, padding: '16px 0' }}>Rayons indisponibles pour le moment. Le produit sera rangé plus tard.</div>}
+        {liste.map((r, i) => {
+          const titre = i === 0 || liste[i - 1].categorie !== r.categorie ? r.categorie : null;
+          return (
+            <div key={r.id}>
+              {titre && <div style={{ fontFamily: F, fontSize: 11, fontWeight: 900, color: GRIS_TEXTE, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '14px 0 6px' }}>{titre}</div>}
+              <button onClick={() => onChoisir(r)}
+                style={{ width: '100%', textAlign: 'left', padding: '13px 14px', marginBottom: 6, borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: 'rgba(255,255,255,0.06)', color: '#fff', fontFamily: F, fontWeight: 800, fontSize: 15, cursor: 'pointer' }}>
+                {r.nom}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function IdentifierProduitPlein({ lignes, ligneDepartId, deps, onFermer, onRetourAccueil }) {
   const [etat, setEtat] = useState(null);
   // Un seul parcours pour toute la vie de l'écran (initialisation paresseuse).
@@ -72,6 +102,17 @@ export default function IdentifierProduitPlein({ lignes, ligneDepartId, deps, on
   const e = etat || p.etat();
   const [imageFigee, setImageFigee] = useState(null);
   const [erreurCamera, setErreurCamera] = useState(null);
+  // Chantier 151 — choix du rayon : fermé par défaut, rayons chargés au premier besoin.
+  const [choixRayonOuvert, setChoixRayonOuvert] = useState(false);
+  const [rayons, setRayons] = useState(null);
+  const ouvrirChoixRayon = () => {
+    setChoixRayonOuvert(true);
+    if (rayons === null && typeof deps?.chargerRayons === 'function') {
+      Promise.resolve(deps.chargerRayons()).then(r => setRayons(Array.isArray(r) ? r : [])).catch(() => setRayons([]));
+    } else if (rayons === null) {
+      setRayons([]);
+    }
+  };
 
   // « ↩ Annuler » : 8 s puis disparition.
   const idAnnulable = e.annulable?.ligneId ?? null;
@@ -196,6 +237,13 @@ export default function IdentifierProduitPlein({ lignes, ligneDepartId, deps, on
           <div style={{ fontFamily: F, fontWeight: 900, fontSize: 24, color: '#fff', lineHeight: 1.2, wordBreak: 'break-word' }}>{f.nom}</div>
           <div style={{ fontFamily: F, fontWeight: 800, fontSize: 16, color: f.marque ? '#fff' : GRIS_TEXTE, marginTop: 4 }}>{f.marque || 'marque inconnue'}</div>
           <div style={{ fontFamily: F, fontWeight: 700, fontSize: 15, color: f.format ? '#fff' : '#FFD27A', marginTop: 2 }}>{f.format || 'quantité à préciser'}</div>
+          {/* Chantier 151 — rayon de la fiche qui va être créée. Une ligne, pas une étape : on peut la toucher pour corriger. */}
+          {e.recherche?.statut === RECHERCHE_INCONNU && !aucuneInfo && (
+            <button onClick={ouvrirChoixRayon} disabled={ecriture}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 8, padding: '6px 10px', borderRadius: 99, border: '1px solid rgba(255,255,255,0.25)', background: 'rgba(255,255,255,0.08)', color: f.rayon ? '#fff' : GRIS_TEXTE, fontFamily: F, fontWeight: 800, fontSize: 13, cursor: 'pointer' }}>
+              Rayon : {f.rayon || 'à ranger plus tard'} <span aria-hidden="true" style={{ opacity: 0.7 }}>✏️</span>
+            </button>
+          )}
           {aucuneInfo ? (
             <div style={{ fontFamily: F, fontWeight: 900, fontSize: 26, color: '#fff', letterSpacing: '0.08em', marginTop: 10 }}>{e.recherche?.code}</div>
           ) : null}
@@ -263,6 +311,10 @@ export default function IdentifierProduitPlein({ lignes, ligneDepartId, deps, on
   return (
     <div style={{ position: 'fixed', inset: 0, background: FOND, zIndex: 620, display: 'flex', flexDirection: 'column', overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
       <style>{STYLE_ANIM}</style>
+      {choixRayonOuvert && (
+        <ChoixRayon rayons={rayons} onFermer={() => setChoixRayonOuvert(false)}
+          onChoisir={(r) => { p.choisirRayon(r); setChoixRayonOuvert(false); }} />
+      )}
       <div style={{ padding: 'calc(14px + env(safe-area-inset-top, 0px)) 18px 14px', display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.08)', flexShrink: 0 }}>
         {entete(true)}
       </div>
