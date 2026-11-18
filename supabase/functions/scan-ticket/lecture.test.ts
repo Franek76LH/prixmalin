@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import {
   construirePromptTicket, construireCorpsOpenRouter, CONSIGNES_ANTI_INVENTION, FOURNISSEUR, MODELE,
   dimensionsJpeg, infosImages, lireImagesRequete, lireTicket,
+  CONSIGNE_REMISE_DE_LIGNE, CONSIGNE_LIBELLE_REMISE_IMPORT, normaliserRemisesDeLigne, VERSION_LECTURE,
 } from './lecture.ts';
 
 // En-tête JPEG minimal : SOI, segment APP0 (16 octets), SOF0 1234 × 567.
@@ -120,7 +121,7 @@ describe('lireTicket — appel, analyse et journaux', () => {
     const j = journal();
     const fetchFn = vi.fn().mockResolvedValue(reponseOpenRouter({ store: 'UTILE', products: [{ name: 'Pain', price: 1 }] }));
     const lu = await lireTicket({ corps: { imageBase64: jpegMinimal(1500, 2000) }, apiKey: 'k', fetchFn, journal: j });
-    expect(lu).toEqual({ store: 'UTILE', products: [{ name: 'Pain', price: 1 }] });
+    expect(lu).toEqual({ store: 'UTILE', products: [{ name: 'Pain', price: 1, remise: 0 }] });
     const envoye = JSON.parse(fetchFn.mock.calls[0][1].body);
     expect(envoye.provider).toEqual({ order: ['anthropic'], allow_fallbacks: false });
     const [etiquette, details] = j.log.mock.calls[0];
@@ -265,11 +266,16 @@ describe('import de ticket (chantier 120) — sans effet sur le scan photo', () 
   const empreinte = (t: string) => createHash('sha256').update(t).digest('hex');
   const refs = [{ nom: 'Lait demi-écrémé', categorie: 'Crèmerie' }, { nom: 'Pâtes', categorie: 'Épicerie' }];
 
-  it('scan photo : consignes identiques au caractère près à celles du chantier 121', () => {
-    expect(empreinte(construirePromptTicket({ nbImages: 1, isMulti: false }))).toBe('78afc88d3f3119441b9fc462c1d7f17450051a9c22d9798716d9a1da2eaee4bd');
-    expect(empreinte(construirePromptTicket({ nbImages: 1, isMulti: false, refProducts: refs }))).toBe('bfcb924e98a980882edba220a429e68385f7cbaab34493dd5b7bc4dd20bb088f');
-    expect(empreinte(construirePromptTicket({ nbImages: 3, isMulti: true, refProducts: refs }))).toBe('64957fc9283c6d9d54e42e1896c3ee4cf42cb2c527e7267ab088191f240e7d30');
-    expect(empreinte(JSON.stringify(construireCorpsOpenRouter({ images: ['AAAA'], isMulti: false, refProducts: refs })))).toBe('5fb3c662d1a4ff1cafdf737384f835db6742eff9fb61fa1135bad72af0cf1bf6');
+  it('scan photo, consigne de remise retirée : texte identique au caractère près à celui du chantier 121', () => {
+    expect(empreinte(construirePromptTicket({ nbImages: 1, isMulti: false, remiseDeLigne: false }))).toBe('78afc88d3f3119441b9fc462c1d7f17450051a9c22d9798716d9a1da2eaee4bd');
+    expect(empreinte(construirePromptTicket({ nbImages: 1, isMulti: false, refProducts: refs, remiseDeLigne: false }))).toBe('bfcb924e98a980882edba220a429e68385f7cbaab34493dd5b7bc4dd20bb088f');
+    expect(empreinte(construirePromptTicket({ nbImages: 3, isMulti: true, refProducts: refs, remiseDeLigne: false }))).toBe('64957fc9283c6d9d54e42e1896c3ee4cf42cb2c527e7267ab088191f240e7d30');
+    // le corps envoyé = le texte du 121 + la seule consigne de remise, insérée juste avant le catalogue
+    const corps = construireCorpsOpenRouter({ images: ['AAAA'], isMulti: false, refProducts: refs });
+    const texte = corps.messages[0].content.at(-1).text as string;
+    expect(texte.split(CONSIGNE_REMISE_DE_LIGNE)).toHaveLength(2);
+    corps.messages[0].content.at(-1).text = texte.replace(CONSIGNE_REMISE_DE_LIGNE, '');
+    expect(empreinte(JSON.stringify(corps))).toBe('5fb3c662d1a4ff1cafdf737384f835db6742eff9fb61fa1135bad72af0cf1bf6');
   });
 
   it('import : les quatre ajouts v14 sont présents, et rien du texte d\'origine n\'est retiré', () => {
@@ -300,9 +306,91 @@ describe('import de ticket (chantier 120) — sans effet sur le scan photo', () 
       fetchFn.mockClear(); journal.log.mockClear();
       // deno-lint-ignore no-explicit-any
       const r2: any = await lireTicket({ corps: { imageBase64: 'AAAA', importFichier: valeur }, apiKey: 'k', fetchFn: fetchFn as unknown as typeof fetch, journal });
-      expect(r2).toEqual(lu); // réponse rendue telle quelle
+      // hors import : seules les remises de ligne sont normalisées (chantier 148)
+      expect(r2).toEqual({ store: 'Carrefour', products: [{ libelle_ticket: 'LAIT', price: 4.29, remise: 2.15 }, { libelle_ticket: 'PAIN', price: 1, remise: 0 }] });
+      expect(r2.captures_peut_etre_incompletes).toBeUndefined();
       expect(JSON.parse(fetchFn.mock.calls[0][1].body).messages[0].content.at(-1).text).not.toContain('REMISE SOUS UNE LIGNE');
       expect(JSON.parse(journal.log.mock.calls[0][1]).import_fichier).toBe(false);
     }
+  });
+});
+
+// Chantier 148 — ticket Carrefour de François du 18/11 : « 4X100G PPC VAN LL
+// 2,27x3 6,81 » puis « Remise Immédiate 2,27- ». Le scan photo ne rattachait
+// pas la remise à sa ligne (consigne réservée à l'import).
+describe('remise imprimée sous un article — scan photo (chantier 148)', () => {
+  it('la consigne part avec TOUT scan photo, une seule fois, avant le catalogue, sans rien retirer', () => {
+    const refs = [{ nom: 'Lait demi-écrémé', categorie: 'Crèmerie' }];
+    for (const args of [{ nbImages: 1, isMulti: false }, { nbImages: 1, isMulti: false, refProducts: refs }, { nbImages: 3, isMulti: true, refProducts: refs }]) {
+      const avec = construirePromptTicket(args);
+      const sans = construirePromptTicket({ ...args, remiseDeLigne: false });
+      expect(avec.split(CONSIGNE_REMISE_DE_LIGNE)).toHaveLength(2);
+      expect(avec.replace(CONSIGNE_REMISE_DE_LIGNE, '')).toBe(sans);
+      expect(avec).toContain(CONSIGNES_ANTI_INVENTION);
+      expect(avec.indexOf(CONSIGNE_REMISE_DE_LIGNE)).toBeGreaterThan(avec.indexOf(CONSIGNES_ANTI_INVENTION));
+    }
+    const avecCatalogue = construirePromptTicket({ nbImages: 1, isMulti: false, refProducts: refs });
+    expect(avecCatalogue.indexOf(CONSIGNE_REMISE_DE_LIGNE)).toBeLessThan(avecCatalogue.indexOf('Catalogue de référence'));
+  });
+
+  it('dit : rattacher à l\'article du dessus, montant positif, texte recopié, prix avant remise, jamais inventer, fidélité exclue', () => {
+    const c = CONSIGNE_REMISE_DE_LIGNE;
+    expect(c).toMatch(/se RATTACHE à l'article du dessus/);
+    expect(c).toMatch(/"remise" \(nombre POSITIF\)/);
+    expect(c).toMatch(/"libelle_remise" \(texte\).*recopié tel quel/s);
+    expect(c).toMatch(/restent les montants AVANT remise/);
+    expect(c).toMatch(/ne change JAMAIS "qty"/);
+    expect(c).toMatch(/N'invente JAMAIS une remise/);
+    expect(c).toMatch(/ne répartis JAMAIS toi-même le total des remises/);
+    expect(c).toMatch(/APRÈS le total.*n'est PAS une remise de ligne/s);
+    expect(c).toMatch(/"total_remises" ci-dessus reste inchangée/);
+  });
+
+  it('import : les consignes v14 restent, seul le champ libelle_remise est ajouté', () => {
+    const t = construirePromptTicket({ nbImages: 1, isMulti: false, consignesImport: true });
+    expect(t).toContain('REMISE SOUS UNE LIGNE');
+    expect(t).toContain(CONSIGNE_LIBELLE_REMISE_IMPORT);
+    expect(t).not.toContain(CONSIGNE_REMISE_DE_LIGNE);
+  });
+
+  it('normalise la remise : signe avant ou après, virgule, texte ; absente ou illisible -> 0', () => {
+    const r = normaliserRemisesDeLigne({ products: [
+      { name: 'a', remise: '2,27-' }, { name: 'b', remise: '-2,27' }, { name: 'c', remise: -0.5 }, { name: 'd', remise: 1.899 },
+      { name: 'e' }, { name: 'f', remise: 'abc' }, { name: 'g', remise: null }, null,
+    ] });
+    expect(r.products.slice(0, 7).map((p: { remise: number }) => p.remise)).toEqual([2.27, 2.27, 0.5, 1.9, 0, 0, 0]);
+    expect(r.products[7]).toBeNull();
+  });
+
+  it('libelle_remise : gardé seulement avec une remise, nettoyé, borné ; jamais d\'exception', () => {
+    const r = normaliserRemisesDeLigne({ products: [
+      { name: 'a', remise: 2.27, libelle_remise: '  Remise Immédiate ' },
+      { name: 'b', remise: 0, libelle_remise: 'Remise Immédiate' },
+      { name: 'c', remise: 1, libelle_remise: 42 },
+      { name: 'd', remise: 1, libelle_remise: 'x'.repeat(200) },
+    ] });
+    expect(r.products[0]).toEqual({ name: 'a', remise: 2.27, libelle_remise: 'Remise Immédiate' });
+    expect(r.products[1]).toEqual({ name: 'b', remise: 0 });
+    expect(r.products[2]).toEqual({ name: 'c', remise: 1 });
+    expect(r.products[3].libelle_remise).toHaveLength(80);
+    for (const v of [null, undefined, 'x', 3, {}, { products: 'x' }]) expect(normaliserRemisesDeLigne(v)).toBe(v);
+  });
+
+  it('le ticket Carrefour du 18/11, lu comme attendu, ressort avec 2,27 € sur la ligne des pots et rien ailleurs', async () => {
+    const lu = { store: 'Carrefour', total_ticket: 30.33, nombre_articles: 11, total_remises: 2.27, products: [
+      { libelle_ticket: 'X36 DOSETTE DOUX N', qty: 1, unit_price: 5.55, price: 5.55, total: 5.55 },
+      { libelle_ticket: '4X100G PPC VAN LL', qty: 3, unit_price: 2.27, price: 2.27, total: 6.81, remise: '2,27-', libelle_remise: 'Remise Immédiate' },
+      { libelle_ticket: 'HACHE 15% X2 BIO', qty: 1, unit_price: 6.15, price: 6.15, total: 6.15, remise: 0 },
+    ] };
+    const journal = { log: vi.fn(), error: vi.fn() };
+    const fetchFn = vi.fn(async () => reponseOpenRouter(lu));
+    // deno-lint-ignore no-explicit-any
+    const r: any = await lireTicket({ corps: { imageBase64: 'AAAA' }, apiKey: 'k', fetchFn: fetchFn as unknown as typeof fetch, journal });
+    expect(r.products.map((p: { remise: number }) => p.remise)).toEqual([0, 2.27, 0]);
+    expect(r.products[1]).toMatchObject({ qty: 3, unit_price: 2.27, total: 6.81, libelle_remise: 'Remise Immédiate' });
+    expect(r.total_remises).toBe(2.27);
+    expect(JSON.parse(fetchFn.mock.calls[0][1].body).messages[0].content.at(-1).text).toContain(CONSIGNE_REMISE_DE_LIGNE);
+    expect(JSON.parse(journal.log.mock.calls[0][1]).version).toBe('remise-de-ligne');
+    expect(VERSION_LECTURE).toBe('remise-de-ligne');
   });
 });

@@ -36,7 +36,7 @@ export const MODELE = "anthropic/claude-sonnet-4-5";
 // en silence chez un autre hébergeur.
 export const FOURNISSEUR = { order: ["anthropic"], allow_fallbacks: false };
 
-export const VERSION_LECTURE = "anti-invention";
+export const VERSION_LECTURE = "remise-de-ligne";
 
 // ── Consignes ajoutées (après le texte v13, avant le catalogue) ────────────
 // L'exigence de ne rien oublier (RÈGLE ABSOLUE v13) reste en place, juste
@@ -65,6 +65,27 @@ ADRESSE ET DATE — RECOPIÉES, JAMAIS DEVINÉES :
 - "address" ne contient QUE le numéro, la rue, le code postal et la ville DU MAGASIN : l'adresse imprimée juste sous le nom du magasin, en haut du ticket. N'y mets JAMAIS le nom ou le numéro du magasin ("MAGASIN …", "N°…"), ni l'adresse de la société exploitante ou du siège (bloc qui suit une raison sociale, "SAS", "SARL", "EXPLOITATION", ou accompagné du SIRET / de la TVA intracommunautaire).
 - "date" : uniquement la date IMPRIMÉE du passage en caisse (voir la règle DATE). Si elle n'est pas lisible telle quelle : null. N'utilise jamais la date du jour ni une date supposée.`;
 
+// ── Remise imprimée sous un article — TOUS les scans (chantier 148, 18/11) ──
+// Constat sur le ticket Carrefour de François (18/11, scan photo) : le lecteur
+// a bien lu le total des remises (2,27 €) mais la remise n'a pas été rattachée
+// à sa ligne (« 4X100G PPC VAN LL 2,27x3 6,81 » puis « Remise Immédiate
+// 2,27- ») : la consigne « remise sous une ligne » n'existait que pour l'import
+// de fichier. Elle vaut maintenant aussi pour un scan photo, avec le texte
+// imprimé de la remise (« libelle_remise »), recopié, jamais interprété.
+// En import, les consignes v14 disent déjà comment rattacher la remise : on
+// n'y ajoute que le champ « libelle_remise ».
+export const CONSIGNE_REMISE_DE_LIGNE = `
+REMISE IMPRIMÉE SOUS UN ARTICLE (ex. Carrefour : une ligne "Remise Immédiate 2,27-" juste sous l'article "4X100G … 2,27x3 6,81") : une remise imprimée juste sous un article, DANS la liste des articles et AVANT le total, se RATTACHE à l'article du dessus. Ajoute alors deux champs à l'objet de CET article dans "products" :
+- "remise" (nombre POSITIF) : le montant de la remise tel qu'il est imprimé, sans son signe (ex. "2,27-" ou "-2,27" -> 2.27).
+- "libelle_remise" (texte) : le texte imprimé sur la ligne de la remise, recopié tel quel, sans le montant (ex. "Remise Immédiate", "2+1 OFFERT", "2EME A -50%"). Ne le reformule pas, ne le complète pas, ne devine pas la règle de la promotion.
+- Les champs unit_price, price et total de l'article restent les montants AVANT remise. La remise n'est JAMAIS un objet de "products" et ne change JAMAIS "qty".
+- Un article SANS remise imprimée juste en dessous : n'ajoute pas ces champs (ou "remise": 0). N'invente JAMAIS une remise, et ne répartis JAMAIS toi-même le total des remises entre les articles.
+- Un montant imprimé APRÈS le total (cagnotte, "AVANTAGES … CLUB", "DETAIL DE VOS AVANTAGES FIDELITE", euros cumulés sur une carte) n'est PAS une remise de ligne, même s'il répète le nom d'un article : il ne réduit pas le montant payé.
+- La règle de "total_remises" ci-dessus reste inchangée (0 / total imprimé / null).`;
+
+export const CONSIGNE_LIBELLE_REMISE_IMPORT = `
+- Quand tu remplis le champ "remise" d'un article, ajoute aussi "libelle_remise" (texte) : le texte imprimé sur la ligne de la remise, recopié tel quel, sans le montant (ex. "Remise immédiate", "2+1 OFFERT"). Ne le reformule pas, ne devine pas la règle de la promotion.`;
+
 // ── Construction des consignes ─────────────────────────────────────────────
 // Texte v13 recopié mécaniquement depuis index.ts (commit a771c7c) : seul
 // l'ajout CONSIGNES_ANTI_INVENTION, inséré juste avant le catalogue, diffère.
@@ -76,7 +97,8 @@ export function construirePromptTicket({
   refProducts = [],
   antiInvention = true,
   consignesImport = false,
-}: { nbImages: number; isMulti: boolean; refProducts?: ProduitRef[]; antiInvention?: boolean; consignesImport?: boolean }): string {
+  remiseDeLigne = true,
+}: { nbImages: number; isMulti: boolean; refProducts?: ProduitRef[]; antiInvention?: boolean; consignesImport?: boolean; remiseDeLigne?: boolean }): string {
   // Ajouts v14 : chaîne vide hors import, donc texte inchangé pour un scan photo.
   const v14 = (texte: string) => (consignesImport ? texte : "");
   const images = { length: nbImages };
@@ -85,7 +107,8 @@ export function construirePromptTicket({
       refProducts.map((p: ProduitRef) => `- ${p.nom} (${p.categorie})`).join("\n") +
       `\n\nPour chaque article du ticket, cherche dans ce catalogue le nom générique le plus proche (ex : "LT DEMI ECR" → "Lait demi-écrémé", "POULET ROT" → "Poulet rôti"). Utilise ce nom officiel dans le champ "name" UNIQUEMENT si la correspondance est franche. Si aucune correspondance n'est évidente, NE force PAS un rapprochement approximatif : laisse "name" vide ou recopie simplement le libellé du ticket normalisé (majuscules → minuscules, abréviations développées), et mets confiance="faible".`
     : `\nNormalise les noms abrégés (ex: LT DEMI ECR → Lait demi-écrémé).`;
-  const ajout = antiInvention ? CONSIGNES_ANTI_INVENTION : "";
+  const ajout = (antiInvention ? CONSIGNES_ANTI_INVENTION : "")
+    + (remiseDeLigne ? (consignesImport ? CONSIGNE_LIBELLE_REMISE_IMPORT : CONSIGNE_REMISE_DE_LIGNE) : "");
   return `${isMulti
                 ? `Ces ${images.length} images sont des morceaux successifs d'UN SEUL ticket de caisse, pris dans l'ordre de haut en bas. Les photos peuvent se CHEVAUCHER : un même produit peut apparaître en bas d'une photo et en haut de la suivante. Tu dois reconstituer UNE SEULE liste de produits, dans l'ordre, en supprimant les doublons dus au chevauchement (ne compte chaque produit qu'une seule fois). Le magasin et la date sont en général sur la première image.\n\n` + v14(CONSIGNE_V14_RECOLLAGE)
                 : ""}Analyse ce ticket de caisse et extrait les informations suivantes en JSON uniquement, sans texte avant ou après :
@@ -297,6 +320,10 @@ export async function lireTicket({
   // Import : champs v14 garantis (remise >= 0 par ligne, captures_peut_etre_
   // incompletes booléen). Hors import, la réponse est rendue telle quelle.
   if (consignesImport) parsed = normaliserSortieV14(parsed);
+  // Chantier 148 — scan photo : "remise" rendue en nombre positif sur chaque
+  // ligne (0 si absente), "libelle_remise" gardé seulement s'il y a une remise.
+  // Aucun autre champ n'est touché.
+  parsed = normaliserRemisesDeLigne(parsed);
 
   // Chantier 98 — observabilité des succès. Correctif anti-invention :
   // + taille des images reçues, hébergeur et modèle qui ont réellement répondu.
@@ -315,6 +342,26 @@ export async function lireTicket({
   }));
 
   return parsed;
+}
+
+// Remise de ligne : nombre >= 0 (« -2,27 », « 2,27- », "2.27" -> 2.27 ; absent
+// ou illisible -> 0). Sans remise, pas de libellé de remise. Ne lève jamais.
+// deno-lint-ignore no-explicit-any
+export function normaliserRemisesDeLigne(parsed: any): any {
+  if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.products)) return parsed;
+  const montant = (v: unknown) => {
+    const n = typeof v === "string" ? Number(v.replace(/\s/g, "").replace(",", ".").replace(/^(.*)-$/, "-$1")) : Number(v);
+    return Number.isFinite(n) ? Math.round(Math.abs(n) * 100) / 100 : 0;
+  };
+  // deno-lint-ignore no-explicit-any
+  const products = parsed.products.map((p: any) => {
+    if (!p || typeof p !== "object") return p;
+    const remise = montant(p.remise);
+    const { libelle_remise: libelle, ...reste } = p;
+    const texte = typeof libelle === "string" ? libelle.trim().slice(0, 80) : "";
+    return remise > 0 && texte ? { ...reste, remise, libelle_remise: texte } : { ...reste, remise };
+  });
+  return { ...parsed, products };
 }
 
 // ── Sens de la photo (correctif orientation, 11/11) ────────────────────────
