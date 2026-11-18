@@ -72,7 +72,7 @@ function Confirmation({ titre, detail, libelle, onConfirmer, onAnnuler }) {
 
 const ETAPES = [
   { n: 1, titre: 'Fais ta liste', detail: 'Cherche tes produits ou parcours les rayons.' },
-  { n: 2, titre: 'Compare', detail: 'On te dit dans quel magasin ta liste coûte le moins cher.' },
+  { n: 2, titre: 'Compare', detail: 'La communauté te dit dans quel magasin ta liste coûte le moins cher.' },
   { n: 3, titre: 'Scanne ton ticket', detail: 'Tes prix mettent la comparaison à jour, pour toi et pour les autres.' },
 ];
 
@@ -171,7 +171,7 @@ export default function AccueilSimple({
               <div style={{ fontFamily: T.police, fontSize: 14, color: T.texteDoux, marginBottom: 14 }}>
                 {liste.total > 0
                   ? 'Tout est coché. Ajoute ce qu\'il te manque pour la prochaine fois.'
-                  : 'Ajoute ce qu\'il te faut : on te dira où ta liste coûte le moins cher.'}
+                  : 'Ajoute ce qu\'il te faut : la communauté te dira où ta liste coûte le moins cher.'}
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <Bouton onClick={() => setTab('catalog')} style={{ flex: 1 }}>Ajouter des produits</Bouton>

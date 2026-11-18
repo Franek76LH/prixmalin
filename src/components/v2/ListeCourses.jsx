@@ -85,7 +85,7 @@ export default function ListeCourses({
         <div style={{ background: T.carte, borderRadius: T.rayon, boxShadow: T.ombre, padding: '32px 22px', textAlign: 'center' }}>
           <div style={{ fontSize: 44, marginBottom: 8 }}>🛒</div>
           <div style={{ fontFamily: T.police, fontWeight: 900, fontSize: 19, color: T.texte, marginBottom: 6 }}>Ta liste est vide</div>
-          <div style={{ fontFamily: T.police, fontSize: 14, color: T.texteDoux, marginBottom: 20 }}>Ajoute ce qu'il te faut, on te dira où ta liste coûte le moins cher.</div>
+          <div style={{ fontFamily: T.police, fontSize: 14, color: T.texteDoux, marginBottom: 20 }}>Ajoute ce qu'il te faut, la communauté te dira où ta liste coûte le moins cher.</div>
           <button onClick={onAjouter} style={{ width: '100%', border: 'none', background: T.rouge, color: '#fff', borderRadius: 14, padding: '14px', fontFamily: T.police, fontWeight: 900, fontSize: 15, cursor: 'pointer' }}>
             Ajouter des produits
           </button>
