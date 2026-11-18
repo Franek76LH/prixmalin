@@ -202,7 +202,9 @@ export function interpreterResultatCore(resultat, { lignesEnvoyees = null } = {}
     // Uniquement des alias non trouvés (ou rien du tout) : fonctionnement
     // normal. Ton neutre, aucune alarme.
     if (morceaux.length > 0) {
-      return { ...base, niveau: NIVEAU_INFO, titre: null, detail: phrase ?? morceaux.join(' · '), messageTechnique: null };
+      // conseilCodeBarres : la phrase envoie scanner des codes-barres, l'écran
+      // peut donc proposer le bouton qui y mène (chantier 155).
+      return { ...base, niveau: NIVEAU_INFO, titre: null, detail: phrase ?? morceaux.join(' · '), messageTechnique: null, conseilCodeBarres: phrase != null };
     }
 
     // Tout est passé, et le compte y est : on ne dit RIEN de plus. Le succès

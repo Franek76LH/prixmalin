@@ -110,6 +110,15 @@ describe('chantier 154 — un bilan qui dit où sont les prix et quoi faire', ()
     expect(r.niveau).toBe(NIVEAU_INFO);
     expect(r.detail).toBe("Tes 9 prix sont dans ton historique. Pour qu'ils comptent aussi dans le comparateur, scanne le code-barres des produits.");
     expect(r.detail).not.toMatch(/échec|erreur|problème|0 prix/i);
+    expect(r.conseilCodeBarres).toBe(true);
+  });
+  it('chantier 155 — pas de bouton « Compléter » quand le conseil n\'est pas le code-barres', () => {
+    const attente = interpreterResultatCore({ statut: 'ok', prix_ecrits: 3, lignes_a_confirmer: 2, rejets: [] }, { lignesEnvoyees: 5 });
+    expect(attente.conseilCodeBarres).toBeFalsy();
+    const technique = interpreterResultatCore({ statut: 'rejet_partiel', prix_ecrits: 18, rejets: [{ motif: 'erreur_technique', message: 'x' }] }, { lignesEnvoyees: 20 });
+    expect(technique.conseilCodeBarres).toBeFalsy();
+    const complet = interpreterResultatCore({ statut: 'ok', prix_ecrits: 9, rejets: [] }, { lignesEnvoyees: 9 });
+    expect(complet.conseilCodeBarres).toBeFalsy();
   });
   it('un seul produit, non reconnu', () => {
     const r = interpreterResultatCore({ statut: 'rejet_partiel', prix_ecrits: 0, rejets: [alias('X')] }, { lignesEnvoyees: 1 });
