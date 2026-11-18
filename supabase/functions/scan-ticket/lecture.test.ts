@@ -392,5 +392,11 @@ describe('remise imprimée sous un article — scan photo (chantier 148)', () =>
     expect(JSON.parse(fetchFn.mock.calls[0][1].body).messages[0].content.at(-1).text).toContain(CONSIGNE_REMISE_DE_LIGNE);
     expect(JSON.parse(journal.log.mock.calls[0][1]).version).toBe('remise-de-ligne');
     expect(VERSION_LECTURE).toBe('remise-de-ligne');
+    // le journal porte l'empreinte des consignes en ligne (photo et import)
+    const sha = (t: string) => createHash('sha256').update(t).digest('hex');
+    expect(JSON.parse(journal.log.mock.calls[0][1]).consignes).toEqual({
+      photo: sha(construirePromptTicket({ nbImages: 1, isMulti: false })),
+      import: sha(construirePromptTicket({ nbImages: 2, isMulti: true, consignesImport: true })),
+    });
   });
 });

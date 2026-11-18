@@ -325,6 +325,13 @@ export async function lireTicket({
   // Aucun autre champ n'est touché.
   parsed = normaliserRemisesDeLigne(parsed);
 
+  // Empreinte des consignes réellement en ligne (18/11) : permet de vérifier
+  // depuis le journal que le texte déployé est bien celui du dépôt.
+  const consignes = {
+    photo: await empreinteTexte(construirePromptTicket({ nbImages: 1, isMulti: false })),
+    import: await empreinteTexte(construirePromptTicket({ nbImages: 2, isMulti: true, consignesImport: true })),
+  };
+
   // Chantier 98 — observabilité des succès. Correctif anti-invention :
   // + taille des images reçues, hébergeur et modèle qui ont réellement répondu.
   journal.log(`${prefixe} ok`, JSON.stringify({
@@ -337,11 +344,23 @@ export async function lireTicket({
     fournisseur: data?.provider ?? null,
     modele: data?.model ?? null,
     version: VERSION_LECTURE,
+    consignes,
     import_fichier: consignesImport,
     finish_reason: data.choices?.[0]?.finish_reason ?? null,
   }));
 
   return parsed;
+}
+
+// sha256 d'un texte, en hexadécimal. null si le calcul est impossible : un
+// journal ne doit jamais faire échouer la lecture.
+export async function empreinteTexte(texte: string): Promise<string | null> {
+  try {
+    const octets = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(texte)));
+    return Array.from(octets).map((o) => o.toString(16).padStart(2, "0")).join("");
+  } catch (_e) {
+    return null;
+  }
 }
 
 // Remise de ligne : nombre >= 0 (« -2,27 », « 2,27- », "2.27" -> 2.27 ; absent
