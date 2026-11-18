@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  lireOffre, quantiteRequise, totalAvecOffre, prixUnitaireAvecOffre, offreConfirmeeParLeTicket, titreOffre, phraseOffre,
+  lireOffre, deduireOffreDesChiffres, comprendreRemiseDeLigne, quantiteRequise, totalAvecOffre, prixUnitaireAvecOffre, offreConfirmeeParLeTicket, titreOffre, phraseOffre,
   OFFRE_LOT_GRATUIT, OFFRE_NIEME_REMISE, OFFRE_POURCENTAGE, OFFRE_MONTANT, OFFRE_INCONNUE,
 } from './promotionsCore';
 
@@ -102,5 +102,76 @@ describe('textes', () => {
   });
   it('remise simple : prix remisé au lieu du prix normal', () => {
     expect(phraseOffre({ type: OFFRE_POURCENTAGE, pourcentage: 25 }, 4)).toBe('−25 % : 3,00 € au lieu de 4,00 €.');
+  });
+});
+
+// Étalonnage sur le ticket Carrefour de François du 18/11/2026 (Marseille
+// B. Bienvenue) et sur les trois affiches de rayon photographiées ce jour-là.
+describe('ticket réel Carrefour du 18/11 — « Remise Immédiate » sans règle imprimée', () => {
+  const pots = { libelleRemise: 'Remise Immédiate', prixNormal: 2.27, quantite: 3, montantRemise: 2.27 };
+
+  it('le texte seul ne donne qu\'un montant', () => {
+    expect(lireOffre('Remise Immédiate', 2.27)).toEqual({ type: OFFRE_MONTANT, montant: 2.27 });
+  });
+  it('les chiffres donnent la règle : 3 pots à 2,27 € et 2,27 € de remise = 2 achetés, le 3e offert', () => {
+    const offre = comprendreRemiseDeLigne(pots);
+    expect(offre).toEqual({ type: OFFRE_LOT_GRATUIT, achetes: 2, offerts: 1, deduite: true });
+    expect(titreOffre(offre)).toBe('2 achetés, le 3e offert');
+    expect(totalAvecOffre(2.27, offre, 3)).toBe(4.54); // « Les 3 pour 4,54 € » de l'affiche
+    expect(prixUnitaireAvecOffre(2.27, offre, 1)).toBe(2.27); // un seul : prix normal
+    expect(offreConfirmeeParLeTicket(2.27, offre, 3, 2.27)).toBe(true);
+    expect(phraseOffre(offre, 2.27)).toBe("2 achetés, le 3e offert : 1,51 € l'unité si tu en prends 3. Un seul : prix normal, 2,27 €.");
+  });
+  it('deux articles, remise d\'un prix unitaire = 1 acheté, le 2e offert', () => {
+    expect(deduireOffreDesChiffres(1.95, 2, 1.95)).toEqual({ type: OFFRE_LOT_GRATUIT, achetes: 1, offerts: 1, deduite: true });
+  });
+  it('tolère un centime d\'arrondi, pas davantage', () => {
+    expect(deduireOffreDesChiffres(2.27, 3, 2.28)).not.toBeNull();
+    expect(deduireOffreDesChiffres(2.27, 3, 2.30)).toBeNull();
+  });
+  it('ne devine jamais : quantité 1, plus de 3 articles, remise qui n\'est pas un prix entier, valeurs absentes', () => {
+    expect(deduireOffreDesChiffres(5.55, 1, 0.5)).toBeNull();     // café Legal : 0,50 € de réduction
+    expect(deduireOffreDesChiffres(2.27, 4, 2.27)).toBeNull();    // « 3+1 » ou « 2+1 » + un plein : ambigu
+    expect(deduireOffreDesChiffres(2.27, 6, 4.54)).toBeNull();
+    expect(deduireOffreDesChiffres(4.65, 2, 2.79)).toBeNull();    // « −60 % sur le 2e » : pas un lot gratuit
+    expect(deduireOffreDesChiffres(2.27, 3, 6.81)).toBeNull();    // tout offert : impossible
+    expect(deduireOffreDesChiffres(2.27, 3, 0)).toBeNull();
+    expect(deduireOffreDesChiffres(0, 3, 2.27)).toBeNull();
+    expect(deduireOffreDesChiffres(2.27, 2.5, 2.27)).toBeNull();
+    expect(deduireOffreDesChiffres(undefined, undefined, undefined)).toBeNull();
+  });
+  it('quand les chiffres ne disent rien, on garde le simple montant', () => {
+    expect(comprendreRemiseDeLigne({ libelleRemise: 'Remise Immédiate', prixNormal: 5.55, quantite: 1, montantRemise: 0.5 }))
+      .toEqual({ type: OFFRE_MONTANT, montant: 0.5 });
+    expect(comprendreRemiseDeLigne({ libelleRemise: 'Remise Immédiate', prixNormal: 4.65, quantite: 2, montantRemise: 2.79 }))
+      .toEqual({ type: OFFRE_MONTANT, montant: 2.79 });
+  });
+  it('une règle imprimée n\'est jamais remplacée par une déduction', () => {
+    expect(comprendreRemiseDeLigne({ libelleRemise: '2EME A -50%', prixNormal: 2, quantite: 2, montantRemise: 1 }))
+      .toEqual({ type: OFFRE_NIEME_REMISE, rang: 2, pourcentage: 50 });
+    expect(comprendreRemiseDeLigne({ libelleRemise: '2+1 OFFERT', prixNormal: 2.27, quantite: 3, montantRemise: 2.27 }))
+      .toEqual({ type: OFFRE_LOT_GRATUIT, achetes: 2, offerts: 1 });
+  });
+  it('pas de remise, pas d\'offre', () => {
+    expect(comprendreRemiseDeLigne({ prixNormal: 6.15, quantite: 1, montantRemise: 0 })).toBeNull();
+    expect(comprendreRemiseDeLigne()).toBeNull();
+  });
+});
+
+describe('affiches de rayon Carrefour du 18/11 — textes réels', () => {
+  it('« 2+1 OFFERT » (La Laitière, vendu seul 2,27 €, les 3 pour 4,54 €)', () => {
+    const offre = lireOffre('2+1 OFFERT');
+    expect(offre).toEqual({ type: OFFRE_LOT_GRATUIT, achetes: 2, offerts: 1 });
+    expect(totalAvecOffre(2.27, offre, 3)).toBe(4.54);
+  });
+  it('« -60% SUR LE 2ÈME » (Fleury Michon, vendu seul 4,65 €, le 2e à 1,86 €, les 2 pour 6,51 €)', () => {
+    const offre = lireOffre('-60% SUR LE 2ÈME');
+    expect(offre).toEqual({ type: OFFRE_NIEME_REMISE, rang: 2, pourcentage: 60 });
+    expect(totalAvecOffre(4.65, offre, 2)).toBe(6.51);
+    expect(totalAvecOffre(4.65, offre, 1)).toBe(4.65);
+  });
+  it('« 0,50€ de RÉDUCTION IMMÉDIATE » (café Legal) : un montant, si la caisse l\'a déduit', () => {
+    expect(lireOffre('0,50€ de RÉDUCTION IMMÉDIATE', 0.5)).toEqual({ type: OFFRE_MONTANT, montant: 0.5 });
+    expect(lireOffre('0,50€ de RÉDUCTION IMMÉDIATE')).toBeNull(); // vignette non passée en caisse : rien
   });
 });

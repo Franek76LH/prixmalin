@@ -13,8 +13,10 @@
 // revient à payer selon la quantité achetée.
 //
 // ⚠️ Les formats de texte reconnus ci-dessous viennent des intitulés courants
-// des tickets français. Ils n'ont PAS encore été vérifiés sur de vrais tickets
-// avec promotion (aucun n'est en base au 18/11) : à étalonner avant de s'y fier.
+// des tickets français et des affiches de rayon. Un seul vrai ticket avec
+// promotion a servi d'étalon (Carrefour, 18/11) — et il n'imprime PAS la règle :
+// seulement « Remise Immédiate 2,27- » sous « 2,27x3 6,81 ». D'où
+// deduireOffreDesChiffres : quand le texte est muet, les chiffres parlent.
 
 export const OFFRE_LOT_GRATUIT = 'lot_gratuit';     // 2 achetés + 1 offert
 export const OFFRE_NIEME_REMISE = 'nieme_remise';   // le 2e à −50 %
@@ -63,6 +65,35 @@ export function lireOffre(libelle, montantRemise = 0) {
       : { type: OFFRE_INCONNUE, montant: remise };
   }
   return null;
+}
+
+// Le texte est muet (« Remise Immédiate ») : la règle se lit dans les chiffres.
+// On ne déduit QUE le cas sans ambiguïté : la remise vaut exactement un nombre
+// entier de fois le prix d'un article, et on en a acheté 2 ou 3. Trois pots à
+// 2,27 € et 2,27 € de remise = « 2 achetés, le 3e offert ». Au-delà de 3
+// articles, plusieurs règles donnent la même remise (4 articles, 1 offert :
+// « 3+1 », ou « 2+1 » plus un article plein) : on ne devine pas -> null.
+// Un pourcentage n'est jamais déduit non plus (« le 2e à −60 % » et « −30 % sur
+// les deux » donnent la même remise). L'offre rendue porte `deduite: true`.
+export function deduireOffreDesChiffres(prixNormal, quantite, montantRemise) {
+  const prix = Number(prixNormal);
+  const q = Number(quantite);
+  const remise = Number(montantRemise);
+  if (!(prix > 0) || !(remise > 0) || !Number.isInteger(q) || q < 2 || q > 3) return null;
+  const offerts = Math.round(remise / prix);
+  if (offerts < 1 || offerts >= q) return null;
+  if (Math.abs(remise - offerts * prix) > 0.011) return null;
+  return { type: OFFRE_LOT_GRATUIT, achetes: q - offerts, offerts, deduite: true };
+}
+
+// Tout ensemble, pour une ligne de ticket : d'abord le texte imprimé ; s'il ne
+// dit que « une remise de tant », on essaie les chiffres ; sinon on garde le
+// simple montant. Une règle lue dans le texte n'est jamais remplacée.
+export function comprendreRemiseDeLigne({ libelleRemise = '', prixNormal, quantite = 1, montantRemise = 0 } = {}) {
+  const lue = lireOffre(libelleRemise, montantRemise);
+  if (!lue) return null;
+  if (lue.type !== OFFRE_MONTANT && lue.type !== OFFRE_INCONNUE) return lue;
+  return deduireOffreDesChiffres(prixNormal, quantite, montantRemise) ?? lue;
 }
 
 // Combien d'articles faut-il prendre pour que l'offre joue ?
