@@ -63,7 +63,7 @@ describe('alias_non_trouve — le fonctionnement NORMAL, pas un échec', () => {
     expect(r.niveau).toBe(NIVEAU_INFO);
     expect(r.niveau).not.toBe(NIVEAU_ECHEC);
     expect(r.aRattacher).toBe(6);
-    expect(r.detail).toBe('14 prix enregistrés sur 20 · 6 lignes à rattacher');
+    expect(r.detail).toBe('14 prix sur 20 comptent déjà dans le comparateur. Pour les 6 autres, scanne le code-barres des produits.');
     // Aucun vocabulaire d'échec ni d'alarme.
     expect(r.titre).toBeNull();
     expect(r.detail).not.toMatch(/échec|erreur|problème/i);
@@ -74,7 +74,7 @@ describe('alias_non_trouve — le fonctionnement NORMAL, pas un échec', () => {
       { statut: 'rejet_partiel', prix_ecrits: 19, rejets: [alias('ART')] },
       { lignesEnvoyees: 20 },
     );
-    expect(r.detail).toBe('19 prix enregistrés sur 20 · 1 ligne à rattacher');
+    expect(r.detail).toBe('19 prix sur 20 comptent déjà dans le comparateur. Pour le dernier, scanne le code-barres du produit.');
   });
 });
 
@@ -97,7 +97,35 @@ describe('réussite partielle avec un vrai problème', () => {
   it('prix_ecrits inférieur aux lignes sans aucun rejet : on le dit quand même', () => {
     const r = interpreterResultatCore({ statut: 'ok', prix_ecrits: 14, rejets: [] }, { lignesEnvoyees: 20 });
     expect(r.niveau).toBe(NIVEAU_INFO);
-    expect(r.detail).toBe('14 prix enregistrés sur 20');
+    expect(r.detail).toBe('14 prix sur 20 comptent déjà dans le comparateur. Pour les 6 autres, scanne le code-barres des produits.');
+  });
+});
+
+describe('chantier 154 — un bilan qui dit où sont les prix et quoi faire', () => {
+  it('le cas réel du 18/11 : 0 prix sur 9, sans contredire le merci', () => {
+    const r = interpreterResultatCore(
+      { statut: 'rejet_partiel', prix_ecrits: 0, rejets: Array.from({ length: 9 }, (_, i) => alias(`ART ${i}`)) },
+      { lignesEnvoyees: 9 },
+    );
+    expect(r.niveau).toBe(NIVEAU_INFO);
+    expect(r.detail).toBe("Tes 9 prix sont dans ton historique. Pour qu'ils comptent aussi dans le comparateur, scanne le code-barres des produits.");
+    expect(r.detail).not.toMatch(/échec|erreur|problème|0 prix/i);
+  });
+  it('un seul produit, non reconnu', () => {
+    const r = interpreterResultatCore({ statut: 'rejet_partiel', prix_ecrits: 0, rejets: [alias('X')] }, { lignesEnvoyees: 1 });
+    expect(r.detail).toBe("Ton prix est dans ton historique. Pour qu'il compte aussi dans le comparateur, scanne le code-barres du produit.");
+  });
+  it('un seul prix reconnu : accord au singulier', () => {
+    const r = interpreterResultatCore({ statut: 'ok', prix_ecrits: 1, rejets: [] }, { lignesEnvoyees: 4 });
+    expect(r.detail).toBe('1 prix sur 4 compte déjà dans le comparateur. Pour les 3 autres, scanne le code-barres des produits.');
+  });
+  it('nombre de lignes envoyées inconnu : on ne parle que de ce qui reste à compléter', () => {
+    const r = interpreterResultatCore({ statut: 'rejet_partiel', prix_ecrits: 3, rejets: [alias('A'), alias('B')] });
+    expect(r.detail).toBe('2 produits à compléter : scanne leur code-barres pour que leur prix compte dans le comparateur.');
+  });
+  it('tout est reconnu : toujours aucun bandeau', () => {
+    const r = interpreterResultatCore({ statut: 'ok', prix_ecrits: 9, rejets: [] }, { lignesEnvoyees: 9 });
+    expect(r.detail).toBeNull();
   });
 });
 

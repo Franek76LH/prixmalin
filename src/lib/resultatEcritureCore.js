@@ -93,6 +93,24 @@ function expliquerRejetGlobal(rejets) {
   };
 }
 
+// Chantier 154 — le bilan dit en clair où sont les prix et quoi faire, au lieu
+// de « 0 prix enregistré sur 9 » (lu juste après « 9 prix enregistrés. Merci »,
+// il semblait dire le contraire). Tous les prix du ticket sont dans
+// l'historique personnel ; seuls ceux d'un produit reconnu comptent dans le
+// comparateur ; pour les autres, le geste est de scanner le code-barres.
+export function phraseBilanComparateur(prixEcrits, attendues) {
+  const reste = attendues - prixEcrits;
+  if (prixEcrits === 0) {
+    return attendues === 1
+      ? "Ton prix est dans ton historique. Pour qu'il compte aussi dans le comparateur, scanne le code-barres du produit."
+      : `Tes ${attendues} prix sont dans ton historique. Pour qu'ils comptent aussi dans le comparateur, scanne le code-barres des produits.`;
+  }
+  const deja = `${prixEcrits} prix sur ${attendues} compte${prixEcrits > 1 ? 'nt' : ''} déjà dans le comparateur.`;
+  return reste === 1
+    ? `${deja} Pour le dernier, scanne le code-barres du produit.`
+    : `${deja} Pour les ${reste} autres, scanne le code-barres des produits.`;
+}
+
 // LE point d'entrée. `lignesEnvoyees` est le nombre de lignes qu'on a
 // transmises : sans lui on ne peut pas parler de réussite partielle, et on
 // s'en abstient plutôt que d'inventer un dénominateur.
@@ -141,6 +159,9 @@ export function interpreterResultatCore(resultat, { lignesEnvoyees = null } = {}
     const manquants = (attendues != null && prixEcrits != null) ? attendues - prixEcrits : null;
 
     const morceaux = [];
+    // Phrase complète (chantier 154) pour le cas courant ; les comptes secs
+    // restent pour l'attente de confirmation et le problème technique.
+    let phrase = null;
     if (aConfirmer > 0) {
       // Chantier 111 — état d'ATTENTE. On compte ce qui s'est appliqué tout
       // seul, ce que l'app a deviné et qui attend un avis, et ce qu'elle n'a
@@ -156,9 +177,15 @@ export function interpreterResultatCore(resultat, { lignesEnvoyees = null } = {}
     } else {
       if (attendues != null && prixEcrits != null && prixEcrits < attendues) {
         morceaux.push(`${prixEcrits} prix enregistré${prixEcrits > 1 ? 's' : ''} sur ${attendues}`);
+        phrase = phraseBilanComparateur(prixEcrits, attendues);
       }
       if (aRattacher > 0) {
         morceaux.push(`${aRattacher} ligne${aRattacher > 1 ? 's' : ''} à rattacher`);
+        if (!phrase) {
+          phrase = aRattacher > 1
+            ? `${aRattacher} produits à compléter : scanne leur code-barres pour que leur prix compte dans le comparateur.`
+            : '1 produit à compléter : scanne son code-barres pour que son prix compte dans le comparateur.';
+        }
       }
     }
 
@@ -175,7 +202,7 @@ export function interpreterResultatCore(resultat, { lignesEnvoyees = null } = {}
     // Uniquement des alias non trouvés (ou rien du tout) : fonctionnement
     // normal. Ton neutre, aucune alarme.
     if (morceaux.length > 0) {
-      return { ...base, niveau: NIVEAU_INFO, titre: null, detail: morceaux.join(' · '), messageTechnique: null };
+      return { ...base, niveau: NIVEAU_INFO, titre: null, detail: phrase ?? morceaux.join(' · '), messageTechnique: null };
     }
 
     // Tout est passé, et le compte y est : on ne dit RIEN de plus. Le succès
