@@ -98,17 +98,20 @@ function expliquerRejetGlobal(rejets) {
 // il semblait dire le contraire). Tous les prix du ticket sont dans
 // l'historique personnel ; seuls ceux d'un produit reconnu comptent dans le
 // comparateur ; pour les autres, le geste est de scanner le code-barres.
+// Chantier 154, 2e version (demande de François, 18/11 au soir) — le bilan doit donner ENVIE de scanner :
+// il dit ce que l'utilisateur y gagne (savoir où ces produits sont moins
+// chers), et rien qu'on ne tienne pas (pas d'« économies validées »).
 export function phraseBilanComparateur(prixEcrits, attendues) {
   const reste = attendues - prixEcrits;
   if (prixEcrits === 0) {
     return attendues === 1
-      ? "Ton prix est dans ton historique. Pour qu'il compte aussi dans le comparateur, scanne le code-barres du produit."
-      : `Tes ${attendues} prix sont dans ton historique. Pour qu'ils comptent aussi dans le comparateur, scanne le code-barres des produits.`;
+      ? '👏 Bravo, ton prix est noté ! 📷 Scanne le code-barres et PrixMalin te dira où ce produit est moins cher.'
+      : `👏 Bravo, tes ${attendues} prix sont notés ! 📷 Scanne les codes-barres et PrixMalin te dira où ces produits sont moins chers.`;
   }
-  const deja = `${prixEcrits} prix sur ${attendues} compte${prixEcrits > 1 ? 'nt' : ''} déjà dans le comparateur.`;
+  const deja = `✅ ${prixEcrits} prix sur ${attendues} compte${prixEcrits > 1 ? 'nt' : ''} déjà dans le comparateur.`;
   return reste === 1
-    ? `${deja} Pour le dernier, scanne le code-barres du produit.`
-    : `${deja} Pour les ${reste} autres, scanne le code-barres des produits.`;
+    ? `${deja} 📷 Scanne le code-barres du dernier et PrixMalin te dira où il est moins cher.`
+    : `${deja} 📷 Scanne les codes-barres des ${reste} autres et PrixMalin te dira où ils sont moins chers.`;
 }
 
 // LE point d'entrée. `lignesEnvoyees` est le nombre de lignes qu'on a
@@ -183,8 +186,8 @@ export function interpreterResultatCore(resultat, { lignesEnvoyees = null } = {}
         morceaux.push(`${aRattacher} ligne${aRattacher > 1 ? 's' : ''} à rattacher`);
         if (!phrase) {
           phrase = aRattacher > 1
-            ? `${aRattacher} produits à compléter : scanne leur code-barres pour que leur prix compte dans le comparateur.`
-            : '1 produit à compléter : scanne son code-barres pour que son prix compte dans le comparateur.';
+            ? `📷 Encore ${aRattacher} produits à scanner : avec leur code-barres, PrixMalin te dira où ils sont moins chers.`
+            : '📷 Encore 1 produit à scanner : avec son code-barres, PrixMalin te dira où il est moins cher.';
         }
       }
     }

@@ -5372,8 +5372,8 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
     // Chantier 139 — le merci communautaire remplace « N prix importés ».
     showToast(`✓ ${merciApresScan(entries.length)}${savingMsg}`);
     if (bilanCore?.niveau === NIVEAU_INFO && bilanCore.detail) {
-      const action = bilanCore.conseilCodeBarres && onCompleterTicket ? { libelle: 'Compléter', onAction: onCompleterTicket } : null;
-      setTimeout(() => showToast(`ℹ️ ${bilanCore.detail}`, true, true, action), 2600);
+      const action = bilanCore.conseilCodeBarres && onCompleterTicket ? { libelle: 'Scanner maintenant', onAction: onCompleterTicket } : null;
+      setTimeout(() => showToast(`${bilanCore.conseilCodeBarres ? '' : 'ℹ️ '}${bilanCore.detail}`, true, true, action), 2600);
     }
   };
   const deletePrice = async (entry) => {
@@ -10968,8 +10968,8 @@ export default function App() {
       : '';
     showAppToast(`✓ ${merciApresScan(entries.length)}${savingMsg}`);
     if (bilanCore?.niveau === NIVEAU_INFO && bilanCore.detail) {
-      const action = bilanCore.conseilCodeBarres && scanApresTicketAccessible ? { libelle: 'Compléter', onAction: completerDernierTicket } : null;
-      setTimeout(() => showAppToast(`ℹ️ ${bilanCore.detail}`, true, true, action), 2600);
+      const action = bilanCore.conseilCodeBarres && scanApresTicketAccessible ? { libelle: 'Scanner maintenant', onAction: completerDernierTicket } : null;
+      setTimeout(() => showAppToast(`${bilanCore.conseilCodeBarres ? '' : 'ℹ️ '}${bilanCore.detail}`, true, true, action), 2600);
     }
   };
 

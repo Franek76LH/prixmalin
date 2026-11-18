@@ -63,7 +63,7 @@ describe('alias_non_trouve — le fonctionnement NORMAL, pas un échec', () => {
     expect(r.niveau).toBe(NIVEAU_INFO);
     expect(r.niveau).not.toBe(NIVEAU_ECHEC);
     expect(r.aRattacher).toBe(6);
-    expect(r.detail).toBe('14 prix sur 20 comptent déjà dans le comparateur. Pour les 6 autres, scanne le code-barres des produits.');
+    expect(r.detail).toBe('✅ 14 prix sur 20 comptent déjà dans le comparateur. 📷 Scanne les codes-barres des 6 autres et PrixMalin te dira où ils sont moins chers.');
     // Aucun vocabulaire d'échec ni d'alarme.
     expect(r.titre).toBeNull();
     expect(r.detail).not.toMatch(/échec|erreur|problème/i);
@@ -74,7 +74,7 @@ describe('alias_non_trouve — le fonctionnement NORMAL, pas un échec', () => {
       { statut: 'rejet_partiel', prix_ecrits: 19, rejets: [alias('ART')] },
       { lignesEnvoyees: 20 },
     );
-    expect(r.detail).toBe('19 prix sur 20 comptent déjà dans le comparateur. Pour le dernier, scanne le code-barres du produit.');
+    expect(r.detail).toBe('✅ 19 prix sur 20 comptent déjà dans le comparateur. 📷 Scanne le code-barres du dernier et PrixMalin te dira où il est moins cher.');
   });
 });
 
@@ -97,7 +97,7 @@ describe('réussite partielle avec un vrai problème', () => {
   it('prix_ecrits inférieur aux lignes sans aucun rejet : on le dit quand même', () => {
     const r = interpreterResultatCore({ statut: 'ok', prix_ecrits: 14, rejets: [] }, { lignesEnvoyees: 20 });
     expect(r.niveau).toBe(NIVEAU_INFO);
-    expect(r.detail).toBe('14 prix sur 20 comptent déjà dans le comparateur. Pour les 6 autres, scanne le code-barres des produits.');
+    expect(r.detail).toBe('✅ 14 prix sur 20 comptent déjà dans le comparateur. 📷 Scanne les codes-barres des 6 autres et PrixMalin te dira où ils sont moins chers.');
   });
 });
 
@@ -108,8 +108,8 @@ describe('chantier 154 — un bilan qui dit où sont les prix et quoi faire', ()
       { lignesEnvoyees: 9 },
     );
     expect(r.niveau).toBe(NIVEAU_INFO);
-    expect(r.detail).toBe("Tes 9 prix sont dans ton historique. Pour qu'ils comptent aussi dans le comparateur, scanne le code-barres des produits.");
-    expect(r.detail).not.toMatch(/échec|erreur|problème|0 prix/i);
+    expect(r.detail).toBe('👏 Bravo, tes 9 prix sont notés ! 📷 Scanne les codes-barres et PrixMalin te dira où ces produits sont moins chers.');
+    expect(r.detail).not.toMatch(/échec|erreur|problème|0 prix|économies/i);
     expect(r.conseilCodeBarres).toBe(true);
   });
   it('chantier 155 — pas de bouton « Compléter » quand le conseil n\'est pas le code-barres', () => {
@@ -122,15 +122,15 @@ describe('chantier 154 — un bilan qui dit où sont les prix et quoi faire', ()
   });
   it('un seul produit, non reconnu', () => {
     const r = interpreterResultatCore({ statut: 'rejet_partiel', prix_ecrits: 0, rejets: [alias('X')] }, { lignesEnvoyees: 1 });
-    expect(r.detail).toBe("Ton prix est dans ton historique. Pour qu'il compte aussi dans le comparateur, scanne le code-barres du produit.");
+    expect(r.detail).toBe('👏 Bravo, ton prix est noté ! 📷 Scanne le code-barres et PrixMalin te dira où ce produit est moins cher.');
   });
   it('un seul prix reconnu : accord au singulier', () => {
     const r = interpreterResultatCore({ statut: 'ok', prix_ecrits: 1, rejets: [] }, { lignesEnvoyees: 4 });
-    expect(r.detail).toBe('1 prix sur 4 compte déjà dans le comparateur. Pour les 3 autres, scanne le code-barres des produits.');
+    expect(r.detail).toBe('✅ 1 prix sur 4 compte déjà dans le comparateur. 📷 Scanne les codes-barres des 3 autres et PrixMalin te dira où ils sont moins chers.');
   });
   it('nombre de lignes envoyées inconnu : on ne parle que de ce qui reste à compléter', () => {
     const r = interpreterResultatCore({ statut: 'rejet_partiel', prix_ecrits: 3, rejets: [alias('A'), alias('B')] });
-    expect(r.detail).toBe('2 produits à compléter : scanne leur code-barres pour que leur prix compte dans le comparateur.');
+    expect(r.detail).toBe('📷 Encore 2 produits à scanner : avec leur code-barres, PrixMalin te dira où ils sont moins chers.');
   });
   it('tout est reconnu : toujours aucun bandeau', () => {
     const r = interpreterResultatCore({ statut: 'ok', prix_ecrits: 9, rejets: [] }, { lignesEnvoyees: 9 });
