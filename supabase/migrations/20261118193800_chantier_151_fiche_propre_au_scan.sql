@@ -71,3 +71,8 @@ grant execute on function public.deviner_rayon_off(jsonb) to authenticated;
 --   revoke all on function public.creer_produit_depuis_code_barres_v152(uuid, text, jsonb) from public, anon, authenticated;
 --   alter function public.creer_produit_depuis_code_barres_avant_152(uuid, text, jsonb) rename to creer_produit_depuis_code_barres;
 --   grant execute on function public.creer_produit_depuis_code_barres(uuid, text, jsonb) to authenticated;
+
+-- ── Correctif du 18/11/2026 à 20h15 (dans la fonction en service) ─────────────────────────────────
+-- Le format lu sur la fiche Open Food Facts ("50 cl", "1,5 l", "350g") n'était jamais reconnu : le motif
+-- finissait par \b, qui n'est pas une limite de mot dans PostgreSQL. Remplacé par \M (fin de mot).
+-- Effet : la raison "format_incomplet" ne sort plus à tort quand OFF donne la contenance.

@@ -18,7 +18,7 @@
 
 export const MODELE = "anthropic/claude-haiku-4.5";
 export const FOURNISSEUR = { order: ["anthropic"], allow_fallbacks: false };
-export const VERSION = "ranger-produit-1";
+export const VERSION = "ranger-produit-2";
 export const MAX_FICHES = 250;
 
 export type Rayon = { id: string; nom: string; categorie: string };
@@ -88,6 +88,7 @@ RÈGLES :
 - "nom_generique" : le nom du TYPE de produit, comme sur l'étiquette d'un rayon. En français, 1 à 5 mots, première lettre en majuscule, sans point final.
   - JAMAIS de marque, de gamme ni de slogan ("La Laitière", "Fleury Michon", "8.6", "Le Petit Pot de", "et ses Légumes du Soleil").
   - JAMAIS de quantité ni de conditionnement ("350 g", "x36", "4 pots", "1,5 L").
+  - JAMAIS de niveau de gamme, de degré d'alcool ni d'adjectif commercial (forte, extra, premium, intense, original, tradition, sélection) : une "bière spéciale forte" est une "Bière".
   - Garde le SOUS-TYPE qui change vraiment le produit : parfum (vanille, chocolat), recette (bœuf, canard), type (nature, aromatisé, zéro, bio seulement si c'est le cœur du produit), forme (dosettes, capsules, moulu, en grains).
   - Exemples : "La Tajine de Boeuf et ses Légumes du Soleil" -> "Tajine de bœuf aux légumes" ; "Le Petit Pot de Crème Saveur Vanille" -> "Crème dessert vanille" ; "8.6 Extreme" (bière) -> "Bière" ; "Café n 5 doux subtile et délicat" avec le ticket "X36 DOSETTE DOUX" -> "Café en dosettes" ; "Chips Lay's saveur barbecue 120g" -> "Chips aromatisées" ; "Pepsi Zéro Sucres" -> "Cola zéro".
   - Si tu ne sais pas ce qu'est le produit : chaîne vide.
@@ -112,6 +113,7 @@ Réponds UNIQUEMENT en JSON : {"fiche": <numéro de la fiche à rejoindre, ou nu
 RÈGLES :
 - Choisis une fiche seulement si elle désigne EXACTEMENT le même type de produit, que l'on comparerait au kilo ou au litre : même produit, même sous-type (parfum, recette, nature/aromatisé, classique/zéro, dosettes/capsules/moulu).
 - La marque et la contenance ne comptent PAS : une bière "8.6 Extreme" rejoint la fiche "Bière".
+- Le degré d'alcool, le niveau de gamme et les adjectifs commerciaux (forte, extra, premium, intense, original) ne sont PAS des sous-types : une bière forte rejoint la fiche "Bière".
 - Un sous-type différent = une autre fiche : une crème dessert à la vanille ne rejoint PAS "Crème dessert chocolat" ; un cola zéro ne rejoint PAS "Cola".
 - Une fiche qui porte une marque ou un nom commercial dans son nom ne convient que si c'est précisément ce produit.
 - Dans le doute : null. Créer une fiche en trop se corrige ; ranger un produit dans la mauvaise fiche fausse les comparaisons.`;
