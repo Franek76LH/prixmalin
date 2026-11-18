@@ -233,6 +233,25 @@ export const depsScanLigne = {
       return null;
     }
   },
+  // Chantier 151, lot 2 — proposition de rangement (rayon, nom générique, fiche
+  // à rejoindre, marque) par la fonction en ligne ranger-produit. Seuls des
+  // textes sur le PRODUIT partent. null en cas d'échec : la création se fait sans.
+  async rangerProduit({ off, libelleTicket }) {
+    try {
+      const o = off && typeof off === 'object' ? off : {};
+      const body = {
+        libelle_ticket: libelleTicket || '',
+        off: {
+          product_name: o.product_name ?? null, product_name_fr: o.product_name_fr ?? null, generic_name_fr: o.generic_name_fr ?? null,
+          brands: o.brands ?? null, quantity: o.quantity ?? null, categories_tags: Array.isArray(o.categories_tags) ? o.categories_tags : [],
+        },
+      };
+      const { data, error } = await supabase.functions.invoke('ranger-produit', { body });
+      return error ? null : (data || null);
+    } catch {
+      return null;
+    }
+  },
   // Chantier 151 — les rayons proposés quand l'utilisateur veut corriger :
   // [{ id, nom, categorie }], triés par catégorie puis par nom. [] en cas d'échec.
   async chargerRayons() {

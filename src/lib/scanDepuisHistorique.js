@@ -303,13 +303,72 @@ export function ficheVerification({ statut, variante = null, off = {}, ligne = n
 // exactement le nom que l'utilisateur a confirmé. {} si OFF est muet.
 // Chantier 151 — `rayonChoisi` ({ id }) : le rayon que l'utilisateur a corrigé
 // à l'écran ; il part sous la clé rayon_choisi et la base le prend en priorité.
-export function offPourCreation(off, rayonChoisi = null) {
+// Lot 2 — `rangement` : la proposition de la fonction en ligne ranger-produit
+// ({ rayon, nom_generique, produit, marque }) ; elle part sous la clé `ia`,
+// réduite à ce que la base sait vérifier. Si l'utilisateur a choisi un AUTRE
+// rayon que celui proposé, la fiche existante proposée n'est plus envoyée.
+export function iaPourCreation(rangement, rayonChoisi = null) {
+  if (!rangement || typeof rangement !== 'object') return null;
+  const autreRayon = !!(rayonChoisi?.id && rangement.rayon?.id && String(rayonChoisi.id) !== String(rangement.rayon.id));
+  const ia = {};
+  if (rangement.nom_generique) ia.nom_generique = String(rangement.nom_generique);
+  if (rangement.marque) ia.marque = String(rangement.marque);
+  if (rangement.rayon?.id) ia.sous_categorie_id = String(rangement.rayon.id);
+  if (rangement.produit?.id && !autreRayon) ia.produit_id = String(rangement.produit.id);
+  return Object.keys(ia).length > 0 ? ia : null;
+}
+
+export function offPourCreation(off, rayonChoisi = null, rangement = null) {
   const choisi = rayonChoisi?.id ? { rayon_choisi: String(rayonChoisi.id) } : {};
-  if (!off || typeof off !== 'object' || Object.keys(off).length === 0) return { ...choisi };
-  const out = { ...off, ...choisi };
+  const ia = iaPourCreation(rangement, rayonChoisi);
+  const plus = { ...choisi, ...(ia ? { ia } : {}) };
+  if (!off || typeof off !== 'object' || Object.keys(off).length === 0) return { ...plus };
+  const out = { ...off, ...plus };
   const nom = nomOff(off);
   if (nom) out.product_name = nom;
   return out;
+}
+
+// Lot 2 — demande de rangement (deps.rangerProduit, facultatif). Rend TOUJOURS
+// une promesse qui se résout (proposition ou null), jamais rejetée : la fiche
+// s'affiche sans l'attendre, et la confirmation l'attend au plus quelques secondes.
+export const DELAI_RANGEMENT_MS = 8000;
+export function demanderRangement({ off, ligne, deps, delaiMax = DELAI_RANGEMENT_MS }) {
+  if (typeof deps?.rangerProduit !== 'function') return Promise.resolve(null);
+  const libelleTicket = String(ligne?.libelle_ticket || '').trim();
+  if (!nomOff(off) && !libelleTicket) return Promise.resolve(null);
+  const demande = (async () => {
+    try {
+      const r = await deps.rangerProduit({ off: off || {}, libelleTicket });
+      if (!r || typeof r !== 'object') return null;
+      const rayon = r.rayon?.id && r.rayon?.nom ? { id: String(r.rayon.id), nom: String(r.rayon.nom) } : null;
+      const produit = r.produit?.id && r.produit?.nom ? { id: String(r.produit.id), nom: String(r.produit.nom) } : null;
+      const nomGenerique = typeof r.nom_generique === 'string' && r.nom_generique.trim() ? r.nom_generique.trim() : null;
+      const marque = typeof r.marque === 'string' && r.marque.trim() ? r.marque.trim() : null;
+      if (!rayon && !produit && !nomGenerique) return null;
+      return { rayon, nom_generique: nomGenerique, produit, marque, certain: r.certain === true };
+    } catch {
+      return null;
+    }
+  })();
+  const limite = new Promise(resolve => setTimeout(() => resolve(null), delaiMax));
+  return Promise.race([demande, limite]);
+}
+
+// Lot 2 — la proposition arrive : la fiche affiche le rayon proposé (sauf si
+// l'utilisateur en a déjà choisi un) et le nom sous lequel le produit sera
+// rangé. Pure ; rend une NOUVELLE recherche.
+export function appliquerRangement(recherche, rangement) {
+  if (!recherche || recherche.statut !== RECHERCHE_INCONNU) return recherche;
+  const prop = rangement || null;
+  if (!prop) return { ...recherche, rangement: null }; // rien de proposé : la fiche ne bouge pas
+  const rayon = recherche.rayonChoisi || prop?.rayon || recherche.rayon || null;
+  return {
+    ...recherche,
+    rangement: prop,
+    rayon: recherche.rayonChoisi ? recherche.rayon : (prop?.rayon || recherche.rayon || null),
+    fiche: { ...recherche.fiche, rayon: rayon?.nom || null, range: prop?.produit?.nom || prop?.nom_generique || null },
+  };
 }
 
 // Rayon { id, nom } déduit des catégories OFF par la base (deps.devinerRayon,
@@ -366,7 +425,9 @@ export async function rechercherScanLigne({ ligne, codeBrut, deps, photoPourConn
   let off = {};
   try { off = (await deps.chercherOff(codePourCreation(code))) || {}; } catch { off = {}; }
   const rayon = await devinerRayonOff(off, deps);
-  return { statut: RECHERCHE_INCONNU, ecrit: false, code, off, rayon, rayonChoisi: null, fiche: ficheVerification({ statut: RECHERCHE_INCONNU, off, ligne, rayon }) };
+  // Lot 2 — le rangement est DEMANDÉ ici mais pas attendu : la fiche s'affiche tout de suite.
+  const rangementEnCours = demanderRangement({ off, ligne, deps });
+  return { statut: RECHERCHE_INCONNU, ecrit: false, code, off, rayon, rayonChoisi: null, rangementEnCours, fiche: ficheVerification({ statut: RECHERCHE_INCONNU, off, ligne, rayon }) };
 }
 
 // TEMPS 2 — écriture, uniquement sur une recherche RÉUSSIE (connu/inconnu).
@@ -404,7 +465,9 @@ export async function ecrireScanLigne({ ligne, recherche, deps }) {
   const off = r.off || {};
   let rep;
   try {
-    rep = await deps.creerDepuisCode({ ligneId: ligne.id, code: codePourCreation(code), off: offPourCreation(off, r.rayonChoisi) });
+    // Lot 2 — proposition déjà arrivée, sinon on l'attend (elle se résout toujours, en 8 s au plus).
+    const rangement = r.rangement !== undefined ? r.rangement : await (r.rangementEnCours || null);
+    rep = await deps.creerDepuisCode({ ligneId: ligne.id, code: codePourCreation(code), off: offPourCreation(off, r.rayonChoisi, rangement) });
   } catch (e) {
     rep = { error: e || true };
   }

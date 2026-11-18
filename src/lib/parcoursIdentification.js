@@ -22,7 +22,7 @@
 import {
   estAIdentifier, trierLignesTicket, prixArticle, titreLigneInconnue,
   rechercherScanLigne, ecrireScanLigne, annulerScanLigne, ligneApresAnnulation,
-  libelleProduitCree, RECHERCHE_CONNU, RECHERCHE_INCONNU, SOURCE_AUCUNE, normaliserCode,
+  libelleProduitCree, RECHERCHE_CONNU, RECHERCHE_INCONNU, SOURCE_AUCUNE, normaliserCode, appliquerRangement,
   marquerSansCodeBarres,
 } from './scanDepuisHistorique';
 import { divergenceAssociation } from './coherenceAssociation';
@@ -150,11 +150,22 @@ export function creerParcoursIdentification({
       }
       if (etat.ligne !== ligne) return etat; // ligne changée entre-temps
       if (recherche.statut === RECHERCHE_CONNU || recherche.statut === RECHERCHE_INCONNU) {
-        return publier({
+        const publie = publier({
           phase: PHASE_VERIFICATION,
           recherche,
           doubleLecture: doubleLectureRequise(recherche) ? { code: recherche.code, relu: false } : null,
         });
+        // Lot 2 — la proposition de rangement arrive après coup : elle complète
+        // la fiche si c'est toujours CE code, sur CETTE ligne, encore affiché.
+        if (recherche.statut === RECHERCHE_INCONNU && recherche.rangementEnCours) {
+          Promise.resolve(recherche.rangementEnCours).then((rangement) => {
+            const r = etat.recherche;
+            if (etat.ligne !== ligne || !r || r.code !== recherche.code || r.rangementEnCours !== recherche.rangementEnCours || r.rangement !== undefined) return;
+            if (etat.phase !== PHASE_VERIFICATION && etat.phase !== PHASE_ECRITURE) return;
+            publier({ recherche: appliquerRangement(r, rangement) });
+          }).catch(() => { /* jamais bloquant */ });
+        }
+        return publie;
       }
       return publier({ phase: PHASE_REFUS, recherche, message: recherche.message });
     },
@@ -166,7 +177,11 @@ export function creerParcoursIdentification({
       if (etat.phase !== PHASE_VERIFICATION || etat.recherche?.statut !== RECHERCHE_INCONNU) return etat;
       if (!rayon?.id || !rayon?.nom) return etat;
       const choisi = { id: String(rayon.id), nom: String(rayon.nom) };
-      return publier({ recherche: { ...etat.recherche, rayonChoisi: choisi, fiche: { ...etat.recherche.fiche, rayon: choisi.nom } } });
+      // Lot 2 — dans un autre rayon que celui proposé, la fiche existante proposée ne tient plus :
+      // le produit sera rangé sous son nom générique, dans le rayon choisi.
+      const prop = etat.recherche.rangement;
+      const range = prop && prop.rayon?.id && prop.rayon.id !== choisi.id ? (prop.nom_generique || null) : (etat.recherche.fiche?.range ?? null);
+      return publier({ recherche: { ...etat.recherche, rayonChoisi: choisi, fiche: { ...etat.recherche.fiche, rayon: choisi.nom, range } } });
     },
 
     // « ✓ C'est bien ça » — SEUL geste qui écrit.

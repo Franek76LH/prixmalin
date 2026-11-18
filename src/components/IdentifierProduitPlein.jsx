@@ -241,11 +241,15 @@ export default function IdentifierProduitPlein({ lignes, ligneDepartId, deps, on
           <div style={{ fontFamily: F, fontWeight: 800, fontSize: 16, color: f.marque ? '#fff' : GRIS_TEXTE, marginTop: 4 }}>{f.marque || 'marque inconnue'}</div>
           <div style={{ fontFamily: F, fontWeight: 700, fontSize: 15, color: f.format ? '#fff' : '#FFD27A', marginTop: 2 }}>{f.format || 'quantité à préciser'}</div>
           {/* Chantier 151 — rayon de la fiche qui va être créée. Une ligne, pas une étape : on peut la toucher pour corriger. */}
-          {e.recherche?.statut === RECHERCHE_INCONNU && !aucuneInfo && (
+          {e.recherche?.statut === RECHERCHE_INCONNU && (!aucuneInfo || f.rayon) && (
             <button onClick={ouvrirChoixRayon} disabled={ecriture}
               style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 8, padding: '6px 10px', borderRadius: 99, border: '1px solid rgba(255,255,255,0.25)', background: 'rgba(255,255,255,0.08)', color: f.rayon ? '#fff' : GRIS_TEXTE, fontFamily: F, fontWeight: 800, fontSize: 13, cursor: 'pointer' }}>
-              Rayon : {f.rayon || 'à ranger plus tard'} <span aria-hidden="true" style={{ opacity: 0.7 }}>✏️</span>
+              Rayon : {f.rayon || (e.recherche?.rangement === undefined && e.recherche?.rangementEnCours ? 'recherche…' : 'à ranger plus tard')} <span aria-hidden="true" style={{ opacity: 0.7 }}>✏️</span>
             </button>
+          )}
+          {/* Lot 2 — le nom sous lequel le produit sera rangé (fiche existante ou nom générique). Information, pas une étape. */}
+          {e.recherche?.statut === RECHERCHE_INCONNU && f.range && (
+            <div style={{ fontFamily: F, fontSize: 13, fontWeight: 700, color: GRIS_TEXTE, marginTop: 6 }}>Rangé avec : <span style={{ color: '#fff' }}>{f.range}</span></div>
           )}
           {aucuneInfo ? (
             <div style={{ fontFamily: F, fontWeight: 900, fontSize: 26, color: '#fff', letterSpacing: '0.08em', marginTop: 10 }}>{e.recherche?.code}</div>

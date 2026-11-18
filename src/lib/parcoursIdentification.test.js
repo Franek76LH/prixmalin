@@ -3,7 +3,7 @@ import {
   creerParcoursIdentification, fileDepuis, doubleLectureRequise, AVERTISSEMENT_AUCUNE_INFO,
   PHASE_CAMERA, PHASE_VERIFICATION, PHASE_REFUS, PHASE_SUCCES, PHASE_FIN, PHRASE_ENGAGEMENT,
 } from './parcoursIdentification';
-import { SOURCE_BASE, SOURCE_OFF, SOURCE_AUCUNE, offPourCreation, ficheVerification, RECHERCHE_INCONNU } from './scanDepuisHistorique';
+import { SOURCE_BASE, SOURCE_OFF, SOURCE_AUCUNE, offPourCreation, ficheVerification, RECHERCHE_INCONNU, iaPourCreation, appliquerRangement, demanderRangement } from './scanDepuisHistorique';
 
 // Ticket Intermarché Aix du 08/11 : 3 lignes à identifier + 1 reconnue.
 const RUMSTECK = { id: 'l-rum', libelle_ticket: 'V.BOVINE 1 X RUMSTEC', statut_validation_produit: 'non_valide', prix_unitaire: 9.9, numero_ligne: 2 };
@@ -603,5 +603,114 @@ describe('chantier 151 — rayon proposé et rayon choisi', () => {
     expect(offPourCreation({}, SURGELES)).toEqual({ rayon_choisi: 'sc-surg' });
     expect(offPourCreation({ product_name: 'X' }, null)).toEqual({ product_name: 'X' });
     expect(offPourCreation({}, null)).toEqual({});
+  });
+});
+
+// Chantier 151, lot 2 — la fonction en ligne ranger-produit propose le rayon,
+// le nom générique, la fiche à rejoindre et la marque. La fiche s'affiche sans
+// l'attendre ; la confirmation l'attend ; rien n'est jamais bloqué.
+describe('chantier 151, lot 2 — proposition de rangement', () => {
+  const OFF_BIERE_EXTREME = { product_name: '8.6 Extreme', brands: 'Bavaria', quantity: '50 cl', categories_tags: ['en:beers'] };
+  const BIERES = { id: 'sc-bieres', nom: 'Bières' };
+  const PROP = { rayon: BIERES, nom_generique: 'Bière', produit: { id: 'p-biere', nom: 'Bière' }, marque: '8.6', certain: true };
+  const tick = () => new Promise(r => setTimeout(r, 0));
+
+  it('la fiche s\'affiche tout de suite ; la proposition la complète quand elle arrive', async () => {
+    let livrer;
+    const rangerProduit = vi.fn(() => new Promise(r => { livrer = r; }));
+    const d = deps({ chercherOff: vi.fn().mockResolvedValue(OFF_BIERE_EXTREME), rangerProduit });
+    const p = parcours(d);
+    await p.codeLu('8714800026949');
+    expect(p.etat().phase).toBe(PHASE_VERIFICATION);
+    expect(p.etat().recherche.rangement).toBeUndefined(); // pas encore arrivée
+    expect(p.etat().recherche.fiche.nom).toBe('8.6 Extreme');
+    expect(rangerProduit).toHaveBeenCalledWith({ off: OFF_BIERE_EXTREME, libelleTicket: 'CHOU FLEUR PIECE' });
+    livrer(PROP); await tick();
+    expect(p.etat().recherche.fiche).toMatchObject({ nom: '8.6 Extreme', rayon: 'Bières', range: 'Bière' });
+    expect(d.creerDepuisCode).not.toHaveBeenCalled();
+  });
+
+  it('confirmer : la proposition part sous `ia`, réduite à ce que la base vérifie', async () => {
+    const d = deps({ chercherOff: vi.fn().mockResolvedValue(OFF_BIERE_EXTREME), rangerProduit: vi.fn().mockResolvedValue(PROP) });
+    const p = parcours(d);
+    await p.codeLu('8714800026949'); await tick();
+    await p.confirmer();
+    expect(d.creerDepuisCode.mock.calls[0][0].off.ia).toEqual({ nom_generique: 'Bière', marque: '8.6', sous_categorie_id: 'sc-bieres', produit_id: 'p-biere' });
+  });
+
+  it('confirmer AVANT l\'arrivée de la proposition : on l\'attend, puis on écrit avec elle', async () => {
+    let livrer;
+    const d = deps({ chercherOff: vi.fn().mockResolvedValue(OFF_BIERE_EXTREME), rangerProduit: vi.fn(() => new Promise(r => { livrer = r; })) });
+    const p = parcours(d);
+    await p.codeLu('8714800026949');
+    const ecriture = p.confirmer();
+    await tick();
+    expect(d.creerDepuisCode).not.toHaveBeenCalled(); // on attend
+    livrer(PROP);
+    await ecriture;
+    expect(d.creerDepuisCode.mock.calls[0][0].off.ia.produit_id).toBe('p-biere');
+  });
+
+  it('proposition absente, vide, illisible ou en échec : la création se fait comme au lot 1', async () => {
+    for (const rangerProduit of [vi.fn().mockResolvedValue(null), vi.fn().mockResolvedValue({}), vi.fn().mockResolvedValue('x'), vi.fn().mockRejectedValue(new Error('réseau')), undefined]) {
+      const d = deps({ chercherOff: vi.fn().mockResolvedValue(OFF_BIERE_EXTREME), ...(rangerProduit ? { rangerProduit } : {}) });
+      const p = parcours(d);
+      await p.codeLu('8714800026949'); await tick();
+      expect(p.etat().recherche.fiche.range ?? null).toBeNull();
+      await p.confirmer();
+      expect(d.creerDepuisCode.mock.calls[0][0].off.ia).toBeUndefined();
+      expect(d.creerDepuisCode.mock.calls[0][0].off.product_name).toBe('8.6 Extreme');
+    }
+  });
+
+  it('la proposition ne répond jamais : on n\'attend pas au-delà du délai', async () => {
+    const jamais = { rangerProduit: () => new Promise(() => {}) };
+    expect(await demanderRangement({ off: OFF_BIERE_EXTREME, ligne: CHOU, deps: jamais, delaiMax: 20 })).toBeNull();
+    expect(await demanderRangement({ off: {}, ligne: { libelle_ticket: '' }, deps: { rangerProduit: vi.fn() } })).toBeNull(); // rien à ranger
+  });
+
+  it('l\'utilisateur choisit un AUTRE rayon : la fiche existante proposée n\'est plus envoyée, le nom générique si', async () => {
+    const d = deps({ chercherOff: vi.fn().mockResolvedValue(OFF_BIERE_EXTREME), rangerProduit: vi.fn().mockResolvedValue(PROP) });
+    const p = parcours(d);
+    await p.codeLu('8714800026949'); await tick();
+    p.choisirRayon({ id: 'sc-spirit', nom: 'Spiritueux & apéritifs' });
+    expect(p.etat().recherche.fiche).toMatchObject({ rayon: 'Spiritueux & apéritifs', range: 'Bière' });
+    await p.confirmer();
+    const envoye = d.creerDepuisCode.mock.calls[0][0].off;
+    expect(envoye.rayon_choisi).toBe('sc-spirit');
+    expect(envoye.ia).toEqual({ nom_generique: 'Bière', marque: '8.6', sous_categorie_id: 'sc-bieres' });
+  });
+
+  it('un rayon choisi AVANT l\'arrivée de la proposition n\'est pas écrasé par elle', async () => {
+    let livrer;
+    const d = deps({ chercherOff: vi.fn().mockResolvedValue(OFF_BIERE_EXTREME), rangerProduit: vi.fn(() => new Promise(r => { livrer = r; })) });
+    const p = parcours(d);
+    await p.codeLu('8714800026949');
+    p.choisirRayon({ id: 'sc-spirit', nom: 'Spiritueux & apéritifs' });
+    livrer(PROP); await tick();
+    expect(p.etat().recherche.fiche.rayon).toBe('Spiritueux & apéritifs');
+    expect(p.etat().recherche.rayonChoisi).toEqual({ id: 'sc-spirit', nom: 'Spiritueux & apéritifs' });
+  });
+
+  it('une proposition qui arrive après le passage à un autre produit est ignorée', async () => {
+    let livrer;
+    const d = deps({ chercherOff: vi.fn().mockResolvedValue(OFF_BIERE_EXTREME), rangerProduit: vi.fn(() => new Promise(r => { livrer = r; })) });
+    const p = parcours(d);
+    await p.codeLu('8714800026949');
+    p.refuser();
+    livrer(PROP); await tick();
+    expect(p.etat().recherche?.rangement).toBeUndefined();
+  });
+
+  it('iaPourCreation et appliquerRangement : cas limites', () => {
+    expect(iaPourCreation(null)).toBeNull();
+    expect(iaPourCreation({})).toBeNull();
+    expect(iaPourCreation({ rayon: BIERES })).toEqual({ sous_categorie_id: 'sc-bieres' });
+    expect(offPourCreation({}, null, PROP)).toEqual({ ia: { nom_generique: 'Bière', marque: '8.6', sous_categorie_id: 'sc-bieres', produit_id: 'p-biere' } });
+    const connue = { statut: 'connu', fiche: { nom: 'X' } };
+    expect(appliquerRangement(connue, PROP)).toBe(connue); // produit déjà connu : rien à ranger
+    const inconnue = { statut: RECHERCHE_INCONNU, rayon: null, rayonChoisi: null, fiche: { nom: 'X', rayon: null } };
+    expect(appliquerRangement(inconnue, null)).toEqual({ ...inconnue, rangement: null });
+    expect(appliquerRangement(inconnue, { rayon: BIERES, nom_generique: 'Bière', produit: null, marque: null }).fiche).toEqual({ nom: 'X', rayon: 'Bières', range: 'Bière' });
   });
 });
