@@ -90,6 +90,7 @@ import BlocCandidatsTicket from "./components/BlocCandidatsTicket";
 import { CLES_TESTEURS, estTesteurDeConfiance } from "./lib/accesTesteurs";
 import { compterAchats } from "./lib/habitudesAchat";
 import { lireMemoire, choixARetenir } from "./lib/memoireListe";
+import { varianteDite, compterAchatsVariantes } from "./lib/marqueDite";
 import { construireCarteSuggestion, compterAConfirmerParJour, jourArchive } from "./lib/suggestionsRattachement";
 import CarteSuggestion from "./components/CarteSuggestion";
 // Chantier 112 — un ticket scanné produit TOUJOURS une archive : on ne
@@ -7907,7 +7908,7 @@ function MicroLienSheet({ element, onClose, onResolu, onIntrouvable }) {
 // Prise plafonnée à 3 minutes (décision chantier), enchaînable à volonté.
 const MICRO_PRISE_MAX_S = 3 * 60;
 
-function MicroTab({ onAdd, setTab, achats = null, memoire = null, onRetenir = null }) {
+function MicroTab({ onAdd, setTab, achats = null, achatsVariantes = null, memoire = null, onRetenir = null }) {
   const F = "'Nunito',sans-serif";
   // Détections une seule fois au montage (pas de setState synchrone au rendu).
   // Le micro exige un contexte sécurisé (https, ou localhost) : en http local,
@@ -7972,7 +7973,7 @@ function MicroTab({ onAdd, setTab, achats = null, memoire = null, onRetenir = nu
         if ((e.statut_resolution ?? "a_relier") !== "a_relier") return e;
         if (decision.issue === LIAISON_RELIE) {
           return { ...e, statut_resolution: "resolu", produit_id: decision.produit.produit_id, variante_produit_id: null,
-            marque_pref: "nationale", produit_nom: decision.produit.produit_nom, suggestions: [], liaison_cherchee: true };
+            marque_pref: "nationale", produit_nom: decision.produit.produit_nom, suggestions: [], liaison_cherchee: true, marque_a_preciser: true };
         }
         return { ...e, liaison_cherchee: true,
           suggestions: decision.suggestions.map(sg => ({ produit_id: sg.produit_id, produit_nom: sg.produit_nom, dejaAchete: !!sg.dejaAchete })) };
@@ -7990,11 +7991,41 @@ function MicroTab({ onAdd, setTab, achats = null, memoire = null, onRetenir = nu
       const seule = ficheARelierSeule(duSens[e.id]);
       if (seule) {
         return { ...e, statut_resolution: "resolu", produit_id: seule.produit_id, variante_produit_id: null,
-          marque_pref: "nationale", produit_nom: seule.produit_nom, suggestions: [], liaison_ia: true };
+          marque_pref: "nationale", produit_nom: seule.produit_nom, suggestions: [], liaison_ia: true, marque_a_preciser: true };
       }
       return { ...e, suggestions: fusionnerPropositions(duSens[e.id].propositions, e.suggestions, achatsRef.current) };
     }));
   }, []);
+
+  // Chantier 157 — la marque dite. Un élément relié à une fiche sans variante
+  // (« bière 8.6 Original » -> Bière) : si ce qui a été dit nomme une marque de
+  // cette fiche et qu'UNE variante s'impose, la ligne la porte, et le
+  // comparateur comparera cette marque-là. Sinon rien ne change.
+  const achatsVariantesRef = useRef(achatsVariantes);
+  useEffect(() => { achatsVariantesRef.current = achatsVariantes; }, [achatsVariantes]);
+  const marquesCherchees = useRef(new Set());
+  useEffect(() => {
+    for (const e of elementsListe) {
+      if (e.statut_resolution !== "resolu" || !e.marque_a_preciser || !e.produit_id || e.variante_produit_id) continue;
+      const cle = `${e.id}|${e.nom}|${e.produit_id}`;
+      if (marquesCherchees.current.has(cle)) continue;
+      marquesCherchees.current.add(cle);
+      const dit = [e.nom, e.texte_entendu, e.qualificatifs].filter(Boolean).join(" ");
+      supabase.from('variantes_produit')
+        .select('id, libelle, quantite_nette, unite_quantite, marques(nom, est_mdd)')
+        .eq('produit_id', e.produit_id).eq('actif', true)
+        .then(({ data, error }) => {
+          if (error || !Array.isArray(data)) return;
+          const trouvee = varianteDite(dit, data.map(v => ({ id: v.id, libelle: v.libelle, quantite_nette: v.quantite_nette,
+            unite_quantite: v.unite_quantite, marque: v.marques?.nom ?? null, est_mdd: v.marques?.est_mdd ?? null })),
+            { achatsVariantes: achatsVariantesRef.current });
+          if (!trouvee?.variante) return;
+          setElementsListe(prev => prev.map(x =>
+            (x.id === e.id && x.nom === e.nom && x.produit_id === e.produit_id && x.statut_resolution === "resolu" && !x.variante_produit_id)
+              ? { ...x, variante_produit_id: trouvee.variante.id, marque_dite: trouvee.marque } : x));
+        }, () => {});
+    }
+  }, [elementsListe]);
 
   // Liste reprise d'un brouillon : les éléments jamais cherchés le sont une
   // fois, à l'ouverture de l'écran.
@@ -8245,7 +8276,7 @@ function MicroTab({ onAdd, setTab, achats = null, memoire = null, onRetenir = nu
     // correspondre à un tout autre produit (statut « à relier »).
     if (nom) {
       setElementsListe(prev => prev.map(e => e.id === editionId
-        ? { ...e, nom, confiance: "haute", statut_resolution: "a_relier", produit_id: null, variante_produit_id: null, produit_nom: null, suggestions: [], liaison_cherchee: false }
+        ? { ...e, nom, confiance: "haute", statut_resolution: "a_relier", produit_id: null, variante_produit_id: null, produit_nom: null, suggestions: [], liaison_cherchee: false, marque_dite: null, marque_a_preciser: false }
         : e));
       lierAutomatiquement([{ id: editionId, nom }]); // Chantier 122 — nouveau nom, nouvelle recherche
     }
@@ -8267,6 +8298,10 @@ function MicroTab({ onAdd, setTab, achats = null, memoire = null, onRetenir = nu
           variante_produit_id: liaison.variante_produit_id,
           marque_pref:         liaison.marque_pref,
           produit_nom:         liaison.produit_nom,
+          // Fiche prise d'un appui sur une proposition : la marque dite reste à
+          // chercher. Fiche choisie dans « Autre… » : l'utilisateur a déjà tout réglé.
+          marque_a_preciser:   !!liaison.aPreciser,
+          marque_dite:         null,
           quantite:            (liaison.qty && liaison.qty !== 1) ? liaison.qty : e.quantite,
           confiance:           "haute", // choix humain = validé
         }
@@ -8503,7 +8538,7 @@ function MicroTab({ onAdd, setTab, achats = null, memoire = null, onRetenir = nu
                            <span style={{ fontFamily:F, fontSize:11, fontWeight:800, color:C.gray }}>C'est :</span>
                            {e.suggestions.map(sg => (
                              <button key={sg.produit_id}
-                               onClick={() => resoudreElement(e.id, { produit_id: sg.produit_id, variante_produit_id: null, marque_pref: "nationale", produit_nom: sg.produit_nom, qty: 1 })}
+                               onClick={() => resoudreElement(e.id, { produit_id: sg.produit_id, variante_produit_id: null, marque_pref: "nationale", produit_nom: sg.produit_nom, qty: 1, aPreciser: true })}
                                style={{ border:"1px solid #BFDBFE", borderRadius:99, background:"#EFF6FF", color:"#1D4ED8", fontFamily:F, fontWeight:800, fontSize:11.5, padding:"5px 11px", cursor:"pointer" }}>
                                {sg.produit_nom}{sg.dejaAchete ? " · déjà acheté" : ""}
                              </button>
@@ -8523,7 +8558,7 @@ function MicroTab({ onAdd, setTab, achats = null, memoire = null, onRetenir = nu
                        {e.statut_resolution === "resolu" && (
                          <>
                            <span style={{ fontFamily:F, fontSize:11.5, fontWeight:800, color:C.green }}>
-                             ✓ {e.produit_nom}
+                             ✓ {e.produit_nom}{e.marque_dite ? ` · ${e.marque_dite}` : ""}
                            </span>
                            <button onClick={() => setLienElement(e)}
                              style={{ border:"none", background:"none", fontFamily:F, fontSize:11, fontWeight:700, color:C.gray, cursor:"pointer", textDecoration:"underline", padding:0 }}>
@@ -11034,13 +11069,14 @@ export default function App() {
   // siennes) départage les fiches qui se ressemblent. null = pas encore lu ;
   // {} = rien à lire ou lecture en échec (on fait alors comme avant).
   const [achatsHabituels, setAchatsHabituels] = useState(null);
+  const [achatsVariantes, setAchatsVariantes] = useState({}); // par variante : départage les formats d'une marque dite
   const idPourAchats = session?.user?.id ?? null;
   const nbArchivesPourAchats = archives.length;
   useEffect(() => {
     if (!idPourAchats) return;
     let annule = false;
-    supabase.from('lignes_ticket').select('produit_id').not('produit_id', 'is', null).limit(5000)
-      .then(({ data, error }) => { if (!annule) setAchatsHabituels(error ? {} : compterAchats(data)); },
+    supabase.from('lignes_ticket').select('produit_id, variante_produit_id').not('produit_id', 'is', null).limit(5000)
+      .then(({ data, error }) => { if (!annule) { setAchatsHabituels(error ? {} : compterAchats(data)); setAchatsVariantes(error ? {} : compterAchatsVariantes(data)); } },
         () => { if (!annule) setAchatsHabituels({}); });
     return () => { annule = true; };
   }, [idPourAchats, nbArchivesPourAchats]);
@@ -11192,7 +11228,7 @@ export default function App() {
           {/* Chantier « Micro » Lot 1 — même mécanique shadow que rejets (#56.3b) :
               jamais rendu pour un autre utilisateur, même si tab="micro" traîne en state.
               Lot 5 : onAdd = le addItem OFFICIEL du caddie (même chemin que le Catalogue). */}
-          {loaded && accesAvance && tab==="micro" && <MicroTab onAdd={addItem} setTab={setTab} achats={achatsHabituels} memoire={memoireListe} onRetenir={retenirChoix}/>}
+          {loaded && accesAvance && tab==="micro" && <MicroTab onAdd={addItem} setTab={setTab} achats={achatsHabituels} achatsVariantes={achatsVariantes} memoire={memoireListe} onRetenir={retenirChoix}/>}
           {/* Chantier « Courses » Lot 1 (shadow estFrancois) — écran de courses,
               accessible uniquement via la validation du comparatif (aucun
               onglet TabBar). Session absente -> rien n'est rendu. */}

@@ -1,0 +1,50 @@
+import { describe, it, expect } from 'vitest';
+import { marqueEstDite, varianteDite, compterAchatsVariantes } from './marqueDite';
+
+const V = (id, marque, libelle, extra = {}) => ({ id, marque, est_mdd: false, libelle, quantite_nette: 500, unite_quantite: 'ml', ...extra });
+const BIERES = [
+  V('86-original', '8.6', 'Original blonde intense 8,6%'),
+  V('86-extreme', '8.6', 'Extreme 50 cl'),
+  V('leffe', 'Leffe', 'Blonde 50 cl'),
+  V('sans-marque', null, 'Bière 50 cl'),
+];
+
+describe('marque dite au micro', () => {
+  it('reconnaît une marque dite en mot entier, accents et tirets ignorés', () => {
+    expect(marqueEstDite('bière 8.6 Original', '8.6')).toBe(true);
+    expect(marqueEstDite('du coca cola zéro', 'Coca-Cola')).toBe(true);
+    expect(marqueEstDite('camembert président', 'Président')).toBe(true);
+    expect(marqueEstDite('des karaokés', 'Kara')).toBe(false);
+    expect(marqueEstDite('bière 18.60', '8.6')).toBe(false);
+    expect(marqueEstDite('bière', '')).toBe(false);
+  });
+  it('le cas de François : « bière 8.6 Original » -> la 8.6 Original', () => {
+    expect(varianteDite('bière 8.6 Original', BIERES)).toMatchObject({ marque: '8.6', variante: { id: '86-original' } });
+  });
+  it('une marque à un seul format : choisie directement', () => {
+    expect(varianteDite('une Leffe', BIERES)).toMatchObject({ marque: 'Leffe', variante: { id: 'leffe' } });
+  });
+  it('aucune marque dite : rien (on reste sur la fiche)', () => {
+    expect(varianteDite('de la bière', BIERES)).toBeNull();
+    expect(varianteDite('bière', [])).toBeNull();
+    expect(varianteDite('bière', null)).toBeNull();
+  });
+  it('marque dite mais plusieurs formats possibles : pas de pari', () => {
+    expect(varianteDite('bière 8.6', BIERES)).toEqual({ marque: '8.6', variante: null });
+  });
+  it('…sauf si l\'habitude d\'achat désigne un seul format', () => {
+    expect(varianteDite('bière 8.6', BIERES, { achatsVariantes: { '86-extreme': 3 } })).toMatchObject({ variante: { id: '86-extreme' } });
+    expect(varianteDite('bière 8.6', BIERES, { achatsVariantes: { '86-extreme': 2, '86-original': 2 } }).variante).toBeNull();
+  });
+  it('deux marques dites : on ne tranche pas', () => {
+    expect(varianteDite('bière 8.6 ou Leffe', BIERES)).toBeNull();
+  });
+  it('jamais une marque de distributeur, jamais une variante sans format', () => {
+    expect(varianteDite('sauce bio village', [V('mdd', 'Bio Village', 'Bolognaise', { est_mdd: true })])).toBeNull();
+    expect(varianteDite('une Leffe', [V('x', 'Leffe', 'Blonde', { quantite_nette: null })])).toBeNull();
+  });
+  it('compte les achats par variante', () => {
+    expect(compterAchatsVariantes([{ variante_produit_id: 'a' }, { variante_produit_id: 'a' }, { variante_produit_id: null }, null])).toEqual({ a: 2 });
+    expect(compterAchatsVariantes(null)).toEqual({});
+  });
+});
