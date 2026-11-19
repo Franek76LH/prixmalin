@@ -1,11 +1,17 @@
 import { describe, it, expect } from 'vitest';
-import { lireReponseIA, fusionnerPropositions, RELIER_SEUL_SI_IA_SURE } from './rapprochementIA';
+import { lireReponseIA, fusionnerPropositions, ficheARelierSeule, RELIER_SEUL_SI_IA_SURE } from './rapprochementIA';
 
 const P = (id, nom = id, extra = {}) => ({ produit_id: id, produit_nom: nom, ...extra });
 
 describe('rapprochement par le sens', () => {
-  it('première version : l\'IA propose, elle ne relie pas seule', () => {
-    expect(RELIER_SEUL_SI_IA_SURE).toBe(false);
+  it('relie seule uniquement une fiche unique et sûre', () => {
+    expect(RELIER_SEUL_SI_IA_SURE).toBe(true);
+    expect(ficheARelierSeule({ propositions: [P('biere', 'Bière')], sur: true })).toEqual(P('biere', 'Bière'));
+    expect(ficheARelierSeule({ propositions: [P('biere', 'Bière')], sur: false })).toBeNull();
+    expect(ficheARelierSeule({ propositions: [P('a'), P('b')], sur: true })).toBeNull();
+    expect(ficheARelierSeule({ propositions: [], sur: true })).toBeNull();
+    expect(ficheARelierSeule({ propositions: [P('a')], sur: 'oui' })).toBeNull();
+    expect(ficheARelierSeule(null)).toBeNull();
   });
   it('lit la réponse de la fonction', () => {
     const r = lireReponseIA({ resultats: [

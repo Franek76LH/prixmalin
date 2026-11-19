@@ -13,7 +13,7 @@ import { calculerPrixReferenceParUnite } from "./lib/unitesCore";
 import { urlPhotoVariante, offLargeSource, offFullUrl, cloudinaryAgrandi } from "./lib/photosProduits";
 import { nomComposeVariante, formatEtiquetteVariante } from "./lib/nomProduit";
 import { transcrireAudioListe, normaliserNomElement, comptesParNom, fusionnerParNom, demanderRapprochementListe } from "./lib/microVocal";
-import { fusionnerPropositions } from "./lib/rapprochementIA";
+import { fusionnerPropositions, ficheARelierSeule } from "./lib/rapprochementIA";
 // Chantier « Courses » Lot 1 — session de courses figée (shadow estFrancois).
 import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession, ajouterNoteSession, supprimerNoteSession, cloreSession, idsCaddieASupprimer, articlesNonAchetesASupprimer, construireBilanCourses, doitRattacherTicketSession, chargerMarquesVariantes, calculerTotalPanier } from "./lib/sessionCoursesCore";
 // Chantier 91 Lot 5 — rapprochement liste / cochés / ticket.
@@ -7959,8 +7959,9 @@ function MicroTab({ onAdd, setTab, achats = null, memoire = null, onRetenir = nu
       return data || [];
     };
     // Chantier 157 — en même temps que la recherche par les mots, on demande
-    // à l'IA un rapprochement par le sens (« sopalin » -> Essuie-tout). Elle
-    // ne relie rien : ses fiches s'ajoutent aux propositions à un appui.
+    // à l'IA un rapprochement par le sens (« sopalin » -> Essuie-tout). Sûre
+    // d'une seule fiche, elle la relie ; sinon ses fiches s'ajoutent aux
+    // propositions à un appui.
     const demandes = (elements || []).filter(el => el?.id && el?.nom);
     const reponseIA = demanderRapprochementListe(demandes);
     for (const el of elements || []) {
@@ -7983,6 +7984,14 @@ function MicroTab({ onAdd, setTab, achats = null, memoire = null, onRetenir = nu
       const demande = demandes.find(d => d.id === e.id);
       // Jamais sur un élément renommé, relié ou écarté entre-temps.
       if (!demande || e.nom !== demande.nom || (e.statut_resolution ?? "a_relier") !== "a_relier" || !duSens[e.id]) return e;
+      // IA sûre d'une seule fiche : reliée toute seule (visible, « changer »
+      // reste possible). Ce n'est pas un choix de l'utilisateur : rien n'est
+      // écrit dans son carnet.
+      const seule = ficheARelierSeule(duSens[e.id]);
+      if (seule) {
+        return { ...e, statut_resolution: "resolu", produit_id: seule.produit_id, variante_produit_id: null,
+          marque_pref: "nationale", produit_nom: seule.produit_nom, suggestions: [], liaison_ia: true };
+      }
       return { ...e, suggestions: fusionnerPropositions(duSens[e.id].propositions, e.suggestions, achatsRef.current) };
     }));
   }, []);

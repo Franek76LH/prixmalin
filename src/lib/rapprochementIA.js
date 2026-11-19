@@ -5,9 +5,12 @@
 // Ici : la mise en forme de sa réponse et sa fusion avec les propositions
 // habituelles (ressemblance des mots + habitudes d'achat). Testé seul.
 //
-// Première version : l'IA PROPOSE, elle ne relie jamais seule — même quand
-// elle se dit sûre. On regarde d'abord ce qu'elle vaut sur de vraies listes.
-export const RELIER_SEUL_SI_IA_SURE = false;
+// Quand l'IA se dit sûre (une seule fiche, sans hésitation), la fiche est
+// reliée toute seule. Décidé après le premier essai réel de François (19/11) :
+// « bière 8.6 Original » avait une proposition sûre, personne n'a appuyé
+// dessus, et le produit est parti au caddie en texte libre — donc sans prix.
+// Le lien reste visible (« ✓ fiche · changer ») et corrigeable avant l'ajout.
+export const RELIER_SEUL_SI_IA_SURE = true;
 export const MAX_PROPOSITIONS = 3;
 
 // Réponse de la fonction -> { [idElement]: { propositions, sur } }.
@@ -47,4 +50,12 @@ export function fusionnerPropositions(ia, lexicales, achats = null) {
     if (fusion.length >= MAX_PROPOSITIONS) break;
   }
   return fusion;
+}
+
+// La fiche à relier toute seule pour cet élément, ou null.
+// Exige une réponse « sûre » ET une fiche unique : au moindre doute, on propose.
+export function ficheARelierSeule(resultat) {
+  if (!RELIER_SEUL_SI_IA_SURE || resultat?.sur !== true) return null;
+  const propositions = Array.isArray(resultat.propositions) ? resultat.propositions : [];
+  return propositions.length === 1 && propositions[0]?.produit_id && propositions[0]?.produit_nom ? propositions[0] : null;
 }
