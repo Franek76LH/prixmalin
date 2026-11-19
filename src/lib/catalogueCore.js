@@ -28,6 +28,20 @@ export function formatVariante(variante) {
   return n > 1 ? `${n} × ${base}` : base;
 }
 
+// Chantier 157 — étiquette d'une ligne de liste qui porte une marque précise :
+// « Leffe · Rituel 9° ». Avant, seul le libellé s'affichait (« Rituel 9° ») et
+// on ne voyait pas quelle marque avait été retenue (capture de François, 19/11).
+// Jamais le nom d'une marque de distributeur (règle du comparateur) ; pas de
+// répétition quand le libellé contient déjà la marque (« Pepsi zéro 1,5L »).
+export function etiquetteMarqueEtFormat(variante) {
+  const format = formatVariante(variante);
+  const marque = variante?.marques?.est_mdd === true ? null : (variante?.marques?.nom || '').trim() || null;
+  if (!marque) return format;
+  const aplati = (t) => String(t ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  if (format === 'Format indifférent') return marque;
+  return ` ${aplati(format)} `.includes(` ${aplati(marque)} `) ? format : `${marque} · ${format}`;
+}
+
 // Transforme une ligne liste_courses (avec jointures produit/variante) en objet d'interface
 export function mapperLigneListeCourses(row) {
   const formatMatch = row.variante_produit_id && row.variante
@@ -35,7 +49,7 @@ export function mapperLigneListeCourses(row) {
     : (row.format_selectionne || '');
 
   const formatDisplay = row.variante_produit_id && row.variante
-    ? formatVariante(row.variante)
+    ? etiquetteMarqueEtFormat(row.variante)
     : (row.format_selectionne || (row.produit_id ? 'Format indifférent' : ''));
 
   return {

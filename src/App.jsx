@@ -6324,7 +6324,9 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
   const nomArticle = (item) => `${item.brand ? `${item.brand} · ` : ''}${item.product}`;
   const lignesGagnant = bestAffiche ? analysisAffichee.map(({ item, byStore }) => {
     const p = byStore[bestAffiche.id];
-    const sousTitre = [item.format, item.qty > 1 ? `× ${item.qty}` : null].filter(Boolean).join(' ');
+    // Ligne qui porte une marque précise : on l'affiche (« Leffe · Rituel 9° »).
+    const precision = item.variante_produit_id ? (item.formatDisplay ?? item.format) : item.format;
+    const sousTitre = [precision, item.qty > 1 ? `× ${item.qty}` : null].filter(Boolean).join(' ');
     if (!p) return { id: item.id, nom: nomArticle(item), sousTitre, manquant: true };
     const aVerifier = !prixEstFiable(p);
     const detail = aVerifier
@@ -9857,7 +9859,7 @@ export default function App() {
           supabase.from('liste_courses')
             .select(`id, texte_libre, libelle_saisi, quantite, format_selectionne, statut, produit_id, variante_produit_id, marque_pref,
               produit:produits(id, nom_reference),
-              variante:variantes_produit(id, libelle, quantite_nette, unite_quantite, nombre_unites)`)
+              variante:variantes_produit(id, libelle, quantite_nette, unite_quantite, nombre_unites, marques(nom, est_mdd))`)
             .eq('utilisateur_id', session?.user?.id)
             .order('cree_le'),
           supabase.from('price_db').select('*'),
@@ -9973,7 +9975,7 @@ export default function App() {
     const { data, error } = await supabase.from('liste_courses')
       .select(`id, texte_libre, libelle_saisi, quantite, format_selectionne, statut, produit_id, variante_produit_id, marque_pref,
         produit:produits(id, nom_reference),
-        variante:variantes_produit(id, libelle, quantite_nette, unite_quantite, nombre_unites)`)
+        variante:variantes_produit(id, libelle, quantite_nette, unite_quantite, nombre_unites, marques(nom, est_mdd))`)
       .eq('utilisateur_id', session?.user?.id)
       .order('cree_le');
     if (error) {
