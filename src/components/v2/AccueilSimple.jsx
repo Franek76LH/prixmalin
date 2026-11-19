@@ -8,7 +8,7 @@
 // L'écran ne décide rien : ce qu'il montre vient de lib/accueilCore.js.
 import { useState } from 'react';
 import { T } from './theme';
-import { IconeLoupe, IconeChevron } from './Icones';
+import { IconeLoupe, IconeChevron, IconeMicro } from './Icones';
 import DefiCommunaute from './DefiCommunaute';
 import { alertesBaisse, phraseBaisse, titreAlerteBaisse } from '../../lib/evolutionPrixCore';
 import {
@@ -82,7 +82,7 @@ export default function AccueilSimple({
   ticketAScanner = null, onOuvrirTicket = null, onEcarterTicket = null,
   sessionCourses = null, progressionCourses = null, joursCourses = 0, onReprendreCourses, onAbandonnerCourses,
   contributionVisible = false, onContribuer,
-  communaute = null, evolutionPrix = null,
+  communaute = null, evolutionPrix = null, onDicter = null,
 }) {
   const [confirme, setConfirme] = useState(null); // 'scan' | 'courses' | null
   const liste = apercuListe(items);
@@ -182,6 +182,7 @@ export default function AccueilSimple({
                   : 'Ajoute ce qu\'il te faut : la communauté te dira où ta liste coûte le moins cher.'}
               </div>
               <Bouton onClick={() => setTab('catalog')}>Ajouter des produits</Bouton>
+              {onDicter && <Bouton onClick={onDicter} plein={false} style={{ marginTop: 10 }}><IconeMicro width={20} height={20} /> Dicter ma liste</Bouton>}
             </>
           ) : (
             <>
@@ -197,6 +198,7 @@ export default function AccueilSimple({
               {action === ACTION_COMPARER && (
                 <Bouton onClick={() => setTab('compare')}>Où c'est le moins cher ?</Bouton>
               )}
+              {onDicter && <Bouton onClick={onDicter} plein={false} style={{ marginTop: 10 }}><IconeMicro width={20} height={20} /> Dicter ma liste</Bouton>}
             </>
           )}
         </Carte>

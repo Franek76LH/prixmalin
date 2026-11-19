@@ -1,9 +1,12 @@
 // Chantier 123 — barre du bas, comme dans une app de courses classique :
-// cinq entrées fixes, toujours au même endroit, l'action principale (scanner
+// des entrées fixes, toujours au même endroit, l'action principale (scanner
 // son ticket) au centre. Remplace les pastilles flottantes animées.
+// Chantier 158 — quatre entrées : « Comparer » faisait triple emploi (barre,
+// accueil, Ma liste). Deux entrées à gauche, le scanner au centre, « Moi » à
+// droite sur la largeur de deux pour que le scanner reste au milieu.
 import { T } from './theme';
 import { entreeActive } from '../../lib/navigationCore';
-import { IconeAccueil, IconeListe, IconeScanner, IconeComparer, IconeMoi } from './Icones';
+import { IconeAccueil, IconeListe, IconeScanner, IconeMoi } from './Icones';
 
 export default function BarreNavigation({ tab, setTab, onScanner, nbListe = 0, pastilleMoi = false }) {
   const active = entreeActive(tab);
@@ -11,8 +14,7 @@ export default function BarreNavigation({ tab, setTab, onScanner, nbListe = 0, p
     { id: 'home', libelle: 'Accueil', Icone: IconeAccueil, action: () => setTab('home') },
     { id: 'list', libelle: 'Ma liste', Icone: IconeListe, action: () => setTab('list'), compteur: nbListe },
     { id: 'scan', libelle: 'Scanner', Icone: IconeScanner, action: onScanner, central: true },
-    { id: 'compare', libelle: 'Comparer', Icone: IconeComparer, action: () => setTab('compare') },
-    { id: 'moi', libelle: 'Moi', Icone: IconeMoi, action: () => setTab('moi'), point: pastilleMoi },
+    { id: 'moi', libelle: 'Moi', Icone: IconeMoi, action: () => setTab('moi'), point: pastilleMoi, large: true },
   ];
 
   return (
@@ -24,7 +26,7 @@ export default function BarreNavigation({ tab, setTab, onScanner, nbListe = 0, p
       userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none', touchAction: 'manipulation',
     }}>
       {entrees.map((entree) => {
-        const { id, libelle, action, compteur, central, point } = entree;
+        const { id, libelle, action, compteur, central, point, large } = entree;
         const Icone = entree.Icone;
         const allume = active === id;
         const couleur = allume ? T.rouge : T.texteLeger;
@@ -47,7 +49,7 @@ export default function BarreNavigation({ tab, setTab, onScanner, nbListe = 0, p
         }
         return (
           <button key={id} onClick={action} aria-current={allume ? 'page' : undefined} style={{
-            border: 'none', background: 'none', padding: '4px 0 0', cursor: 'pointer', flex: 1,
+            border: 'none', background: 'none', padding: '4px 0 0', cursor: 'pointer', flex: large ? 2 : 1,
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, color: couleur,
           }}>
             <span style={{ position: 'relative', display: 'flex' }}>

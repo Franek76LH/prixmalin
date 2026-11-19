@@ -10,16 +10,21 @@ describe('navigation — cohérence en-tête / barre du bas', () => {
   });
 
   it('les écrans de premier niveau n\'ont pas de flèche retour', () => {
-    for (const t of ['list', 'compare', 'moi']) expect(ecranParent(t)).toBeNull();
+    for (const t of ['list', 'moi']) expect(ecranParent(t)).toBeNull();
   });
 
   it('un écran secondaire revient vers un écran de la MÊME entrée de la barre du bas', () => {
-    for (const t of ['catalog', 'micro', 'courses', 'archive', 'economies', 'rejets']) {
+    for (const t of ['catalog', 'micro', 'courses', 'compare', 'archive', 'economies', 'rejets']) {
       const parent = ecranParent(t);
       expect(parent).not.toBeNull();
       expect(entreeActive(parent)).toBe(entreeActive(t));
       expect(ecranParent(parent)).toBeNull(); // jamais deux niveaux de retour
     }
+  });
+
+  it('chantier 158 — la comparaison est la suite de Ma liste', () => {
+    expect(entreeActive('compare')).toBe('list');
+    expect(ecranParent('compare')).toBe('list');
   });
 
   it('onglet inconnu : l\'accueil est allumé, pas de retour', () => {

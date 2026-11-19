@@ -7,7 +7,9 @@ const FAMILLES = {
   home: 'home',
   list: 'list', catalog: 'list', micro: 'list', courses: 'list',
   prices: 'scan',
-  compare: 'compare',
+  // Chantier 158 — « Comparer » n'a plus d'entrée dans la barre du bas : c'est
+  // la suite de Ma liste (on y arrive par « Où c'est le moins cher ? »).
+  compare: 'list',
   moi: 'moi', archive: 'moi', economies: 'moi', rejets: 'moi', evolution: 'moi',
 };
 
@@ -20,7 +22,7 @@ const TITRES = {
 // Écran vers lequel la flèche « retour » ramène. Absent = écran de premier
 // niveau (il a sa propre entrée dans la barre du bas), donc pas de flèche.
 const PARENTS = {
-  catalog: 'list', micro: 'list', courses: 'list',
+  catalog: 'list', micro: 'list', courses: 'list', compare: 'list',
   archive: 'moi', economies: 'moi', rejets: 'moi', evolution: 'moi',
   prices: 'home',
 };

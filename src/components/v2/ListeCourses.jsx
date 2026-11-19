@@ -2,7 +2,7 @@
 // Présentation seule : toutes les actions (cocher, modifier, supprimer,
 // préférence de marque, favoris) restent celles de ListTab, passées en props.
 import { T } from './theme';
-import { IconePlus, IconeCroix, IconeCrayon, IconeCoche } from './Icones';
+import { IconePlus, IconeCroix, IconeCrayon, IconeCoche, IconeMicro } from './Icones';
 
 function Section({ titre, children }) {
   return (
@@ -74,7 +74,7 @@ function Ligne({ item, fait, dernier, vignette, onCocher, onModifier, onSupprime
 export default function ListeCourses({
   items = [], itemsReportes = [], nbFavoris = 0, vignette = null,
   onCocher, onModifier, onSupprimer, onMarque, onReactiverReporte, onSupprimerReporte,
-  onAjouter, onComparer, onFavoris, propositions = {}, onRelier,
+  onAjouter, onComparer, onFavoris, propositions = {}, onRelier, onDicter = null,
 }) {
   const aAcheter = items.filter(i => !i.checked);
   const pris = items.filter(i => i.checked);
@@ -89,6 +89,11 @@ export default function ListeCourses({
           <button onClick={onAjouter} style={{ width: '100%', border: 'none', background: T.rouge, color: '#fff', borderRadius: 14, padding: '14px', fontFamily: T.police, fontWeight: 900, fontSize: 15, cursor: 'pointer' }}>
             Ajouter des produits
           </button>
+          {onDicter && (
+            <button onClick={onDicter} style={{ width: '100%', marginTop: 10, border: `1.5px solid ${T.trait}`, background: '#fff', color: T.texte, borderRadius: 14, padding: '13px', fontFamily: T.police, fontWeight: 900, fontSize: 15, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <IconeMicro width={20} height={20} /> Dicter ma liste
+            </button>
+          )}
           {nbFavoris > 0 && (
             <button onClick={onFavoris} style={{ width: '100%', marginTop: 10, border: `1.5px solid ${T.trait}`, background: '#fff', color: T.texte, borderRadius: 14, padding: '13px', fontFamily: T.police, fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
               ⭐ Reprendre mes courses habituelles
@@ -147,6 +152,15 @@ export default function ListeCourses({
         {aAcheter.length > 0 && (
           <button onClick={onComparer} style={{ flex: 1, pointerEvents: 'auto', border: 'none', background: T.rouge, color: '#fff', borderRadius: 16, padding: '15px', fontFamily: T.police, fontWeight: 900, fontSize: 15.5, cursor: 'pointer', boxShadow: '0 8px 22px rgba(204,0,0,0.32)' }}>
             Où c'est le moins cher ?
+          </button>
+        )}
+        {onDicter && (
+          <button onClick={onDicter} aria-label="Dicter ma liste" style={{
+            pointerEvents: 'auto', border: 'none', cursor: 'pointer', borderRadius: 16, background: '#fff', color: T.rouge,
+            padding: '0 16px', minHeight: 50, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 8px 22px rgba(22,24,29,0.18)',
+          }}>
+            <IconeMicro width={22} height={22} />
           </button>
         )}
         <button onClick={onAjouter} aria-label="Ajouter des produits" style={{
