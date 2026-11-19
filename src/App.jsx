@@ -6955,6 +6955,7 @@ function ArchiveTab({ archives, onDelete, onAddToList, priceDB, onImport, onSave
           enseigne={enseigneCourante}
           enseigneResolue={enseigneResolue}
           estFrancois={estFrancois}
+          onCreerProduit={onOuvrirHistoriqueTickets ? ()=>{ setCorrectionCible(null); onOuvrirHistoriqueTickets(); } : null}
           onClose={()=>setCorrectionCible(null)}
           onChoisir={(produit,varianteId,methode)=>rattacherProduit(correctionCible.arc, correctionCible.item, produit, varianteId, methode)}
         />
@@ -6972,7 +6973,7 @@ function ArchiveTab({ archives, onDelete, onAddToList, priceDB, onImport, onSave
 // par code-barres : marque + libellé + quantité, tel que demandé (distinct de
 // libelleVariante ci-dessus, qui ne sert qu'au sélecteur "plusieurs variantes"
 // de la recherche par nom).
-function CorrigerProduitSheet({ item, libelleTicket = null, suggestion = null, enseigne = null, enseigneResolue = false, estFrancois = false, onClose, onChoisir }) {
+function CorrigerProduitSheet({ item, libelleTicket = null, suggestion = null, enseigne = null, enseigneResolue = false, estFrancois = false, onClose, onChoisir, onCreerProduit = null }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -7282,7 +7283,12 @@ function CorrigerProduitSheet({ item, libelleTicket = null, suggestion = null, e
     const inconnu = () => {
       setScanDiag(d => ({ ...(d || {}), resultat: 'non trouvé' }));
       setCodeBarresEnAttente(code);
-      setBarcodeMessage(`Code-barres ${code} détecté, mais aucun article correspondant n'existe encore.`);
+      // Chantier 159 — cette feuille ne sait pas créer une fiche (essai de
+      // François, 19/11 : trois scans d'un produit inconnu, trois impasses).
+      // Quand l'écran qui sait le faire est accessible, on y envoie.
+      setBarcodeMessage(onCreerProduit
+        ? `Code-barres ${code} bien lu, mais ce produit n'est pas encore dans le catalogue. Choisis-le dans la liste ci-dessous s'il y est, ou crée sa fiche.`
+        : `Code-barres ${code} détecté, mais aucun article correspondant n'existe encore.`);
     };
 
     const trouve = cbv && cbv[0];
@@ -7551,6 +7557,11 @@ Résultat : ${scanDiag.resultat}`}
                   <button onClick={annulerApprentissage} style={{ background:"none", border:"none", color:C.textLight, fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:800, textDecoration:"underline", cursor:"pointer", flexShrink:0 }}>Annuler</button>
                 )}
               </div>
+            )}
+            {codeBarresEnAttente && onCreerProduit && (
+              <button onClick={onCreerProduit} style={{ width:"100%", padding:"12px", marginBottom:12, border:"none", borderRadius:12, background:C.red, color:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, cursor:"pointer" }}>
+                Créer la fiche de ce produit
+              </button>
             )}
             {error && <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:"#CC0000", marginBottom:8 }}>⚠️ {error}</div>}
             <div style={{ overflowY:"auto", WebkitOverflowScrolling:"touch", flex:1, minHeight:0, paddingBottom:24 }}>
