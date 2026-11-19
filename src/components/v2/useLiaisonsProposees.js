@@ -16,13 +16,16 @@ export function produitsNonRelies(items) {
 
 // chercher(terme) -> Promise<fiches[]> (recherche catalogue).
 // Rend { [idDeLigne]: [{ produit_id, produit_nom }] }.
-export function useLiaisonsProposees(items, chercher) {
+// achats : habitudes d'achat ({ [produit_id]: n }), ou null tant qu'elles ne
+// sont pas lues — on attend alors, pour ne pas classer deux fois (chantier 157).
+export function useLiaisonsProposees(items, chercher, achats = {}) {
   const [parTexte, setParTexte] = useState({});
   const demandes = useRef(new Set()); // textes déjà cherchés (ou en cours)
   const monte = useRef(true);
   useEffect(() => { monte.current = true; return () => { monte.current = false; }; }, []);
 
   useEffect(() => {
+    if (achats === null) return;
     // Chantier 130 — on garde le texte tel qu'il est écrit (accents compris) :
     // c'est lui qui départage « pâtes » et « pâté ». La clé sans accent ne
     // sert qu'à ne pas chercher deux fois la même chose.
@@ -33,11 +36,11 @@ export function useLiaisonsProposees(items, chercher) {
     }
     aChercher.forEach(async (texte, cle) => {
       demandes.current.add(cle);
-      const decision = await proposerLiaison(texte, chercher);
+      const decision = await proposerLiaison(texte, chercher, { achats });
       const propositions = decision.produit ? [decision.produit] : decision.suggestions;
-      if (monte.current) setParTexte(prev => ({ ...prev, [cle]: propositions.map(p => ({ produit_id: p.produit_id, produit_nom: p.produit_nom })) }));
+      if (monte.current) setParTexte(prev => ({ ...prev, [cle]: propositions.map(p => ({ produit_id: p.produit_id, produit_nom: p.produit_nom, dejaAchete: !!p.dejaAchete })) }));
     });
-  }, [items, chercher]);
+  }, [items, chercher, achats]);
 
   const parLigne = {};
   for (const i of produitsNonRelies(items)) {

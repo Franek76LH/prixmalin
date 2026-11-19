@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   motsUtiles, termeDeRecherche, ressemblance, deciderLiaison, proposerLiaison,
-  LIAISON_RELIE, LIAISON_SUGGESTIONS, LIAISON_A_RELIER, MAX_SUGGESTIONS,
+  LIAISON_RELIE, LIAISON_SUGGESTIONS, LIAISON_A_RELIER, MAX_SUGGESTIONS, SEUIL_MEME_NOM,
 } from './liaisonAutoListe';
 
 const fiche = (produit_id, nom_reference, dernier_prix = 1) => ({ produit_id, nom_reference, dernier_prix });
@@ -151,5 +151,66 @@ describe('chantier 130 — fiche trouvée par tous les mots', () => {
   it('un mot seul ne profite pas de ce coup de pouce (« riz » est dans « chorizo »)', async () => {
     const d = await proposerLiaison('riz', async () => [{ produit_id: 'c', nom_reference: 'Chorizo', dernier_prix: 3 }]);
     expect(d.suggestions.map(s => s.produit_nom)).not.toContain('Chorizo');
+  });
+});
+
+// Chantier 157 — « tes achats en premier ».
+describe('habitudes d\'achat', () => {
+  const YAOURTS = [
+    { produit_id: 'y-boire', nom_reference: 'Yaourt à boire', dernier_prix: 1 },
+    { produit_id: 'y-fruits', nom_reference: 'Yaourt aux fruits', dernier_prix: 1 },
+    { produit_id: 'y-nature', nom_reference: 'Yaourt nature', dernier_prix: null },
+  ];
+  it('sans habitudes, rien ne change', () => {
+    const avant = deciderLiaison('yaourts', YAOURTS);
+    expect(deciderLiaison('yaourts', YAOURTS, {})).toEqual(avant);
+    expect(deciderLiaison('yaourts', YAOURTS, { achats: {} })).toEqual(avant);
+  });
+  it('la fiche déjà achetée passe devant et le dit', () => {
+    const d = deciderLiaison('yaourts', YAOURTS, { achats: { 'y-nature': 4 } });
+    expect(d.issue).toBe(LIAISON_SUGGESTIONS);
+    expect(d.suggestions[0]).toMatchObject({ produit_id: 'y-nature', dejaAchete: true });
+    expect(d.suggestions[1].dejaAchete).toBe(false);
+  });
+  it('un achat ne suffit jamais à relier seul', () => {
+    const d = deciderLiaison('yaourts', [YAOURTS[2]], { achats: { 'y-nature': 50 } });
+    expect(d.issue).toBe(LIAISON_SUGGESTIONS);
+    expect(d.suggestions[0].score).toBeLessThan(SEUIL_MEME_NOM);
+  });
+  it('le nom exact relie toujours, acheté ou non', () => {
+    const fiches = [{ produit_id: 'lait', nom_reference: 'Lait', dernier_prix: 1 }, { produit_id: 'choco', nom_reference: 'Chocolat au lait', dernier_prix: 1 }];
+    const d = deciderLiaison('du lait', fiches, { achats: { choco: 9 } });
+    expect(d.issue).toBe(LIAISON_RELIE);
+    expect(d.produit.produit_id).toBe('lait');
+  });
+  it('fiche achetée trouvée par le terme complet : proposée même sans ressemblance de nom', () => {
+    // « coca » : la base trouve « Cola zéro » par la marque ; le nom ne ressemble pas.
+    const candidats = [
+      { produit_id: 'cola-zero', nom_reference: 'Cola zéro', dernier_prix: 1, termeComplet: true },
+      { produit_id: 'cola-light', nom_reference: 'Cola light', dernier_prix: 1, termeComplet: true },
+    ];
+    expect(deciderLiaison('coca', candidats).issue).toBe(LIAISON_A_RELIER);
+    const d = deciderLiaison('coca', candidats, { achats: { 'cola-zero': 5 } });
+    expect(d.issue).toBe(LIAISON_SUGGESTIONS);
+    expect(d.suggestions.map(s => s.produit_id)).toEqual(['cola-zero']);
+  });
+  it('dès qu\'un nom ressemble, les voisins lointains achetés ne sont pas ajoutés', () => {
+    // « jambon » : la recherche ramène aussi des chips goût jambon, déjà achetées.
+    const candidats = [
+      { produit_id: 'jambon-cuit', nom_reference: 'Jambon cuit', dernier_prix: 1, termeComplet: true },
+      { produit_id: 'chips', nom_reference: 'Chips aromatisées', dernier_prix: 1, termeComplet: true },
+    ];
+    const d = deciderLiaison('jambon', candidats, { achats: { 'jambon-cuit': 3, chips: 1 } });
+    expect(d.suggestions.map(s => s.produit_id)).toEqual(['jambon-cuit']);
+  });
+  it('une fiche achetée sans aucun rapport n\'est pas proposée', () => {
+    const d = deciderLiaison('riz', [{ produit_id: 'chorizo', nom_reference: 'Chorizo', dernier_prix: 1 }], { achats: { chorizo: 3 } });
+    expect(d.issue).toBe(LIAISON_A_RELIER);
+  });
+  it('proposerLiaison transmet les habitudes et marque le terme complet', async () => {
+    const chercher = async (terme) => (terme === 'coca' ? [{ produit_id: 'cola-zero', nom_reference: 'Cola zéro', dernier_prix: 1 }] : []);
+    expect((await proposerLiaison('du coca', chercher)).issue).toBe(LIAISON_A_RELIER);
+    const d = await proposerLiaison('du coca', chercher, { achats: { 'cola-zero': 2 } });
+    expect(d.suggestions[0]).toMatchObject({ produit_id: 'cola-zero', dejaAchete: true });
   });
 });

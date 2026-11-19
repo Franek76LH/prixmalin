@@ -49,7 +49,7 @@ function Ligne({ item, fait, dernier, vignette, onCocher, onModifier, onSupprime
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 8, marginLeft: vignette ? 84 : 36 }}>
             <span style={{ fontFamily: T.police, fontWeight: 800, fontSize: 11.5, color: T.texteLeger }}>Tu veux dire :</span>
             {propositions.map(p => (
-              <button key={p.produit_id} onClick={() => onRelier?.(item, p)} style={{ border: `1px solid ${T.bleu}`, background: '#fff', color: T.bleu, borderRadius: 99, padding: '4px 10px', fontFamily: T.police, fontWeight: 800, fontSize: 11.5, cursor: 'pointer' }}>{p.produit_nom}</button>
+              <button key={p.produit_id} onClick={() => onRelier?.(item, p)} style={{ border: `1px solid ${T.bleu}`, background: '#fff', color: T.bleu, borderRadius: 99, padding: '4px 10px', fontFamily: T.police, fontWeight: 800, fontSize: 11.5, cursor: 'pointer' }}>{p.produit_nom}{p.dejaAchete ? ' · déjà acheté' : ''}</button>
             ))}
           </div>
         )}

@@ -16,6 +16,8 @@
 // « Coca-Cola » n'y trouvent rien d'utile. On nettoie donc le terme avant, on
 // élargit mot par mot si besoin, et on reclasse ici par ressemblance.
 
+import { nbAchats } from './habitudesAchat';
+
 export const LIAISON_RELIE = 'relie';
 export const LIAISON_SUGGESTIONS = 'suggestions';
 export const LIAISON_A_RELIER = 'a_relier';
@@ -27,6 +29,13 @@ export const SEUIL_SUGGESTION = 0.5;
 // -> « Emmental râpé ». Assez pour proposer, jamais pour relier seul.
 export const NOTE_TROUVE_PAR_TOUS_LES_MOTS = 0.55;
 export const MAX_SUGGESTIONS = 3;
+// Chantier 157 — « tes achats en premier ». Une fiche que l'utilisateur a déjà
+// achetée (ses tickets le disent) gagne un petit bonus ; et quand aucun nom ne
+// ressemble, les fiches achetées trouvées avec le terme complet sont proposées.
+// Jamais assez pour relier seul : le bonus s'arrête sous SEUIL_MEME_NOM.
+export const BONUS_DEJA_ACHETE = 0.1;
+export const NOTE_ACHETE_ET_TROUVE = 0.6;
+export const PLAFOND_SANS_NOM_EXACT = 0.89;
 
 // Mots qui ne désignent aucun produit (« du lait », « des pâtes », « l'huile »).
 const MOTS_VIDES = new Set(['du', 'de', 'des', 'la', 'le', 'les', 'l', 'd', 'un', 'une', 'au', 'aux', 'et', 'a']);
@@ -128,20 +137,44 @@ export function ressemblance(entendu, nomFiche) {
 
 // Classe les fiches candidates et rend la décision.
 //   candidats : [{ produit_id, nom_reference, dernier_prix }]
-export function deciderLiaison(entendu, candidats) {
-  const vus = new Set();
-  const notes = [];
+//   options.achats : { [produit_id]: nombre d'achats } — les habitudes de
+//   l'utilisateur (lib/habitudesAchat). Absent : comportement d'avant.
+export function deciderLiaison(entendu, candidats, options = {}) {
+  const achats = options?.achats || null;
+  // Une même fiche peut revenir de plusieurs recherches : on garde ce que
+  // chacune a établi (trouvée avec tous les mots, trouvée par le terme complet).
+  const parFiche = new Map();
   for (const c of candidats || []) {
-    if (!c?.produit_id || vus.has(c.produit_id)) continue;
-    vus.add(c.produit_id);
+    if (!c?.produit_id) continue;
+    const deja = parFiche.get(c.produit_id);
+    if (!deja) parFiche.set(c.produit_id, { ...c });
+    else {
+      deja.tousLesMotsTrouves = deja.tousLesMotsTrouves || c.tousLesMotsTrouves;
+      deja.termeComplet = deja.termeComplet || c.termeComplet;
+    }
+  }
+  const notes = [];
+  for (const c of parFiche.values()) {
     let score = ressemblance(entendu, c.nom_reference);
     if (c.tousLesMotsTrouves) score = Math.max(score, NOTE_TROUVE_PAR_TOUS_LES_MOTS);
-    if (score <= 0) continue;
-    notes.push({ produit_id: c.produit_id, produit_nom: c.nom_reference, score, aUnPrix: c.dernier_prix != null });
+    const achete = nbAchats(achats, c.produit_id);
+    if (achete > 0 && score > 0 && score < SEUIL_MEME_NOM) score = Math.min(PLAFOND_SANS_NOM_EXACT, score + BONUS_DEJA_ACHETE);
+    notes.push({ produit_id: c.produit_id, produit_nom: c.nom_reference, score, aUnPrix: c.dernier_prix != null, nbAchats: achete, dejaAchete: achete > 0, termeComplet: !!c.termeComplet });
   }
-  // À ressemblance égale, une fiche qui a déjà des prix passe devant : c'est
-  // elle qui rendra la comparaison possible.
-  notes.sort((a, b) => (b.score - a.score) || (Number(b.aUnPrix) - Number(a.aUnPrix)) || a.produit_nom.localeCompare(b.produit_nom, 'fr'));
+  // Repli : aucun nom ne ressemble à ce qui a été dit (« coca » -> « Cola
+  // zéro », trouvée par la marque). Les fiches DÉJÀ ACHETÉES que la recherche a
+  // trouvées avec le terme entier sont alors proposées. Seulement dans ce cas :
+  // dès qu'un nom ressemble, la recherche ramène trop de voisins lointains
+  // (« jambon » trouve aussi des chips goût jambon).
+  if (!notes.some(n => n.score >= SEUIL_SUGGESTION)) {
+    for (const n of notes) if (n.dejaAchete && n.termeComplet) n.score = Math.max(n.score, NOTE_ACHETE_ET_TROUVE);
+  }
+  for (let i = notes.length - 1; i >= 0; i--) {
+    if (notes[i].score <= 0) notes.splice(i, 1); else delete notes[i].termeComplet;
+  }
+  // À ressemblance égale : d'abord ce que l'utilisateur achète le plus, puis
+  // une fiche qui a déjà des prix (c'est elle qui rendra la comparaison possible).
+  notes.sort((a, b) => (b.score - a.score) || (b.nbAchats - a.nbAchats) || (Number(b.aUnPrix) - Number(a.aUnPrix)) || a.produit_nom.localeCompare(b.produit_nom, 'fr'));
 
   const exacts = notes.filter(n => n.score >= SEUIL_MEME_NOM);
   if (exacts.length === 1) {
@@ -157,24 +190,24 @@ export function deciderLiaison(entendu, candidats) {
 // Trois recherches au plus par produit : le terme complet, puis ses deux mots
 // les plus longs (« coca cola » ne donne rien ? on essaie « cola »).
 // Ne lève jamais : en cas de panne, le produit reste simplement « à relier ».
-export async function proposerLiaison(entendu, chercher) {
+export async function proposerLiaison(entendu, chercher, options = {}) {
   const mots = motsUtiles(entendu);
   if (mots.length === 0 || typeof chercher !== 'function') {
     return { issue: LIAISON_A_RELIER, produit: null, suggestions: [] };
   }
   const candidats = [];
-  const lancer = async (terme, tousLesMotsTrouves = false) => {
+  const lancer = async (terme, tousLesMotsTrouves = false, termeComplet = false) => {
     if (terme.length < 2) return;
     try {
       const lignes = await chercher(terme);
-      if (Array.isArray(lignes)) candidats.push(...lignes.map(l => (tousLesMotsTrouves ? { ...l, tousLesMotsTrouves: true } : l)));
+      if (Array.isArray(lignes)) candidats.push(...lignes.map(l => ({ ...l, tousLesMotsTrouves, termeComplet })));
     } catch { /* panne réseau : on fait avec ce qu'on a */ }
   };
 
   // Deux mots ou plus : ce que la base trouve avec le terme complet contient
   // tous les mots dits. Un mot seul est trop vague (« riz » est dans « chorizo »).
-  await lancer(mots.join(' '), mots.length >= 2);
-  let decision = deciderLiaison(entendu, candidats);
+  await lancer(mots.join(' '), mots.length >= 2, true);
+  let decision = deciderLiaison(entendu, candidats, options);
   if (decision.issue === LIAISON_RELIE) return decision;
   if (mots.length === 1) {
     // Un seul mot et rien de sérieux : la recherche exige le mot exact, donc
@@ -182,13 +215,13 @@ export async function proposerLiaison(entendu, chercher) {
     // une fois sans cette lettre (« knack »), et la ressemblance tranche.
     if (decision.issue === LIAISON_A_RELIER && mots[0].length >= 5) {
       await lancer(mots[0].slice(0, -1));
-      decision = deciderLiaison(entendu, candidats);
+      decision = deciderLiaison(entendu, candidats, options);
     }
     return decision;
   }
 
   const motsLongs = [...new Set(mots)].filter(m => m.length >= 3).sort((a, b) => b.length - a.length).slice(0, 2);
   for (const mot of motsLongs) await lancer(mot);
-  decision = deciderLiaison(entendu, candidats);
+  decision = deciderLiaison(entendu, candidats, options);
   return decision;
 }

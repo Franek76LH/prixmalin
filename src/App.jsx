@@ -12,7 +12,8 @@ import { mapperLigneListeCourses, chargerVariantes, getCategoryPresentation, for
 import { calculerPrixReferenceParUnite } from "./lib/unitesCore";
 import { urlPhotoVariante, offLargeSource, offFullUrl, cloudinaryAgrandi } from "./lib/photosProduits";
 import { nomComposeVariante, formatEtiquetteVariante } from "./lib/nomProduit";
-import { transcrireAudioListe, normaliserNomElement, comptesParNom, fusionnerParNom } from "./lib/microVocal";
+import { transcrireAudioListe, normaliserNomElement, comptesParNom, fusionnerParNom, demanderRapprochementListe } from "./lib/microVocal";
+import { fusionnerPropositions } from "./lib/rapprochementIA";
 // Chantier « Courses » Lot 1 — session de courses figée (shadow estFrancois).
 import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession, ajouterNoteSession, supprimerNoteSession, cloreSession, idsCaddieASupprimer, articlesNonAchetesASupprimer, construireBilanCourses, doitRattacherTicketSession, chargerMarquesVariantes, calculerTotalPanier } from "./lib/sessionCoursesCore";
 // Chantier 91 Lot 5 — rapprochement liste / cochés / ticket.
@@ -86,6 +87,8 @@ import { RPC_CANDIDATS_TICKET, texteDeCaisse, argumentsCandidatsTicket, normalis
 import BlocCandidatsTicket from "./components/BlocCandidatsTicket";
 // Chantier 111 — la base n'applique plus les rattachements incertains : elle
 // SUGGÈRE. On affiche la devinette, on ne la pré-remplit jamais.
+import { CLES_TESTEURS, estTesteurDeConfiance } from "./lib/accesTesteurs";
+import { compterAchats } from "./lib/habitudesAchat";
 import { construireCarteSuggestion, compterAConfirmerParJour, jourArchive } from "./lib/suggestionsRattachement";
 import CarteSuggestion from "./components/CarteSuggestion";
 // Chantier 112 — un ticket scanné produit TOUJOURS une archive : on ne
@@ -7903,7 +7906,7 @@ function MicroLienSheet({ element, onClose, onResolu, onIntrouvable }) {
 // Prise plafonnée à 3 minutes (décision chantier), enchaînable à volonté.
 const MICRO_PRISE_MAX_S = 3 * 60;
 
-function MicroTab({ onAdd, setTab }) {
+function MicroTab({ onAdd, setTab, achats = null }) {
   const F = "'Nunito',sans-serif";
   // Détections une seule fois au montage (pas de setState synchrone au rendu).
   // Le micro exige un contexte sécurisé (https, ou localhost) : en http local,
@@ -7942,15 +7945,24 @@ function MicroTab({ onAdd, setTab }) {
   // ressemblance -> jusqu'à 3 propositions à un appui ; sinon rien ne change.
   // On ne touche JAMAIS un élément que l'utilisateur a modifié entre-temps
   // (renommé, relié à la main, marqué introuvable).
+  // Chantier 157 — les habitudes d'achat arrivent un peu après l'ouverture :
+  // lues par une référence, pour ne pas relancer toutes les recherches.
+  const achatsRef = useRef(achats);
+  useEffect(() => { achatsRef.current = achats; }, [achats]);
   const lierAutomatiquement = useCallback(async (elements) => {
     const chercher = async (terme) => {
       const { data, error } = await supabase.rpc('rechercher_produits_catalogue_v2', { p_terme: terme });
       if (error) throw error;
       return data || [];
     };
+    // Chantier 157 — en même temps que la recherche par les mots, on demande
+    // à l'IA un rapprochement par le sens (« sopalin » -> Essuie-tout). Elle
+    // ne relie rien : ses fiches s'ajoutent aux propositions à un appui.
+    const demandes = (elements || []).filter(el => el?.id && el?.nom);
+    const reponseIA = demanderRapprochementListe(demandes);
     for (const el of elements || []) {
       if (!el?.id || !el?.nom) continue;
-      const decision = await proposerLiaison(el.nom, chercher);
+      const decision = await proposerLiaison(el.nom, chercher, { achats: achatsRef.current });
       setElementsListe(prev => prev.map(e => {
         if (e.id !== el.id || e.nom !== el.nom) return e;
         if ((e.statut_resolution ?? "a_relier") !== "a_relier") return e;
@@ -7959,9 +7971,17 @@ function MicroTab({ onAdd, setTab }) {
             marque_pref: "nationale", produit_nom: decision.produit.produit_nom, suggestions: [], liaison_cherchee: true };
         }
         return { ...e, liaison_cherchee: true,
-          suggestions: decision.suggestions.map(sg => ({ produit_id: sg.produit_id, produit_nom: sg.produit_nom })) };
+          suggestions: decision.suggestions.map(sg => ({ produit_id: sg.produit_id, produit_nom: sg.produit_nom, dejaAchete: !!sg.dejaAchete })) };
       }));
     }
+    const duSens = await reponseIA; // {} si la fonction ne répond pas
+    if (Object.keys(duSens).length === 0) return;
+    setElementsListe(prev => prev.map(e => {
+      const demande = demandes.find(d => d.id === e.id);
+      // Jamais sur un élément renommé, relié ou écarté entre-temps.
+      if (!demande || e.nom !== demande.nom || (e.statut_resolution ?? "a_relier") !== "a_relier" || !duSens[e.id]) return e;
+      return { ...e, suggestions: fusionnerPropositions(duSens[e.id].propositions, e.suggestions, achatsRef.current) };
+    }));
   }, []);
 
   // Liste reprise d'un brouillon : les éléments jamais cherchés le sont une
@@ -8315,7 +8335,7 @@ function MicroTab({ onAdd, setTab }) {
 
       {/* Badge shadow : rappel que cette version n'est visible que par François */}
       <div style={{ display:"inline-block", background:"#FFF8E6", border:"1.5px solid #F5C200", borderRadius:99, padding:"4px 12px", marginBottom:14, fontFamily:F, fontSize:11, fontWeight:800, color:"#7A6000" }}>
-        🧪 Version test — visible uniquement par toi
+        🧪 Version test — réservée aux testeurs
       </div>
 
       {!contexteSecurise && (
@@ -8470,7 +8490,7 @@ function MicroTab({ onAdd, setTab }) {
                              <button key={sg.produit_id}
                                onClick={() => resoudreElement(e.id, { produit_id: sg.produit_id, variante_produit_id: null, marque_pref: "nationale", produit_nom: sg.produit_nom, qty: 1 })}
                                style={{ border:"1px solid #BFDBFE", borderRadius:99, background:"#EFF6FF", color:"#1D4ED8", fontFamily:F, fontWeight:800, fontSize:11.5, padding:"5px 11px", cursor:"pointer" }}>
-                               {sg.produit_nom}
+                               {sg.produit_nom}{sg.dejaAchete ? " · déjà acheté" : ""}
                              </button>
                            ))}
                            <button onClick={() => setLienElement(e)}
@@ -9254,6 +9274,12 @@ export default function App() {
   // différent de 'true' : fermé.
   const [scanApresTicketOuvert, setScanApresTicketOuvert] = useState(false);
   const scanApresTicketAccessible = scanApresTicketOuvert || estFrancois;
+  // Chantier 156 — comptes de confiance (Nico, Bouchman) : ils voient ce qui
+  // était réservé à François côté utilisateur — le micro et l'import d'un
+  // ticket en fichier. Les outils de diagnostic et l'administration ne
+  // changent pas de mains. Liste lue dans la base, voir lib/accesTesteurs.
+  const [testeurDeConfiance, setTesteurDeConfiance] = useState(false);
+  const accesAvance = estFrancois || testeurDeConfiance;
   const idPourReglageScan = session?.user?.id ?? null;
   useEffect(() => {
     if (!idPourReglageScan) return;
@@ -9261,13 +9287,14 @@ export default function App() {
     // Deux réglages : « ouvert à tous » ('true'), ou une liste de testeurs
     // (`scan_apres_ticket_testeurs` : identifiants de comptes séparés par des
     // virgules). Chantier 142 : ouverture à Nico et Boucheman d'abord.
-    supabase.from('parametres_globaux').select('cle, valeur').in('cle', ['scan_apres_ticket_ouvert', 'scan_apres_ticket_testeurs'])
+    supabase.from('parametres_globaux').select('cle, valeur').in('cle', ['scan_apres_ticket_ouvert', ...CLES_TESTEURS])
       .then(({ data, error }) => {
         if (annule) return;
         const reglages = Object.fromEntries((!error && Array.isArray(data) ? data : []).map(r => [r.cle, r.valeur]));
         const testeurs = String(reglages.scan_apres_ticket_testeurs || '').split(',').map(t => t.trim()).filter(Boolean);
         setScanApresTicketOuvert(reglages.scan_apres_ticket_ouvert === 'true' || testeurs.includes(idPourReglageScan));
-      }, () => { if (!annule) setScanApresTicketOuvert(false); });
+        setTesteurDeConfiance(estTesteurDeConfiance(reglages, idPourReglageScan));
+      }, () => { if (!annule) { setScanApresTicketOuvert(false); setTesteurDeConfiance(false); } });
     return () => { annule = true; };
   }, [idPourReglageScan]);
   // Chantier 94 Lot 10 — flag gamification_visible (même principe) : le
@@ -10987,7 +11014,22 @@ export default function App() {
     if (error) throw error;
     return data || [];
   }, []);
-  const liaisonsProposees = useLiaisonsProposees(items, chercherFichesCatalogue);
+  // Chantier 157 — « tes achats en premier » : ce que l'utilisateur a déjà
+  // acheté (ses propres lignes de ticket, la base ne lui montre que les
+  // siennes) départage les fiches qui se ressemblent. null = pas encore lu ;
+  // {} = rien à lire ou lecture en échec (on fait alors comme avant).
+  const [achatsHabituels, setAchatsHabituels] = useState(null);
+  const idPourAchats = session?.user?.id ?? null;
+  const nbArchivesPourAchats = archives.length;
+  useEffect(() => {
+    if (!idPourAchats) return;
+    let annule = false;
+    supabase.from('lignes_ticket').select('produit_id').not('produit_id', 'is', null).limit(5000)
+      .then(({ data, error }) => { if (!annule) setAchatsHabituels(error ? {} : compterAchats(data)); },
+        () => { if (!annule) setAchatsHabituels({}); });
+    return () => { annule = true; };
+  }, [idPourAchats, nbArchivesPourAchats]);
+  const liaisonsProposees = useLiaisonsProposees(items, chercherFichesCatalogue, achatsHabituels);
 
   // Chantier 139 — chiffres de la communauté pour l'accueil (totaux seulement).
   // Relus à l'ouverture et après chaque ticket (le nombre d'archives change).
@@ -11113,7 +11155,7 @@ export default function App() {
           {/* Chantier « Micro » Lot 1 — même mécanique shadow que rejets (#56.3b) :
               jamais rendu pour un autre utilisateur, même si tab="micro" traîne en state.
               Lot 5 : onAdd = le addItem OFFICIEL du caddie (même chemin que le Catalogue). */}
-          {loaded && estFrancois && tab==="micro" && <MicroTab onAdd={addItem} setTab={setTab}/>}
+          {loaded && accesAvance && tab==="micro" && <MicroTab onAdd={addItem} setTab={setTab} achats={achatsHabituels}/>}
           {/* Chantier « Courses » Lot 1 (shadow estFrancois) — écran de courses,
               accessible uniquement via la validation du comparatif (aucun
               onglet TabBar). Session absente -> rien n'est rendu. */}
@@ -11121,7 +11163,7 @@ export default function App() {
               même si tab="courses" traîne en state. */}
           {loaded && tab==="courses" && sessionCoursesAccessible && sessionCoursesActive && <CoursesTab session={sessionCoursesActive} onChangerEtat={changerEtatArticleSession} onAjouterNote={ajouterNoteCourses} onSupprimerNote={supprimerNoteCourses} onTerminer={demanderTerminerCourses} onPasserEnCaisse={()=>setCaisseCourses(true)} syncEchec={syncCoursesEchec}/>}
           {loaded && tab==="list"      && <ListTab liaisonsProposees={liaisonsProposees} onRelier={relierArticle}      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} onSetMarquePref={setMarquePrefItem} itemsReportes={itemsReportes} onReactiverReporte={reactiverReporte} onSupprimerReporte={supprimerReporte}/>}
-          {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab} onDicter={estFrancois ? ()=>setTab("micro") : null}/>}
+          {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab} onDicter={accesAvance ? ()=>setTab("micro") : null}/>}
           {loaded && tab==="compare"   && <CompareTab liaisonsProposees={liaisonsProposees} onRelier={relierArticle}   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix} sessionCoursesAccessible={sessionCoursesAccessible}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
           {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} estFrancois={estFrancois} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} magasinSession={scanCaisse?.magasin ?? null} onImportSession={rattacherTicketScanSession} onScanSessionFerme={()=>definirScanCaisse(null)} onCompleterTicket={scanApresTicketAccessible ? completerDernierTicket : null} onVoirTicketExistant={()=>setTab("archive")} notifierPoints={profilVisible} onEchecEcritureCore={setEchecEcritureCore} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
@@ -11252,14 +11294,14 @@ export default function App() {
             onClose={() => setShowScanChoix(false)}
             onUnePhoto={handleFlashConfirmed}
             onPlusieursPhotos={() => { setShowScanChoix(false); setShowMultiPhoto(true); }}
-            onImporterFichier={estFrancois ? () => { setShowScanChoix(false); setShowImportFichier(true); } : null}
+            onImporterFichier={accesAvance ? () => { setShowScanChoix(false); setShowImportFichier(true); } : null}
             onPhotoPellicule={() => { setShowScanChoix(false); setShowGalleryImportFromScan(true); }}
             onSaisieManuelle={() => { setShowScanChoix(false); setShowManualEntryFromScan(true); }}
           />
         )}
         {/* Chantier 120 — import d'un ticket dématérialisé : même aval que
             « Grand ticket » (résultat -> onglet Prix -> ImportTicketSheet). */}
-        {showImportFichier && estFrancois && (
+        {showImportFichier && accesAvance && (
           <ImportFichierSheet
             onClose={() => setShowImportFichier(false)}
             refProducts={produitsRef.map(p => ({ nom: p.produit_generique, categorie: p.sous_categorie }))}

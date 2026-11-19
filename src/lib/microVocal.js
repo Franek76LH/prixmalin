@@ -1,3 +1,4 @@
+import { lireReponseIA } from './rapprochementIA';
 import { supabase } from "./supabase";
 
 // Chantier « Micro » — LOT 2. Pont entre l'écran Micro (App.jsx) et l'Edge
@@ -120,4 +121,21 @@ export async function transcrireAudioListe(blob, mime) {
   if (error) throw new Error(error.message);
   if (data?.error) throw new Error(data.error);
   return normaliserResultatTranscription(data);
+}
+
+// Chantier 157 — demande à la fonction en ligne `rapprocher-liste` les fiches
+// du catalogue qui correspondent, par le sens, à chaque produit dicté.
+// Rend { [idElement]: { propositions, sur } }. Ne lève jamais : panne, lenteur
+// (15 s) ou réponse illisible -> {} et l'écran garde ses propositions habituelles.
+export async function demanderRapprochementListe(elements, attenteMs = 15000) {
+  const demande = (elements || []).filter(e => e?.id && e?.nom).map(e => ({ id: String(e.id), nom: String(e.nom) }));
+  if (demande.length === 0) return {};
+  try {
+    const appel = supabase.functions.invoke("rapprocher-liste", { body: { elements: demande } });
+    const delai = new Promise(resolve => setTimeout(() => resolve({ data: null }), attenteMs));
+    const { data, error } = await Promise.race([appel, delai]);
+    return error ? {} : lireReponseIA(data);
+  } catch {
+    return {};
+  }
 }
