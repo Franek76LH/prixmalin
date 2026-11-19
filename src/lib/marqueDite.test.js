@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { marqueEstDite, varianteDite, compterAchatsVariantes } from './marqueDite';
+import { marqueEstDite, varianteDite, choisirVarianteDite, compterAchatsVariantes } from './marqueDite';
 
 const V = (id, marque, libelle, extra = {}) => ({ id, marque, est_mdd: false, libelle, quantite_nette: 500, unite_quantite: 'ml', ...extra });
 const BIERES = [
@@ -46,5 +46,38 @@ describe('marque dite au micro', () => {
   it('compte les achats par variante', () => {
     expect(compterAchatsVariantes([{ variante_produit_id: 'a' }, { variante_produit_id: 'a' }, { variante_produit_id: null }, null])).toEqual({ a: 2 });
     expect(compterAchatsVariantes(null)).toEqual({});
+  });
+});
+
+describe('marque dite rangée dans une fiche voisine', () => {
+  const F = (v, produit_id, produit_nom) => ({ ...v, produit_id, produit_nom });
+  const RAYON = [
+    F(V('86-original', '8.6', 'Original blonde intense 8,6%'), 'biere', 'Bière'),
+    F(V('86-extreme', '8.6', 'Extreme 50 cl'), 'biere', 'Bière'),
+    F(V('leffe', 'Leffe', 'Rituel 9°'), 'blonde', 'Bière blonde'),
+    F(V('1664', '1664', null), 'blonde', 'Bière blonde'),
+    F(V('heinz-ketchup', 'Heinz', 'Tomato'), 'ketchup', 'Ketchup'),
+  ];
+  const BIERE = { produit_id: 'biere', produit_nom: 'Bière' };
+  it('marque de la fiche reliée : on reste dessus', () => {
+    expect(choisirVarianteDite('bière 8.6 Original', BIERE, RAYON)).toMatchObject({ produit_id: 'biere', autreFiche: false, variante: { id: '86-original' } });
+  });
+  it('« bière Leffe » reliée à Bière -> la Leffe de « Bière blonde »', () => {
+    expect(choisirVarianteDite('bière Leffe', BIERE, RAYON)).toMatchObject({ produit_id: 'blonde', produit_nom: 'Bière blonde', marque: 'Leffe', autreFiche: true, variante: { id: 'leffe' } });
+    expect(choisirVarianteDite('bière 1664', BIERE, RAYON)).toMatchObject({ produit_id: 'blonde', marque: '1664' });
+  });
+  it('marque de la fiche reliée mais format indécis : on ne va pas voir ailleurs', () => {
+    expect(choisirVarianteDite('bière 8.6', BIERE, RAYON)).toBeNull();
+  });
+  it('aucune marque dite, ou marque inconnue de la base : rien', () => {
+    expect(choisirVarianteDite('de la bière', BIERE, RAYON)).toBeNull();
+    expect(choisirVarianteDite('bière Heineken', BIERE, RAYON)).toBeNull();
+  });
+  it('jamais vers un produit sans rapport, même rayon et même marque', () => {
+    expect(choisirVarianteDite('sauce barbecue Heinz', { produit_id: 'bbq', produit_nom: 'Sauce barbecue' }, RAYON)).toBeNull();
+  });
+  it('entrées abîmées : rien, sans plantage', () => {
+    expect(choisirVarianteDite('bière Leffe', null, RAYON)).toMatchObject({ produit_id: 'blonde' });
+    expect(choisirVarianteDite('bière Leffe', BIERE, null)).toBeNull();
   });
 });

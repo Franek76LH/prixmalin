@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatDepuisMime, normaliserResultatTranscription, normaliserNomElement, comptesParNom, fusionnerParNom } from "./microVocal";
+import { formatDepuisMime, normaliserResultatTranscription, normaliserNomElement, comptesParNom, fusionnerParNom, regrouperPourCaddie } from './microVocal';
 
 describe("formatDepuisMime", () => {
   it("mappe l'audio Safari iOS (mp4/AAC) vers m4a", () => {
@@ -133,5 +133,30 @@ describe("fusionnerParNom", () => {
   it("ne touche à rien s'il n'y a pas de doublon", () => {
     const r = fusionnerParNom(base, "beurre");
     expect(r).toEqual(base);
+  });
+});
+
+describe('regroupement avant l\'ajout au caddie', () => {
+  const R = (id, produit_id, extra = {}) => ({ id, nom: 'x', statut_resolution: 'resolu', produit_id, produit_nom: 'Bière', quantite: 1, ...extra });
+  it('deux éléments vers la même fiche : une ligne, quantités additionnées', () => {
+    const g = regrouperPourCaddie([R('a', 'biere'), R('b', 'biere', { quantite: 2 })]);
+    expect(g).toHaveLength(1);
+    expect(g[0].ids).toEqual(['a', 'b']);
+    expect(g[0].item).toMatchObject({ produit_id: 'biere', variante_produit_id: null, qty: 3 });
+  });
+  it('même fiche mais marque précise différente : deux lignes', () => {
+    const g = regrouperPourCaddie([R('a', 'biere'), R('b', 'biere', { variante_produit_id: 'v86' }), R('c', 'biere', { variante_produit_id: 'v86' })]);
+    expect(g.map(x => [x.item.variante_produit_id, x.item.qty])).toEqual([[null, 1], ['v86', 2]]);
+  });
+  it('textes libres regroupés par nom, jamais avec un produit relié', () => {
+    const g = regrouperPourCaddie([
+      { id: 'a', nom: 'Croquettes', statut_resolution: 'a_relier' }, { id: 'b', nom: 'croquettes', statut_resolution: 'introuvable', quantite: 2 }, R('c', 'biere'),
+    ]);
+    expect(g).toHaveLength(2);
+    expect(g[0].item).toEqual({ product: 'Croquettes', format: '', brand: '', qty: 3, checked: false });
+  });
+  it('quantité absente = 1 ; liste vide ou abîmée = rien', () => {
+    expect(regrouperPourCaddie([R('a', 'biere', { quantite: null })])[0].item.qty).toBe(1);
+    expect(regrouperPourCaddie(null)).toEqual([]);
   });
 });

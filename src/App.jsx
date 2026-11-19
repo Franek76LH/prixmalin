@@ -12,7 +12,7 @@ import { mapperLigneListeCourses, chargerVariantes, getCategoryPresentation, for
 import { calculerPrixReferenceParUnite } from "./lib/unitesCore";
 import { urlPhotoVariante, offLargeSource, offFullUrl, cloudinaryAgrandi } from "./lib/photosProduits";
 import { nomComposeVariante, formatEtiquetteVariante } from "./lib/nomProduit";
-import { transcrireAudioListe, normaliserNomElement, comptesParNom, fusionnerParNom, demanderRapprochementListe } from "./lib/microVocal";
+import { transcrireAudioListe, normaliserNomElement, comptesParNom, fusionnerParNom, demanderRapprochementListe, regrouperPourCaddie } from "./lib/microVocal";
 import { fusionnerPropositions, ficheARelierSeule } from "./lib/rapprochementIA";
 // Chantier « Courses » Lot 1 — session de courses figée (shadow estFrancois).
 import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession, ajouterNoteSession, supprimerNoteSession, cloreSession, idsCaddieASupprimer, articlesNonAchetesASupprimer, construireBilanCourses, doitRattacherTicketSession, chargerMarquesVariantes, calculerTotalPanier } from "./lib/sessionCoursesCore";
@@ -90,7 +90,7 @@ import BlocCandidatsTicket from "./components/BlocCandidatsTicket";
 import { CLES_TESTEURS, estTesteurDeConfiance } from "./lib/accesTesteurs";
 import { compterAchats } from "./lib/habitudesAchat";
 import { lireMemoire, choixARetenir } from "./lib/memoireListe";
-import { varianteDite, compterAchatsVariantes } from "./lib/marqueDite";
+import { choisirVarianteDite, compterAchatsVariantes } from "./lib/marqueDite";
 import { construireCarteSuggestion, compterAConfirmerParJour, jourArchive } from "./lib/suggestionsRattachement";
 import CarteSuggestion from "./components/CarteSuggestion";
 // Chantier 112 — un ticket scanné produit TOUJOURS une archive : on ne
@@ -8011,19 +8011,27 @@ function MicroTab({ onAdd, setTab, achats = null, achatsVariantes = null, memoir
       if (marquesCherchees.current.has(cle)) continue;
       marquesCherchees.current.add(cle);
       const dit = [e.nom, e.texte_entendu, e.qualificatifs].filter(Boolean).join(" ");
-      supabase.from('variantes_produit')
-        .select('id, libelle, quantite_nette, unite_quantite, marques(nom, est_mdd)')
-        .eq('produit_id', e.produit_id).eq('actif', true)
-        .then(({ data, error }) => {
+      // Les variantes de tout le rayon de la fiche : la marque dite peut être
+      // rangée sous une fiche voisine (« bière Leffe » -> Bière blonde).
+      (async () => {
+        try {
+          const { data: fiche } = await supabase.from('produits').select('sous_categorie_id').eq('id', e.produit_id).maybeSingle();
+          let requete = supabase.from('variantes_produit')
+            .select('id, libelle, quantite_nette, unite_quantite, produit_id, marques(nom, est_mdd), produits!inner(nom_reference, actif, sous_categorie_id)')
+            .eq('actif', true).eq('produits.actif', true).limit(2000);
+          requete = fiche?.sous_categorie_id ? requete.eq('produits.sous_categorie_id', fiche.sous_categorie_id) : requete.eq('produit_id', e.produit_id);
+          const { data, error } = await requete;
           if (error || !Array.isArray(data)) return;
-          const trouvee = varianteDite(dit, data.map(v => ({ id: v.id, libelle: v.libelle, quantite_nette: v.quantite_nette,
-            unite_quantite: v.unite_quantite, marque: v.marques?.nom ?? null, est_mdd: v.marques?.est_mdd ?? null })),
+          const trouvee = choisirVarianteDite(dit, { produit_id: e.produit_id, produit_nom: e.produit_nom },
+            data.map(v => ({ id: v.id, libelle: v.libelle, quantite_nette: v.quantite_nette, unite_quantite: v.unite_quantite,
+              produit_id: v.produit_id, produit_nom: v.produits?.nom_reference ?? null, marque: v.marques?.nom ?? null, est_mdd: v.marques?.est_mdd ?? null })),
             { achatsVariantes: achatsVariantesRef.current });
-          if (!trouvee?.variante) return;
+          if (!trouvee) return;
           setElementsListe(prev => prev.map(x =>
             (x.id === e.id && x.nom === e.nom && x.produit_id === e.produit_id && x.statut_resolution === "resolu" && !x.variante_produit_id)
-              ? { ...x, variante_produit_id: trouvee.variante.id, marque_dite: trouvee.marque } : x));
-        }, () => {});
+              ? { ...x, produit_id: trouvee.produit_id, produit_nom: trouvee.produit_nom, variante_produit_id: trouvee.variante.id, marque_dite: trouvee.marque } : x));
+        } catch { /* panne réseau : la ligne reste sur sa fiche */ }
+      })();
     }
   }, [elementsListe]);
 
@@ -8328,18 +8336,14 @@ function MicroTab({ onAdd, setTab, achats = null, achatsVariantes = null, memoir
 
     let ajoutes = 0, doublons = 0;
     const idsEchecs = new Set();
-    for (const e of [...elementsListe]) {
-      const estRelie = e.statut_resolution === "resolu" && e.produit_id;
-      const item = estRelie
-        ? { product: e.produit_nom, format: "", brand: "", qty: e.quantite ?? 1, checked: false,
-            produit_id: e.produit_id, variante_produit_id: e.variante_produit_id ?? null,
-            marque_pref: e.marque_pref === "mdd" ? "mdd" : "nationale" }
-        : { product: e.nom, format: "", brand: "", qty: e.quantite ?? 1, checked: false };
+    // Chantier 157 — une seule ligne par produit : les éléments qui aboutissent
+    // à la même fiche sont regroupés, quantités additionnées.
+    for (const { ids, item } of regrouperPourCaddie(elementsListe)) {
       let ok = false;
       try { ok = await onAdd(item); } catch (err) { console.error("Erreur ajout caddie depuis Micro :", err); ok = false; }
       if (ok === true) ajoutes++;
       else if (ok === "duplicate") doublons++;
-      else idsEchecs.add(e.id);
+      else ids.forEach(id => idsEchecs.add(id));
     }
 
     setElementsListe(prev => prev.filter(e => idsEchecs.has(e.id)));

@@ -139,3 +139,31 @@ export async function demanderRapprochementListe(elements, attenteMs = 15000) {
     return {};
   }
 }
+
+// Chantier 157 — avant l'ajout au caddie : une seule ligne par produit.
+// Deux éléments dictés peuvent aboutir à la même fiche (« bière Heineken » et
+// « une bière » -> Bière) ; envoyés un par un, ils créaient deux lignes
+// identiques dans la liste (essai de François, 19/11). On les regroupe en
+// additionnant les quantités. Même fiche mais variantes différentes = deux
+// produits différents, deux lignes.
+// Rend [{ ids, item }] dans l'ordre de première apparition.
+export function regrouperPourCaddie(elements) {
+  const groupes = new Map();
+  for (const e of Array.isArray(elements) ? elements : []) {
+    if (!e?.id) continue;
+    const relie = e.statut_resolution === "resolu" && !!e.produit_id;
+    const cle = relie ? `p:${e.produit_id}|v:${e.variante_produit_id ?? ""}` : `t:${normaliserNomElement(e.nom)}`;
+    const qty = Number(e.quantite) > 0 ? Number(e.quantite) : 1;
+    const groupe = groupes.get(cle);
+    if (groupe) { groupe.ids.push(e.id); groupe.item.qty += qty; continue; }
+    groupes.set(cle, {
+      ids: [e.id],
+      item: relie
+        ? { product: e.produit_nom, format: "", brand: "", qty, checked: false,
+            produit_id: e.produit_id, variante_produit_id: e.variante_produit_id ?? null,
+            marque_pref: e.marque_pref === "mdd" ? "mdd" : "nationale" }
+        : { product: e.nom, format: "", brand: "", qty, checked: false },
+    });
+  }
+  return [...groupes.values()];
+}

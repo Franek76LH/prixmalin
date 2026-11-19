@@ -10,6 +10,8 @@
 // Les marques de distributeur ne sont jamais choisies par leur nom (règle du
 // comparateur : une MDD n'existe que dans son enseigne).
 
+import { motsUtiles } from './liaisonAutoListe';
+
 const aplati = (t) => String(t ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
 // La marque est-elle dite en toutes lettres, mot entier ? (« 8.6 », « Coca-Cola »)
@@ -56,4 +58,29 @@ export function compterAchatsVariantes(lignes) {
     if (typeof id === 'string' && id) achats[id] = (achats[id] || 0) + 1;
   }
   return achats;
+}
+
+// La marque dite peut vivre dans une fiche VOISINE de celle qui a été reliée :
+// « bière Leffe » est relié à « Bière », mais la Leffe est rangée sous « Bière
+// blonde » (essai de François, 19/11 : deux bières dictées ont fini en deux
+// lignes « Bière » identiques). On regarde alors les autres fiches du même
+// rayon — seulement celles dont le nom partage un mot avec la fiche reliée ou
+// avec ce qui a été dit, pour ne jamais sauter vers un produit sans rapport
+// (« sauce barbecue Heinz » ne devient pas « Ketchup »).
+//
+// variantes : celles de tout le rayon, chacune avec produit_id et produit_nom.
+// Rend { variante, marque, produit_id, produit_nom, autreFiche } ou null.
+export function choisirVarianteDite(texte, fiche, variantes, options = {}) {
+  const toutes = (Array.isArray(variantes) ? variantes : []).filter(v => v?.produit_id);
+  const ici = varianteDite(texte, toutes.filter(v => v.produit_id === fiche?.produit_id), options);
+  if (ici) {
+    return ici.variante
+      ? { variante: ici.variante, marque: ici.marque, produit_id: fiche.produit_id, produit_nom: fiche.produit_nom, autreFiche: false }
+      : null; // marque de cette fiche, format indécis : on ne bouge pas
+  }
+  const reperes = new Set([...motsUtiles(fiche?.produit_nom), ...motsUtiles(texte)]);
+  const voisines = toutes.filter(v => v.produit_id !== fiche?.produit_id && v.produit_nom && motsUtiles(v.produit_nom).some(m => reperes.has(m)));
+  const ailleurs = varianteDite(texte, voisines, options);
+  if (!ailleurs?.variante) return null;
+  return { variante: ailleurs.variante, marque: ailleurs.marque, produit_id: ailleurs.variante.produit_id, produit_nom: ailleurs.variante.produit_nom, autreFiche: true };
 }
