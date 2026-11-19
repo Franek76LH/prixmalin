@@ -18,14 +18,15 @@ export function produitsNonRelies(items) {
 // Rend { [idDeLigne]: [{ produit_id, produit_nom }] }.
 // achats : habitudes d'achat ({ [produit_id]: n }), ou null tant qu'elles ne
 // sont pas lues — on attend alors, pour ne pas classer deux fois (chantier 157).
-export function useLiaisonsProposees(items, chercher, achats = {}) {
+// memoire : carnet personnel ({ [mots]: fiche }), ou null tant qu'il n'est pas lu.
+export function useLiaisonsProposees(items, chercher, achats = {}, memoire = {}) {
   const [parTexte, setParTexte] = useState({});
   const demandes = useRef(new Set()); // textes déjà cherchés (ou en cours)
   const monte = useRef(true);
   useEffect(() => { monte.current = true; return () => { monte.current = false; }; }, []);
 
   useEffect(() => {
-    if (achats === null) return;
+    if (achats === null || memoire === null) return;
     // Chantier 130 — on garde le texte tel qu'il est écrit (accents compris) :
     // c'est lui qui départage « pâtes » et « pâté ». La clé sans accent ne
     // sert qu'à ne pas chercher deux fois la même chose.
@@ -36,11 +37,13 @@ export function useLiaisonsProposees(items, chercher, achats = {}) {
     }
     aChercher.forEach(async (texte, cle) => {
       demandes.current.add(cle);
-      const decision = await proposerLiaison(texte, chercher, { achats });
+      const decision = await proposerLiaison(texte, chercher, { achats, memoire });
       const propositions = decision.produit ? [decision.produit] : decision.suggestions;
-      if (monte.current) setParTexte(prev => ({ ...prev, [cle]: propositions.map(p => ({ produit_id: p.produit_id, produit_nom: p.produit_nom, dejaAchete: !!p.dejaAchete })) }));
+      if (monte.current) setParTexte(prev => ({ ...prev, [cle]: propositions.map(p => ({ produit_id: p.produit_id, produit_nom: p.produit_nom, dejaAchete: !!p.dejaAchete, memorise: !!p.memorise })) }));
     });
-  }, [items, chercher, achats]);
+  // (le carnet n'est pas une dépendance : un choix fait à l'instant ne doit pas relancer les recherches)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, chercher, achats, memoire === null]);
 
   const parLigne = {};
   for (const i of produitsNonRelies(items)) {

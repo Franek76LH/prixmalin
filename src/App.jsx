@@ -89,6 +89,7 @@ import BlocCandidatsTicket from "./components/BlocCandidatsTicket";
 // SUGGÈRE. On affiche la devinette, on ne la pré-remplit jamais.
 import { CLES_TESTEURS, estTesteurDeConfiance } from "./lib/accesTesteurs";
 import { compterAchats } from "./lib/habitudesAchat";
+import { lireMemoire, choixARetenir } from "./lib/memoireListe";
 import { construireCarteSuggestion, compterAConfirmerParJour, jourArchive } from "./lib/suggestionsRattachement";
 import CarteSuggestion from "./components/CarteSuggestion";
 // Chantier 112 — un ticket scanné produit TOUJOURS une archive : on ne
@@ -7906,7 +7907,7 @@ function MicroLienSheet({ element, onClose, onResolu, onIntrouvable }) {
 // Prise plafonnée à 3 minutes (décision chantier), enchaînable à volonté.
 const MICRO_PRISE_MAX_S = 3 * 60;
 
-function MicroTab({ onAdd, setTab, achats = null }) {
+function MicroTab({ onAdd, setTab, achats = null, memoire = null, onRetenir = null }) {
   const F = "'Nunito',sans-serif";
   // Détections une seule fois au montage (pas de setState synchrone au rendu).
   // Le micro exige un contexte sécurisé (https, ou localhost) : en http local,
@@ -7949,6 +7950,8 @@ function MicroTab({ onAdd, setTab, achats = null }) {
   // lues par une référence, pour ne pas relancer toutes les recherches.
   const achatsRef = useRef(achats);
   useEffect(() => { achatsRef.current = achats; }, [achats]);
+  const memoireRef = useRef(memoire);
+  useEffect(() => { memoireRef.current = memoire; }, [memoire]);
   const lierAutomatiquement = useCallback(async (elements) => {
     const chercher = async (terme) => {
       const { data, error } = await supabase.rpc('rechercher_produits_catalogue_v2', { p_terme: terme });
@@ -7962,7 +7965,7 @@ function MicroTab({ onAdd, setTab, achats = null }) {
     const reponseIA = demanderRapprochementListe(demandes);
     for (const el of elements || []) {
       if (!el?.id || !el?.nom) continue;
-      const decision = await proposerLiaison(el.nom, chercher, { achats: achatsRef.current });
+      const decision = await proposerLiaison(el.nom, chercher, { achats: achatsRef.current, memoire: memoireRef.current });
       setElementsListe(prev => prev.map(e => {
         if (e.id !== el.id || e.nom !== el.nom) return e;
         if ((e.statut_resolution ?? "a_relier") !== "a_relier") return e;
@@ -8244,6 +8247,9 @@ function MicroTab({ onAdd, setTab, achats = null }) {
   // est écrit SUR l'élément ; la quantité choisie dans la fiche remplace celle
   // de l'élément seulement si elle a été modifiée (≠ 1).
   const resoudreElement = (id, liaison) => {
+    // Chantier 157 — choix fait à la main : on le retient pour la prochaine fois.
+    const choisi = elementsListe.find(e => e.id === id);
+    if (choisi?.nom && liaison?.produit_id) onRetenir?.(choisi.nom, { produit_id: liaison.produit_id, produit_nom: liaison.produit_nom });
     setElementsListe(prev => prev.map(e => e.id === id
       ? {
           ...e,
@@ -11029,7 +11035,29 @@ export default function App() {
         () => { if (!annule) setAchatsHabituels({}); });
     return () => { annule = true; };
   }, [idPourAchats, nbArchivesPourAchats]);
-  const liaisonsProposees = useLiaisonsProposees(items, chercherFichesCatalogue, achatsHabituels);
+  // Chantier 157 — mémoire personnelle : ce que l'utilisateur a déjà choisi
+  // pour un mot (« coca » -> Cola zéro). Carnet privé `memoire_liste`. null =
+  // pas encore lu ; {} = vide ou illisible (on fait alors comme avant).
+  const [memoireListe, setMemoireListe] = useState(null);
+  useEffect(() => {
+    if (!idPourAchats) return;
+    let annule = false;
+    supabase.from('memoire_liste').select('texte_normalise, produit_id, produits(nom_reference, actif)').limit(2000)
+      .then(({ data, error }) => { if (!annule) setMemoireListe(error ? {} : lireMemoire(data)); },
+        () => { if (!annule) setMemoireListe({}); });
+    return () => { annule = true; };
+  }, [idPourAchats]);
+  // Retenir un choix : tout de suite à l'écran, puis dans le carnet. Jamais
+  // bloquant — un échec d'écriture ne gêne pas la liste.
+  const retenirChoix = useCallback((texte, produit) => {
+    const choix = choixARetenir(texte, produit);
+    if (!choix || !idPourAchats) return;
+    setMemoireListe(prev => ({ ...(prev || {}), [choix.texte_normalise]: { produit_id: produit.produit_id, produit_nom: produit.produit_nom } }));
+    supabase.from('memoire_liste')
+      .upsert({ utilisateur_id: idPourAchats, texte_normalise: choix.texte_normalise, produit_id: choix.produit_id, modifie_le: new Date().toISOString() }, { onConflict: 'utilisateur_id,texte_normalise' })
+      .then(() => {}, () => {});
+  }, [idPourAchats]);
+  const liaisonsProposees = useLiaisonsProposees(items, chercherFichesCatalogue, achatsHabituels, memoireListe);
 
   // Chantier 139 — chiffres de la communauté pour l'accueil (totaux seulement).
   // Relus à l'ouverture et après chaque ticket (le nombre d'archives change).
@@ -11061,10 +11089,10 @@ export default function App() {
     });
     return () => { annule = true; };
   }, [utilisateurConnecte, nbArchives]);
-  const relierArticle = (item, proposition) => updateItem({
+  const relierArticle = (item, proposition) => { retenirChoix(item.product, proposition); return updateItem({
     id: item.id, product: proposition.produit_nom, qty: item.qty,
     produit_id: proposition.produit_id, variante_produit_id: null,
-  });
+  }); };
 
   const handleLogout = async () => { await supabase.auth.signOut(); };
 
@@ -11155,7 +11183,7 @@ export default function App() {
           {/* Chantier « Micro » Lot 1 — même mécanique shadow que rejets (#56.3b) :
               jamais rendu pour un autre utilisateur, même si tab="micro" traîne en state.
               Lot 5 : onAdd = le addItem OFFICIEL du caddie (même chemin que le Catalogue). */}
-          {loaded && accesAvance && tab==="micro" && <MicroTab onAdd={addItem} setTab={setTab} achats={achatsHabituels}/>}
+          {loaded && accesAvance && tab==="micro" && <MicroTab onAdd={addItem} setTab={setTab} achats={achatsHabituels} memoire={memoireListe} onRetenir={retenirChoix}/>}
           {/* Chantier « Courses » Lot 1 (shadow estFrancois) — écran de courses,
               accessible uniquement via la validation du comparatif (aucun
               onglet TabBar). Session absente -> rien n'est rendu. */}

@@ -195,6 +195,13 @@ export async function proposerLiaison(entendu, chercher, options = {}) {
   if (mots.length === 0 || typeof chercher !== 'function') {
     return { issue: LIAISON_A_RELIER, produit: null, suggestions: [] };
   }
+  // Chantier 157 — mémoire personnelle : l'utilisateur a déjà choisi une fiche
+  // pour ces mots-là. C'est SA décision, on la reprend sans rien demander
+  // (options.memoire : { [mots utiles]: { produit_id, produit_nom } }).
+  const souvenir = options?.memoire?.[mots.join(' ')];
+  if (souvenir?.produit_id && souvenir?.produit_nom) {
+    return { issue: LIAISON_RELIE, produit: { produit_id: souvenir.produit_id, produit_nom: souvenir.produit_nom, score: 1, memorise: true }, suggestions: [] };
+  }
   const candidats = [];
   const lancer = async (terme, tousLesMotsTrouves = false, termeComplet = false) => {
     if (terme.length < 2) return;

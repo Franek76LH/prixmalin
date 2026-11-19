@@ -23,7 +23,7 @@ export default function ProduitsARelier({ items = [], propositions = {}, onRelie
                 <button key={p.produit_id} onClick={() => onRelier?.(item, p)} style={{
                   border: `1px solid ${T.bleu}`, background: '#fff', color: T.bleu, borderRadius: 99, padding: '7px 13px',
                   fontFamily: T.police, fontWeight: 800, fontSize: 13, cursor: 'pointer',
-                }}>{p.produit_nom}{p.dejaAchete ? ' · déjà acheté' : ''}</button>
+                }}>{p.produit_nom}{p.memorise ? ' · comme d\'habitude' : p.dejaAchete ? ' · déjà acheté' : ''}</button>
               ))}
             </div>
           </div>
