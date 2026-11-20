@@ -61,6 +61,7 @@ import BarreNavigation from "./components/v2/BarreNavigation";
 import EcranMoi from "./components/v2/EcranMoi";
 import EnTete from "./components/v2/EnTete";
 import BasculeCourses from "./components/v2/BasculeCourses";
+import { lireRetourLien, verifierNouveauMotDePasse, emailPlausible, messageErreurMotDePasse } from "./lib/motDePasseCore";
 import { ecranRetour, noterOrigine, ecranCourses } from "./lib/navigationCore";
 import ListeCourses from "./components/v2/ListeCourses";
 // Chantier 126 — produits de la liste en texte libre : fiches proposées.
@@ -503,11 +504,70 @@ function PseudoModal({ onSave }) {
   );
 }
 
+// Chantier 161 — « Mot de passe oublié ». L'adresse est lue UNE fois, au
+// chargement du module, avant que Supabase n'efface les jetons de l'adresse.
+const RETOUR_LIEN_MDP = lireRetourLien(typeof window !== 'undefined' ? window.location.hash : '');
+
+// Écran affiché après un clic sur le lien reçu par e-mail : l'utilisateur est
+// déjà connecté par le lien, il choisit son nouveau mot de passe.
+function NouveauMotDePasse({ onFini }) {
+  const F = "'Nunito',sans-serif";
+  const [mdp, setMdp] = useState('');
+  const [conf, setConf] = useState('');
+  const [voir, setVoir] = useState(false);
+  const [envoi, setEnvoi] = useState(false);
+  const [erreur, setErreur] = useState('');
+  const [fait, setFait] = useState(false);
+  const valider = async () => {
+    const probleme = verifierNouveauMotDePasse(mdp, conf);
+    if (probleme) { setErreur(probleme); return; }
+    setEnvoi(true); setErreur('');
+    try {
+      const { error } = await supabase.auth.updateUser({ password: mdp });
+      if (error) throw error;
+      setFait(true);
+      try { window.history.replaceState(null, '', window.location.pathname); } catch { /* sans effet */ }
+    } catch (e) {
+      setErreur(messageErreurMotDePasse(e));
+    } finally { setEnvoi(false); }
+  };
+  const champ = { width:"100%", padding:"12px 14px", borderRadius:10, border:`2px solid ${C.grayLight}`, fontFamily:F, fontSize:15, color:C.text, boxSizing:"border-box", marginBottom:12 };
+  return (
+    <div style={{ minHeight:"100vh", background:C.bg, maxWidth:430, margin:"0 auto", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"32px 24px" }}>
+      <div style={{ fontSize:52, marginBottom:6 }}>🔑</div>
+      <div style={{ fontFamily:F, fontWeight:900, fontSize:24, color:C.red, marginBottom:24 }}>PrixMalin</div>
+      <div style={{ background:C.white, borderRadius:20, padding:"26px 22px", width:"100%", boxSizing:"border-box", boxShadow:"0 4px 24px rgba(0,0,0,0.08)" }}>
+        {fait ? (<>
+          <div style={{ fontFamily:F, fontWeight:900, fontSize:18, color:C.text, marginBottom:8 }}>C'est fait ✓</div>
+          <div style={{ fontFamily:F, fontSize:14, color:C.textLight, marginBottom:20 }}>Ton nouveau mot de passe est enregistré. Tu es connecté(e).</div>
+          <button onClick={onFini} style={{ width:"100%", padding:"14px", border:"none", borderRadius:12, background:C.red, fontFamily:F, fontWeight:900, fontSize:15, color:C.white, cursor:"pointer" }}>Ouvrir PrixMalin</button>
+        </>) : (<>
+          <div style={{ fontFamily:F, fontWeight:900, fontSize:18, color:C.text, marginBottom:6 }}>Choisis un nouveau mot de passe</div>
+          <div style={{ fontFamily:F, fontSize:13, color:C.textLight, marginBottom:18 }}>Au moins 6 caractères.</div>
+          <input type={voir ? "text" : "password"} value={mdp} onChange={e=>setMdp(e.target.value)} placeholder="Nouveau mot de passe" autoComplete="new-password" style={champ}/>
+          <input type={voir ? "text" : "password"} value={conf} onChange={e=>setConf(e.target.value)} placeholder="Le même, une 2e fois" autoComplete="new-password"
+            onKeyDown={e=>e.key==='Enter'&&valider()} style={champ}/>
+          <button onClick={()=>setVoir(v=>!v)} style={{ border:"none", background:"none", padding:"0 0 14px", fontFamily:F, fontSize:13, fontWeight:700, color:C.blue, cursor:"pointer" }}>
+            {voir ? "🙈 Masquer" : "👁️ Afficher"}
+          </button>
+          {erreur && <div style={{ background:"#FEE", borderRadius:8, padding:"10px 12px", marginBottom:12, fontFamily:F, fontSize:13, color:C.red, fontWeight:700 }}>⚠️ {erreur}</div>}
+          <button onClick={valider} disabled={envoi} style={{ width:"100%", padding:"14px", border:"none", borderRadius:12, background:envoi?C.grayLight:C.red, fontFamily:F, fontWeight:900, fontSize:15, color:envoi?C.gray:C.white, cursor:envoi?"default":"pointer", marginBottom:8 }}>
+            {envoi ? "…" : "Enregistrer mon mot de passe"}
+          </button>
+          <button onClick={onFini} style={{ width:"100%", padding:"10px", border:"none", background:"none", fontFamily:F, fontSize:13, fontWeight:700, color:C.gray, cursor:"pointer" }}>Plus tard</button>
+        </>)}
+      </div>
+    </div>
+  );
+}
+
 // ── AUTH SCREEN ───────────────────────────────────────────────────────────────
 function AuthScreen() {
   const F = "'Nunito',sans-serif";
   // Chantier 135 — on arrive d'abord sur la page de garde (tickets qui glissent).
-  const [mode,     setMode]     = useState('garde');
+  // Chantier 161 — lien « mot de passe oublié » périmé : écran de connexion
+  // avec un message, pour redemander un lien.
+  const [mode,     setMode]     = useState(RETOUR_LIEN_MDP.lienInvalide ? 'oubli' : 'garde');
   const [email,    setEmail]    = useState('');
   const [password, setPassword] = useState('');
   const [confirm,  setConfirm]  = useState('');
@@ -517,6 +577,21 @@ function AuthScreen() {
   const [error,    setError]    = useState('');
   const [success,  setSuccess]  = useState('');
   const [cguAccepted, setCguAccepted] = useState(false);
+  const [lienPerime, setLienPerime] = useState(RETOUR_LIEN_MDP.lienInvalide);
+
+  // Chantier 161 — envoi du lien. Message identique que le compte existe ou
+  // non : l'app ne révèle jamais quels e-mails sont inscrits.
+  const envoyerLien = async () => {
+    if (!emailPlausible(email)) { setError("Écris l'e-mail de ton compte"); return; }
+    setLoading(true); setError(''); setSuccess(''); setLienPerime(false);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: window.location.origin });
+      if (error) throw error;
+      setSuccess("Si un compte existe avec cet e-mail, tu vas recevoir un lien pour choisir un nouveau mot de passe. Pense à regarder dans les indésirables.");
+    } catch (e) {
+      setError(messageErreurMotDePasse(e));
+    } finally { setLoading(false); }
+  };
 
   const switchMode = (m) => { setMode(m); setError(''); setSuccess(''); setConfirm(''); setShowPwd(false); setShowConf(false); setCguAccepted(false); };
 
@@ -626,16 +701,23 @@ function AuthScreen() {
 
       <div style={{ background:C.white, borderRadius:20, padding:"28px 24px", width:"100%", boxShadow:"0 4px 24px rgba(0,0,0,0.08)" }}>
         <div style={{ fontFamily:F, fontWeight:900, fontSize:18, color:C.text, marginBottom:20 }}>
-          {mode === 'login' ? 'Connexion' : 'Créer un compte'}
+          {mode === 'login' ? 'Connexion' : mode === 'oubli' ? 'Mot de passe oublié' : 'Créer un compte'}
         </div>
+        {mode === 'oubli' && (
+          <div style={{ fontFamily:F, fontSize:13, color:C.textLight, marginBottom:16 }}>
+            {lienPerime ? "Ce lien n'est plus valable (il ne sert qu'une fois et expire au bout d'un moment). Redemande-en un ici." : "Écris l'e-mail de ton compte : on t'envoie un lien pour choisir un nouveau mot de passe."}
+          </div>
+        )}
 
         <div style={{ fontFamily:F, fontSize:12, fontWeight:700, color:C.gray, marginBottom:6 }}>Email</div>
         <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="ton@email.com"
           style={{ width:"100%", padding:"12px 14px", borderRadius:10, border:`2px solid ${C.grayLight}`, fontFamily:F, fontSize:14, color:C.text, marginBottom:14, boxSizing:"border-box" }}
         />
 
+        {mode !== 'oubli' && (<>
         <div style={{ fontFamily:F, fontSize:12, fontWeight:700, color:C.gray, marginBottom:6 }}>Mot de passe</div>
         {pwdInput(password, e=>setPassword(e.target.value), showPwd, ()=>setShowPwd(s=>!s), "••••••••", mode==='login')}
+        </>)}
 
         {mode === 'register' && (<>
           <div style={{ fontFamily:F, fontSize:12, fontWeight:700, color:C.gray, marginBottom:6 }}>Confirmer le mot de passe</div>
@@ -645,14 +727,21 @@ function AuthScreen() {
         {error   && <div style={{ background:"#FEE", borderRadius:8, padding:"10px 12px", marginBottom:12, fontFamily:F, fontSize:13, color:C.red,   fontWeight:700 }}>⚠️ {error}</div>}
         {success && <div style={{ background:"#F0FFF5", borderRadius:8, padding:"10px 12px", marginBottom:12, fontFamily:F, fontSize:13, color:C.green, fontWeight:700 }}>✓ {success}</div>}
 
-        <button onClick={handle} disabled={loading}
+        <button onClick={mode === 'oubli' ? envoyerLien : handle} disabled={loading}
           style={{ width:"100%", padding:"14px", border:"none", borderRadius:12, background:loading?C.grayLight:C.red, fontFamily:F, fontWeight:900, fontSize:15, color:loading?C.gray:C.white, cursor:loading?"default":"pointer", marginBottom:12 }}>
-          {loading ? "…" : mode === 'login' ? 'Se connecter' : 'Créer mon compte'}
+          {loading ? "…" : mode === 'login' ? 'Se connecter' : mode === 'oubli' ? 'Recevoir le lien' : 'Créer mon compte'}
         </button>
 
-        <button onClick={()=>switchMode(mode==='login'?'register':'login')}
+        {mode === 'login' && (
+          <button onClick={()=>switchMode('oubli')}
+            style={{ width:"100%", padding:"6px 10px 12px", border:"none", background:"none", fontFamily:F, fontSize:13, color:C.gray, fontWeight:700, cursor:"pointer" }}>
+            Mot de passe oublié ?
+          </button>
+        )}
+
+        <button onClick={()=>switchMode(mode==='register'?'login':mode==='oubli'?'login':'register')}
           style={{ width:"100%", padding:"10px", border:"none", background:"none", fontFamily:F, fontSize:13, color:C.blue, fontWeight:700, cursor:"pointer" }}>
-          {mode === 'login' ? "Pas encore de compte → S'inscrire" : '← Déjà un compte ? Se connecter'}
+          {mode === 'login' ? "Pas encore de compte → S'inscrire" : mode === 'oubli' ? '← Retour à la connexion' : '← Déjà un compte ? Se connecter'}
         </button>
       </div>
     </div>
@@ -9437,6 +9526,8 @@ class TabErrorBoundary extends Component {
 export default function App() {
   const [session,   setSession]   = useState(null);
   const [authReady, setAuthReady] = useState(false);
+  // Chantier 161 — arrivée par le lien « mot de passe oublié » : écran du nouveau mot de passe.
+  const [recuperationMdp, setRecuperationMdp] = useState(RETOUR_LIEN_MDP.recuperation);
   // #56.3b — statut admin, dérivé de la session (jamais true par défaut ni
   // par accident : false pendant le chargement, false sans session, false
   // sur toute erreur RPC).
@@ -9890,6 +9981,8 @@ export default function App() {
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
+      // Chantier 161 — arrivée par le lien « mot de passe oublié ».
+      if (_event === 'PASSWORD_RECOVERY') setRecuperationMdp(true);
       if (!session) {
         setItems([]); setPriceDB([]); setArchives([]); setFavorites([]); setCircles([]);
         setPseudo(null); setCguAcceptedAt(undefined); setProfileMap({});
@@ -11352,6 +11445,7 @@ export default function App() {
   );
 
   if (!session) return <>{globalStyle}<AuthScreen/></>;
+  if (recuperationMdp) return <>{globalStyle}<NouveauMotDePasse onFini={()=>setRecuperationMdp(false)}/></>;
   // Chantier 123 — invitations de cercle reçues et pas encore traitées
   // (pastille de l'en-tête et de l'entrée « Moi »).
   const invitationsEnAttente = circles.filter(c=>(c.recipient_id===session.user.id||c.recipient_email?.toLowerCase()===session.user.email?.toLowerCase())&&c.status==='pending').length;
