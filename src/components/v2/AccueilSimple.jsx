@@ -6,15 +6,23 @@
 // « Scanner » vit dans le bouton rouge du bas, « Dicter » à côté de la
 // recherche du catalogue, « Mes économies » dans l'espace « Moi ».
 // L'écran ne décide rien : ce qu'il montre vient de lib/accueilCore.js.
+//
+// Chantier 160 (20/11) — en haut, trois gestes visibles : « Rechercher un
+// produit », « Parcourir les rayons », « Dicter mes courses » (comptes qui ont
+// le micro). Des courses en cours passent AVANT ces gestes (« Reprendre mes
+// courses »). « Comparer » a quitté cette carte (il est dans la barre du bas,
+// comme « Scanner »). Carte « Économies estimées » avec la référence du calcul.
 import { useState } from 'react';
 import { T } from './theme';
 import { IconeLoupe, IconeChevron, IconeMicro } from './Icones';
 import DefiCommunaute from './DefiCommunaute';
 import { alertesBaisse, phraseBaisse, titreAlerteBaisse } from '../../lib/evolutionPrixCore';
 import {
-  apercuListe, actionPrincipale, montrerModeDemploi,
-  ACTION_COMPARER, ACTION_COMMENCER_LISTE,
+  apercuListe, actionPrincipale, montrerModeDemploi, carteEconomies,
+  ACTION_COMMENCER_LISTE,
 } from '../../lib/accueilCore';
+
+const euros = (n) => `${Number(n).toFixed(2).replace('.', ',')} €`;
 
 function Carte({ children, style, onClick }) {
   return (
@@ -83,7 +91,11 @@ export default function AccueilSimple({
   sessionCourses = null, progressionCourses = null, joursCourses = 0, onReprendreCourses, onAbandonnerCourses,
   contributionVisible = false, onContribuer,
   communaute = null, evolutionPrix = null, onDicter = null,
+  onRechercher = null, onRayons = null, onEconomies = null, margeDroite = false,
 }) {
+  const rechercher = onRechercher || (() => setTab('catalog'));
+  const rayons = onRayons || (() => setTab('catalog'));
+  const economies = carteEconomies(archives);
   const [confirme, setConfirme] = useState(null); // 'scan' | 'courses' | null
   const liste = apercuListe(items);
   const action = actionPrincipale({ items, sessionCourses });
@@ -100,39 +112,58 @@ export default function AccueilSimple({
           <div style={{ fontFamily: T.police, fontWeight: 900, fontSize: 24, color: '#fff', letterSpacing: '-0.5px' }}>
             Prix<span style={{ color: T.jaune }}>Malin</span>
           </div>
-          <div style={{ fontFamily: T.police, fontWeight: 700, fontSize: 13, color: 'rgba(255,255,255,0.85)' }}>
+          <div style={{ fontFamily: T.police, fontWeight: 700, fontSize: 13, color: 'rgba(255,255,255,0.85)', paddingRight: margeDroite ? 40 : 0 }}>
             {prenom ? `Bonjour ${prenom}` : 'Bonjour'}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={() => setTab('catalog')} aria-label="Chercher un produit" style={{
-            flex: 1, minWidth: 0, border: 'none', background: '#fff', borderRadius: 14, padding: '13px 14px', cursor: 'pointer',
-            display: 'flex', alignItems: 'center', gap: 10, color: T.texteLeger, boxShadow: '0 4px 14px rgba(0,0,0,0.12)',
+        {/* Des courses en cours : leur reprise passe avant tout le reste. */}
+        {sessionCourses && progressionCourses && (
+          <div style={{ background: '#fff', borderRadius: 16, padding: 14, marginBottom: 12, boxShadow: '0 4px 14px rgba(0,0,0,0.12)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ width: 40, height: 40, borderRadius: 12, background: T.jaunePale, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>🛒</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontFamily: T.police, fontWeight: 900, fontSize: 15, color: T.texte }}>
+                  Mes courses{sessionCourses.magasin?.nom ? ` chez ${sessionCourses.magasin.nom}` : ''}
+                </div>
+                <div style={{ fontFamily: T.police, fontSize: 12.5, color: T.texteDoux, marginTop: 1 }}>
+                  {`${progressionCourses.pris} article${progressionCourses.pris > 1 ? 's' : ''} sur ${progressionCourses.total} dans le caddie${joursCourses >= 2 ? ` · commencées il y a ${joursCourses} jours` : ''}`}
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <Bouton onClick={onReprendreCourses} style={{ flex: 1, padding: '12px 14px' }}>Reprendre mes courses</Bouton>
+              <button onClick={() => setConfirme('courses')} style={{ border: 'none', background: 'none', color: T.texteLeger, padding: '8px 6px', fontFamily: T.police, fontWeight: 800, fontSize: 13, cursor: 'pointer', flexShrink: 0 }}>Abandonner</button>
+            </div>
+          </div>
+        )}
+        <button onClick={rechercher} aria-label="Rechercher un produit" style={{
+          width: '100%', border: 'none', background: '#fff', borderRadius: 14, padding: '13px 14px', cursor: 'pointer', boxSizing: 'border-box',
+          display: 'flex', alignItems: 'center', gap: 10, color: T.texteLeger, boxShadow: '0 4px 14px rgba(0,0,0,0.12)',
+        }}>
+          <IconeLoupe width={20} height={20} style={{ flexShrink: 0 }} />
+          <span style={{ fontFamily: T.police, fontWeight: 700, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Rechercher un produit…</span>
+        </button>
+        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+          <button onClick={rayons} style={{
+            flex: 1, minWidth: 0, border: 'none', background: T.jaune, color: T.texte, borderRadius: 14, padding: '12px 10px', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontFamily: T.police, fontWeight: 900, fontSize: 14, boxShadow: '0 4px 14px rgba(0,0,0,0.12)',
           }}>
-            <IconeLoupe width={20} height={20} style={{ flexShrink: 0 }} />
-            <span style={{ fontFamily: T.police, fontWeight: 700, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Chercher un produit…</span>
+            <span aria-hidden="true" style={{ fontSize: 16 }}>🛒</span> Parcourir les rayons
           </button>
-          <button onClick={() => setTab('catalog')} aria-label="Parcourir les rayons" style={{
-            flexShrink: 0, border: 'none', background: T.jaune, color: T.texte, borderRadius: 14, padding: '13px 14px', cursor: 'pointer',
-            display: 'flex', alignItems: 'center', gap: 6, fontFamily: T.police, fontWeight: 900, fontSize: 14, boxShadow: '0 4px 14px rgba(0,0,0,0.12)',
-          }}>
-            <span aria-hidden="true" style={{ fontSize: 16 }}>🛒</span> Rayons
-          </button>
+          {onDicter && (
+            <button onClick={onDicter} style={{
+              flex: 1, minWidth: 0, border: 'none', background: '#fff', color: T.rouge, borderRadius: 14, padding: '12px 10px', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontFamily: T.police, fontWeight: 900, fontSize: 14, boxShadow: '0 4px 14px rgba(0,0,0,0.12)',
+            }}>
+              <IconeMicro width={19} height={19} /> Dicter mes courses
+            </button>
+          )}
         </div>
       </div>
 
       <div style={{ padding: '16px 16px 0', display: 'flex', flexDirection: 'column', gap: 12 }}>
 
         {/* Ce qui attend l'utilisateur, s'il y a quelque chose */}
-        {sessionCourses && progressionCourses && (
-          <Rappel
-            pastille="🛒"
-            titre={`Courses en cours${sessionCourses.magasin?.nom ? ` chez ${sessionCourses.magasin.nom}` : ''}`}
-            detail={`${progressionCourses.pris} article${progressionCourses.pris > 1 ? 's' : ''} sur ${progressionCourses.total} dans le caddie${joursCourses >= 2 ? ` · commencées il y a ${joursCourses} jours` : ''}`}
-            action="Reprendre" onAction={onReprendreCourses}
-            onFermer={() => setConfirme('courses')} libelleFermer="Abandonner"
-          />
-        )}
         {onOuvrirTicket && ticketAScanner && (
           <Rappel pastille="🧾" titre={ticketAScanner.titre} detail={ticketAScanner.sousTitre} action="Compléter" onAction={onOuvrirTicket}
             onFermer={onEcarterTicket} libelleFermer="Je ne les ai plus" />
@@ -166,7 +197,7 @@ export default function AccueilSimple({
         {/* Ma liste — le cœur de l'accueil : un aperçu, un seul gros bouton */}
         <Carte>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: liste.total > 0 ? 10 : 6 }}>
-            <div style={{ fontFamily: T.police, fontWeight: 900, fontSize: 18, color: T.texte }}>Ma liste de courses</div>
+            <div style={{ fontFamily: T.police, fontWeight: 900, fontSize: 18, color: T.texte }}>Ma liste</div>
             {liste.total > 0 && (
               <button onClick={() => setTab('list')} style={{ border: 'none', background: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 2, color: T.rouge, fontFamily: T.police, fontWeight: 800, fontSize: 13 }}>
                 Voir tout <IconeChevron width={16} height={16} />
@@ -182,7 +213,6 @@ export default function AccueilSimple({
                   : 'Ajoute ce qu\'il te faut : la communauté te dira où ta liste coûte le moins cher.'}
               </div>
               <Bouton onClick={() => setTab('catalog')}>Ajouter des produits</Bouton>
-              {onDicter && <Bouton onClick={onDicter} plein={false} style={{ marginTop: 10 }}><IconeMicro width={20} height={20} /> Dicter ma liste</Bouton>}
             </>
           ) : (
             <>
@@ -195,12 +225,27 @@ export default function AccueilSimple({
                 )}
                 <button onClick={() => setTab('catalog')} style={{ border: `1.5px dashed ${T.rouge}`, background: 'none', color: T.rouge, borderRadius: 99, padding: '5px 12px', fontFamily: T.police, fontWeight: 900, fontSize: 13, cursor: 'pointer' }}>+ Ajouter</button>
               </div>
-              {action === ACTION_COMPARER && (
-                <Bouton onClick={() => setTab('compare')}>Où c'est le moins cher ?</Bouton>
-              )}
-              {onDicter && <Bouton onClick={onDicter} plein={false} style={{ marginTop: 10 }}><IconeMicro width={20} height={20} /> Dicter ma liste</Bouton>}
+              <Bouton onClick={() => setTab('list')} plein={false}>Ouvrir ma liste</Bouton>
             </>
           )}
+        </Carte>
+
+        {/* Chantier 160 — « Économies estimées » : la référence du calcul est dite. */}
+        <Carte onClick={economies.etat === 'vide' ? () => setTab(liste.aAcheter > 0 ? 'compare' : 'list') : (onEconomies || (() => setTab('economies')))}
+          style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 14, background: economies.etat === 'vide' ? T.carte : T.vertPale, boxShadow: economies.etat === 'vide' ? T.ombre : 'none' }}>
+          <span style={{ width: 42, height: 42, borderRadius: 13, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 21, flexShrink: 0 }}>💶</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontFamily: T.police, fontWeight: 900, fontSize: 15, color: economies.etat === 'vide' ? T.texte : T.vert }}>
+              {economies.etat === 'vide' ? 'Économies estimées' : `Économies estimées : ${euros(economies.montant)}`}
+            </div>
+            {economies.etat === 'tickets' && (
+              <div style={{ fontFamily: T.police, fontWeight: 800, fontSize: 12, color: T.texteDoux, marginTop: 1 }}>
+                Sur {economies.nbTickets} ticket{economies.nbTickets > 1 ? 's' : ''} scanné{economies.nbTickets > 1 ? 's' : ''}
+              </div>
+            )}
+            <div style={{ fontFamily: T.police, fontSize: 12.5, color: T.texteDoux, marginTop: 2 }}>{economies.phrase}</div>
+          </div>
+          <IconeChevron width={20} height={20} style={{ color: economies.etat === 'vide' ? T.texteLeger : T.vert, flexShrink: 0 }} />
         </Carte>
 
         {/* Chantier 139 — le défi de la communauté (pilier communautaire). */}

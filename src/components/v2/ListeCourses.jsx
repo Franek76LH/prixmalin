@@ -1,6 +1,10 @@
 // Chantier 125 — écran « Ma liste », aux couleurs de la nouvelle interface.
 // Présentation seule : toutes les actions (cocher, modifier, supprimer,
 // préférence de marque, favoris) restent celles de ListTab, passées en props.
+// Chantier 160 — « Dicter mes courses » à côté de « Ajouter des produits », en
+// haut de la liste (et non plus en petit rond flottant). Le bandeau « Où c'est
+// le moins cher ? » est retiré : l'onglet Comparer de la barre ouvre le même
+// écran (CompareTab), avec la même liste, les mêmes quantités et préférences.
 import { T } from './theme';
 import { IconePlus, IconeCroix, IconeCrayon, IconeCoche, IconeMicro } from './Icones';
 
@@ -74,7 +78,7 @@ function Ligne({ item, fait, dernier, vignette, onCocher, onModifier, onSupprime
 export default function ListeCourses({
   items = [], itemsReportes = [], nbFavoris = 0, vignette = null,
   onCocher, onModifier, onSupprimer, onMarque, onReactiverReporte, onSupprimerReporte,
-  onAjouter, onComparer, onFavoris, propositions = {}, onRelier, onDicter = null,
+  onAjouter, onFavoris, propositions = {}, onRelier, onDicter = null,
 }) {
   const aAcheter = items.filter(i => !i.checked);
   const pris = items.filter(i => i.checked);
@@ -91,7 +95,7 @@ export default function ListeCourses({
           </button>
           {onDicter && (
             <button onClick={onDicter} style={{ width: '100%', marginTop: 10, border: `1.5px solid ${T.trait}`, background: '#fff', color: T.texte, borderRadius: 14, padding: '13px', fontFamily: T.police, fontWeight: 900, fontSize: 15, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-              <IconeMicro width={20} height={20} /> Dicter ma liste
+              <IconeMicro width={20} height={20} /> Dicter mes courses
             </button>
           )}
           {nbFavoris > 0 && (
@@ -105,7 +109,23 @@ export default function ListeCourses({
   }
 
   return (
-    <div style={{ padding: '16px 16px 180px' }}>
+    <div style={{ padding: '16px 16px 110px' }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+        <button onClick={onAjouter} style={{
+          flex: 1, minWidth: 0, border: 'none', background: T.texte, color: '#fff', borderRadius: 14, padding: '12px 10px', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontFamily: T.police, fontWeight: 900, fontSize: 14,
+        }}>
+          <IconePlus width={18} height={18} /> Ajouter des produits
+        </button>
+        {onDicter && (
+          <button onClick={onDicter} style={{
+            flex: 1, minWidth: 0, border: `1.5px solid ${T.trait}`, background: '#fff', color: T.rouge, borderRadius: 14, padding: '12px 10px', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontFamily: T.police, fontWeight: 900, fontSize: 14,
+          }}>
+            <IconeMicro width={18} height={18} /> Dicter mes courses
+          </button>
+        )}
+      </div>
       {aAcheter.length > 0 && (
         <Section titre={`À acheter (${aAcheter.length})`}>
           {aAcheter.map((item, i) => (
@@ -147,30 +167,6 @@ export default function ListeCourses({
         ⭐ {nbFavoris > 0 ? 'Mes courses habituelles' : 'Enregistrer comme courses habituelles'}
       </button>
 
-      {/* Actions toujours sous le pouce, au-dessus de la barre du bas */}
-      <div style={{ position: 'fixed', bottom: 'calc(78px + env(safe-area-inset-bottom, 0px))', left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 430, padding: '0 16px', boxSizing: 'border-box', display: 'flex', gap: 10, zIndex: 45, pointerEvents: 'none' }}>
-        {aAcheter.length > 0 && (
-          <button onClick={onComparer} style={{ flex: 1, pointerEvents: 'auto', border: 'none', background: T.rouge, color: '#fff', borderRadius: 16, padding: '15px', fontFamily: T.police, fontWeight: 900, fontSize: 15.5, cursor: 'pointer', boxShadow: '0 8px 22px rgba(204,0,0,0.32)' }}>
-            Où c'est le moins cher ?
-          </button>
-        )}
-        {onDicter && (
-          <button onClick={onDicter} aria-label="Dicter ma liste" style={{
-            pointerEvents: 'auto', border: 'none', cursor: 'pointer', borderRadius: 16, background: '#fff', color: T.rouge,
-            padding: '0 16px', minHeight: 50, display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 8px 22px rgba(22,24,29,0.18)',
-          }}>
-            <IconeMicro width={22} height={22} />
-          </button>
-        )}
-        <button onClick={onAjouter} aria-label="Ajouter des produits" style={{
-          pointerEvents: 'auto', border: 'none', cursor: 'pointer', borderRadius: 16, background: T.texte, color: '#fff',
-          padding: aAcheter.length > 0 ? '0 16px' : '15px', flex: aAcheter.length > 0 ? 'none' : 1,
-          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, fontFamily: T.police, fontWeight: 900, fontSize: 15, boxShadow: '0 8px 22px rgba(22,24,29,0.25)',
-        }}>
-          <IconePlus width={20} height={20} />{aAcheter.length > 0 ? null : 'Ajouter des produits'}
-        </button>
-      </div>
     </div>
   );
 }

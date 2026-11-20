@@ -7,8 +7,10 @@ import { IconeRetour } from './Icones';
 import { titreEcran, ecranParent } from '../../lib/navigationCore';
 
 
-export default function EnTete({ tab, setTab, droite = null }) {
-  const parent = ecranParent(tab);
+// Chantier 160 — `retour` (facultatif) : l'écran d'où l'on vient, calculé par
+// la racine (lib/navigationCore.ecranRetour) ; sinon le parent par défaut.
+export default function EnTete({ tab, setTab, droite = null, retour }) {
+  const parent = retour === undefined ? ecranParent(tab) : retour;
   return (
     <header style={{
       position: 'sticky', top: 0, zIndex: 40, background: 'rgba(255,255,255,0.96)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',

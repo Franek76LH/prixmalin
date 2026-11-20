@@ -58,3 +58,28 @@ describe('montrerModeDemploi', () => {
     expect(montrerModeDemploi({ archives: [], items: [{}] })).toBe(false);
   });
 });
+
+describe('chantier 160 — carte « Économies estimées »', () => {
+  it('avec des tickets analysés : montant des tickets, nombre de tickets, phrase sur le prix moyen', async () => {
+    const { carteEconomies, PHRASE_ECONOMIES_TICKETS } = await import('./accueilCore');
+    const c = carteEconomies([
+      { ticket_scanned: true, realized_saving: 3.2 }, { ticket_scanned: true, realized_saving: 1.1 },
+      { ticket_scanned: false, potential_saving: 50 },
+    ]);
+    expect(c).toEqual({ etat: 'tickets', montant: 4.3, nbTickets: 2, phrase: PHRASE_ECONOMIES_TICKETS });
+  });
+  it('sans ticket analysé mais avec une comparaison validée : l\'écart estimé', async () => {
+    const { carteEconomies } = await import('./accueilCore');
+    const c = carteEconomies([{ ticket_scanned: false, potential_saving: 4.1 }, { potential_saving: -9 }]);
+    expect(c.etat).toBe('comparaison');
+    expect(c.montant).toBe(4.1);
+  });
+  it('rien : aucun chiffre', async () => {
+    const { carteEconomies } = await import('./accueilCore');
+    for (const a of [[], null, [{ potential_saving: 0 }], [{ ticket_scanned: true, realized_saving: null }]]) {
+      const c = carteEconomies(a);
+      expect(c.etat).toBe('vide');
+      expect(c.montant).toBeNull();
+    }
+  });
+});

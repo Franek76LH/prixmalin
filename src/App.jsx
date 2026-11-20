@@ -60,6 +60,8 @@ import AccueilSimple from "./components/v2/AccueilSimple";
 import BarreNavigation from "./components/v2/BarreNavigation";
 import EcranMoi from "./components/v2/EcranMoi";
 import EnTete from "./components/v2/EnTete";
+import BasculeCourses from "./components/v2/BasculeCourses";
+import { ecranRetour, noterOrigine, ecranCourses } from "./lib/navigationCore";
 import ListeCourses from "./components/v2/ListeCourses";
 // Chantier 126 — produits de la liste en texte libre : fiches proposées.
 import ProduitsARelier from "./components/v2/ProduitsARelier";
@@ -871,10 +873,32 @@ function StatsSheet({ userId, archives, onClose }) {
 // Même mécanique de sheet que « Mes Statistiques ». Distinct des « courses
 // habituelles » (legacy favorites), qui ne bougent pas. Lecture best effort :
 // un échec affiche un message, jamais un plantage.
-function FavorisSheet({ userId, onClose }) {
+// Chantier 160 — identifiant local d'un article ajouté depuis un favori (même
+// forme que celui du catalogue).
+function nouvelIdArticle() { return Date.now() + Math.random(); }
+
+function FavorisSheet({ userId, onClose, items = [], onAdd = null, onVoirListe = null }) {
   const F = "'Nunito',sans-serif";
   const [favoris, setFavoris] = useState(null); // null = chargement
   const [chargeErreur, setChargeErreur] = useState(false);
+  // Chantier 160 — un favori qui désigne un format précis part dans Ma liste
+  // par le même chemin que le catalogue (addItem) ; un favori « tous formats »
+  // ouvre la fiche du produit pour choisir le format.
+  const [ficheProduit, setFicheProduit] = useState(null);
+  const [ajoutes, setAjoutes] = useState({}); // id du favori -> 'ok' | 'deja' | 'erreur' | 'travail'
+  const ajouterALaListe = async (f) => {
+    if (!onAdd || !f.produit) return;
+    if (!f.variante_produit_id) { setFicheProduit(f.produit); return; }
+    setAjoutes(a => ({ ...a, [f.id]: 'travail' }));
+    let res;
+    try {
+      res = await onAdd({
+        id: nouvelIdArticle(), product: f.produit.nom_reference, format: '', brand: '', qty: 1, checked: false,
+        produit_id: f.produit_id, variante_produit_id: f.variante_produit_id, marque_pref: 'nationale',
+      });
+    } catch { res = false; }
+    setAjoutes(a => ({ ...a, [f.id]: res === true ? 'ok' : res === 'duplicate' ? 'deja' : 'erreur' }));
+  };
 
   useEffect(() => {
     let annule = false;
@@ -937,7 +961,19 @@ function FavorisSheet({ userId, onClose }) {
                       {f.magasin?.nom ? ` · 🏪 ${f.magasin.nom}` : ""}
                     </div>
                   </div>
-                  <button onClick={()=>retirer(f)} title="Retirer des favoris"
+                  {onAdd && f.produit && (
+                    ajoutes[f.id] === 'ok' || ajoutes[f.id] === 'deja' ? (
+                      <button onClick={()=>onVoirListe?.()} style={{ flexShrink:0, border:"none", background:"#E9F8EF", color:"#0A7A3E", borderRadius:10, padding:"7px 10px", fontFamily:F, fontWeight:900, fontSize:12, cursor:"pointer" }}>
+                        {ajoutes[f.id] === 'ok' ? "✓ Dans ma liste" : "Déjà dans ma liste"}
+                      </button>
+                    ) : (
+                      <button onClick={()=>ajouterALaListe(f)} disabled={ajoutes[f.id] === 'travail'}
+                        style={{ flexShrink:0, border:"none", background:C.red, color:"#fff", borderRadius:10, padding:"7px 10px", fontFamily:F, fontWeight:900, fontSize:12, cursor: ajoutes[f.id] === 'travail' ? "default" : "pointer", opacity: ajoutes[f.id] === 'travail' ? 0.6 : 1 }}>
+                        {ajoutes[f.id] === 'erreur' ? "Réessayer" : f.variante_produit_id ? "+ Ma liste" : "Choisir le format"}
+                      </button>
+                    )
+                  )}
+                  <button onClick={()=>retirer(f)} title="Retirer des favoris" aria-label="Retirer des favoris"
                     style={{ background:"none", border:"none", fontSize:15, cursor:"pointer", color:C.gray }}>✕</button>
                 </div>
               ))}
@@ -945,6 +981,12 @@ function FavorisSheet({ userId, onClose }) {
           )}
         </div>
       </div>
+      {ficheProduit && (
+        <div onClick={e=>e.stopPropagation()}>
+          <ProductPickerSheet produit={ficheProduit} categoryPresentation={getCategoryPresentation({})}
+            onClose={()=>setFicheProduit(null)} onAdd={onAdd} items={items} />
+        </div>
+      )}
     </div>
   );
 }
@@ -1202,7 +1244,7 @@ function Toast({ msg, ok = true, onFermer = null, action = null }) {
   if (onFermer) {
     return (
       <div role="status" style={{
-        position:"fixed", bottom:76, left:"50%", transform:"translateX(-50%)",
+        position:"fixed", bottom:"calc(92px + env(safe-area-inset-bottom, 0px))", left:"50%", transform:"translateX(-50%)",
         background:ok?C.green:C.red, color:C.white,
         padding:"10px 8px 10px 18px", borderRadius:18,
         fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, lineHeight:1.35,
@@ -1232,7 +1274,7 @@ function Toast({ msg, ok = true, onFermer = null, action = null }) {
   }
   return (
     <div style={{
-      position:"fixed", bottom:76, left:"50%", transform:"translateX(-50%)",
+      position:"fixed", bottom:"calc(92px + env(safe-area-inset-bottom, 0px))", left:"50%", transform:"translateX(-50%)",
       background:ok?C.green:C.red, color:C.white,
       padding:"10px 22px", borderRadius:99,
       fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14,
@@ -1325,7 +1367,56 @@ function etapeLisibleScan(status) {
 }
 
 // ── IMPORT TICKET SHEET ───────────────────────────────────────────────────────
-function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera = false, autoOpenGallery = false, onManualEntry, initialResult = null, resumeDraft = null, magasinSession = null, onVoirTicketExistant = null, onDoublonTardif = null, onPointsCredites = null }) {
+// Chantier 160 — question posée à la validation d'un ticket quand des courses
+// sont en cours. Deux étapes : le choix, puis (si le magasin du ticket n'est
+// pas celui des courses, ou ne peut pas être vérifié) une confirmation
+// explicite. « Retour au ticket » ne fait rien : aucune écriture n'a eu lieu.
+function ChoixRattachementCourses({ choix, magasinCourses, onEtape }) {
+  const F = "'Nunito',sans-serif";
+  const chez = magasinCourses ? ` chez ${magasinCourses}` : "";
+  const bouton = (plein) => ({ width:"100%", padding:"13px", borderRadius:12, fontFamily:F, fontWeight:900, fontSize:14.5, cursor:"pointer", marginBottom:8,
+    border: plein ? "none" : "1.5px solid #E2E5EA", background: plein ? "#CC0000" : "#fff", color: plein ? "#fff" : "#16181D" });
+  const lien = { width:"100%", padding:"8px", border:"none", background:"none", fontFamily:F, fontWeight:800, fontSize:13, color:"#8A9099", cursor:"pointer" };
+  const rattacher = () => { if (choix.ecart) onEtape('ecart'); else choix.resoudre('rattacher'); };
+  return (
+    <div onClick={e=>e.stopPropagation()} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:10000, padding:24 }}>
+      <div role="dialog" aria-label="Rattacher ce ticket à tes courses" style={{ background:"#fff", borderRadius:18, padding:20, maxWidth:340, width:"100%", boxSizing:"border-box" }}>
+        {choix.etape === 'choix' ? (
+          <>
+            <div style={{ fontFamily:F, fontWeight:900, fontSize:16, color:"#16181D", marginBottom:6 }}>🛒 Tu as des courses en cours{chez}</div>
+            <div style={{ fontFamily:F, fontSize:13.5, color:"#5C646E", marginBottom:16 }}>
+              Rattaché, ce ticket servira à vérifier ce que tu as acheté. Tes courses restent ouvertes : tu les termines quand tu veux.
+            </div>
+            <button onClick={rattacher} style={bouton(true)}>Rattacher à mes courses{chez}</button>
+            <button onClick={()=>choix.resoudre('separe')} style={bouton(false)}>Enregistrer séparément</button>
+            <button onClick={()=>choix.resoudre(null)} style={lien}>Retour au ticket</button>
+          </>
+        ) : (
+          <>
+            <div style={{ fontFamily:F, fontWeight:900, fontSize:16, color:"#16181D", marginBottom:6 }}>
+              {choix.ecart === 'different' ? "Ce n'est pas le même magasin" : "Magasin à vérifier"}
+            </div>
+            <div style={{ fontFamily:F, fontSize:13.5, color:"#5C646E", marginBottom:16 }}>
+              {choix.ecart === 'different'
+                ? `Ce ticket est de ${choix.magasinTicket || "un autre magasin"}, et tes courses sont${chez || " dans un autre magasin"}. Tu le rattaches quand même ?`
+                : `On ne peut pas vérifier que ce ticket${choix.magasinTicket ? ` (${choix.magasinTicket})` : ""} vient du magasin de tes courses${chez}. Tu le rattaches quand même ?`}
+            </div>
+            <button onClick={()=>choix.resoudre('rattacher')} style={bouton(true)}>Oui, rattacher quand même</button>
+            <button onClick={()=>choix.resoudre('separe')} style={bouton(false)}>Enregistrer séparément</button>
+            <button onClick={()=>onEtape('choix')} style={lien}>Retour</button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera = false, autoOpenGallery = false, onManualEntry, initialResult = null, resumeDraft = null, magasinSession = null, onVoirTicketExistant = null, onDoublonTardif = null, onPointsCredites = null, coursesActives = null, onRattacherCourses = null }) {
+  // Chantier 160 — ticket scanné par le bouton Scanner alors que des courses
+  // sont en cours : au moment de valider, on demande s'il faut le rattacher à
+  // ces courses (même mécanisme que « Je passe en caisse ») ou l'enregistrer
+  // séparément. { etape: 'choix' | 'ecart', ecart, magasinTicket, resoudre }.
+  const [choixCourses, setChoixCourses] = useState(null);
   // Chantier 115 — la prop estFrancois n'est plus lue ici (l'adresse du ticket
   // n'est plus effacée pour François). Les appelants peuvent continuer à la
   // passer : elle est simplement ignorée.
@@ -2040,6 +2131,24 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
       return;
     }
 
+    // Chantier 160 — des courses sont en cours (scan lancé hors « Je passe en
+    // caisse ») : rattacher ou enregistrer séparément. La question vient
+    // APRÈS l'anti-doublon et AVANT toute écriture : annuler ne laisse aucune
+    // trace, et le ticket n'est écrit qu'une fois, quel que soit le choix.
+    let rattacherCourses = false;
+    if (coursesActives?.sessionId) {
+      const idTicket = magasinCoreRef.current?.id || null;
+      const idCourses = coursesActives.magasin?.magasin_id || null;
+      const ecart = (!idTicket || !idCourses) ? 'inconnu' : (idTicket !== idCourses ? 'different' : null);
+      const decision = await new Promise(resoudre => setChoixCourses({
+        etape: 'choix', ecart, resoudre,
+        magasinTicket: magasinCoreRef.current?.nom || storeNameEdit.trim() || result?.store || null,
+      }));
+      setChoixCourses(null);
+      if (decision !== 'rattacher' && decision !== 'separe') { setSaving(false); return; }
+      rattacherCourses = decision === 'rattacher';
+    }
+
     // #56.5.A — double écriture Core, un seul appel. #56.6 : la promesse est
     // transmise à onImport (au lieu d'être ignorée via void) pour permettre
     // un realized_saving Core scopé à ce ticket quand core_actif=true — mais
@@ -2078,6 +2187,9 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
           : "✨ Contributions enregistrées — points en attente de validation");
       }).catch(() => { /* jamais bloquant */ });
     }
+    // Chantier 160 — rattachement choisi : même mécanisme que « Je passe en
+    // caisse », appelé une seule fois, avec la même promesse d'écriture.
+    if (rattacherCourses) onRattacherCourses?.(ecritureCorePromise);
     onImport(toImport, ecritureCorePromise);
     // Chantier 79 — écriture en base lancée : le brouillon n'a plus lieu
     // d'être. On l'efface AVANT onClose (jamais sur un simple ✕/onClose).
@@ -2149,6 +2261,11 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
 
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", zIndex:200, animation:"fadeIn 0.2s ease" }} onClick={(status==="idle"||status==="camera")?onClose:undefined}>
+      {/* Chantier 160 — rattacher ce ticket aux courses en cours ? */}
+      {choixCourses && (
+        <ChoixRattachementCourses choix={choixCourses} magasinCourses={coursesActives?.magasin?.nom || null}
+          onEtape={(etape) => setChoixCourses(c => c ? { ...c, etape } : c)} />
+      )}
       {/* LOT 1 (shadow estFrancois) — zone grise anti-doublon : un magasin proche
           existe déjà, mais sans certitude. L'utilisateur tranche. */}
       {/* Chantier 93 Lot 7 — doublon détecté AVANT import : rien n'a été
@@ -4250,7 +4367,7 @@ function FamilleDepliee({ membres, items, onAdd, onUpdate, onRemove, modeRayon =
   );
 }
 
-function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab, onDicter = null }) {
+function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab, onDicter = null, focusRecherche = false }) {
   const [categories,      setCategories]      = useState([]);
   const [catLoading,      setCatLoading]      = useState(true);
   const [catError,        setCatError]        = useState(null);
@@ -4469,7 +4586,7 @@ function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab, onDicter = null 
           recherche, là où l'on ajoute des produits. */}
       <div style={{ display:"flex", gap:8, alignItems:"stretch", marginBottom:16 }}>
       <div style={{ position:"relative", flex:1, minWidth:0 }}>
-        <input ref={champRechercheRef} value={searchQuery} onChange={e=>{
+        <input ref={champRechercheRef} autoFocus={focusRecherche} value={searchQuery} onChange={e=>{
             const val = e.target.value;
             setSearchQuery(val);
             if (val.trim().length < 2) {
@@ -5093,7 +5210,7 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
         )}
         onCocher={toggleCheck} onModifier={setEditItem} onSupprimer={removeItem} onMarque={onSetMarquePref}
         onReactiverReporte={onReactiverReporte} onSupprimerReporte={onSupprimerReporte}
-        onAjouter={()=>setTab("catalog")} onComparer={()=>setTab("compare")} onFavoris={()=>setShowFavModal(true)} onDicter={onDicter}
+        onAjouter={()=>setTab("catalog")} onFavoris={()=>setShowFavModal(true)} onDicter={onDicter}
         propositions={liaisonsProposees} onRelier={onRelier}
       />
 
@@ -5152,9 +5269,17 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
 }
 
 // ── PRICES TAB ────────────────────────────────────────────────────────────────
-function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValidated, onCreateArchive, userId, produitsRef = [], autoOpenCamera = false, onAutoOpenConsumed, autoResumeScan = false, onAutoResumeConsumed, initialScanResult = null, onInitialScanConsumed, hideActions = false, coreActifGlobal = false, estFrancois = false, magasinSession = null, onImportSession, onScanSessionFerme, onCompleterTicket = null, onVoirTicketExistant = null, notifierPoints = false, onEchecEcritureCore = null }) {
+function PricesTab({ onAnnulerScanAuto = null, coursesActives = null, onRattacherCourses = null, priceDB, setPriceDB, archives, updateArchive, onTicketValidated, onCreateArchive, userId, produitsRef = [], autoOpenCamera = false, onAutoOpenConsumed, autoResumeScan = false, onAutoResumeConsumed, initialScanResult = null, onInitialScanConsumed, hideActions = false, coreActifGlobal = false, estFrancois = false, magasinSession = null, onImportSession, onScanSessionFerme, onCompleterTicket = null, onVoirTicketExistant = null, notifierPoints = false, onEchecEcritureCore = null }) {
   const [showImport,    setShowImport]    = useState(false);
   const [capturedResult] = useState(initialScanResult);
+  // Chantier 160 — scan ouvert directement (bouton Scanner, « Je passe en
+  // caisse », reprise d'un brouillon) puis fermé SANS ticket importé : on
+  // revient à l'écran de départ au lieu de rester sur cet écran.
+  const ouvertDirectementRef = useRef(!!(autoOpenCamera || autoResumeScan || initialScanResult));
+  const ticketImporteRef = useRef(false);
+  // « Saisir à la main » ferme la feuille PUIS ouvre la saisie : ce n'est pas
+  // une annulation, on reste ici.
+  const saisieManuelleRef = useRef(false);
   // Chantier 79 — brouillon de scan reprenable. scanDraft : détecté au montage
   // (survit au rechargement, contrairement à ImportTicketSheet démonté).
   // resumeDraft : brouillon transmis à la feuille pour réhydratation.
@@ -5207,6 +5332,7 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
     showToast("✓ Prix enregistré");
   };
   const importPrices = async (entries, ecritureCorePromise) => {
+    ticketImporteRef.current = true;
     // Chantier 90 Lot 4 — scan lancé depuis une session de courses : signale
     // l'import à la racine avec la promesse d'écriture Core, pour rattacher
     // le ticket créé à la session (best effort, jamais bloquant pour ce flux).
@@ -5623,7 +5749,7 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
       })}
 
       {!hideActions && (
-        <button onClick={()=>{setEditPrice(null);setShowEntry(true);}} style={{ position:"fixed", bottom:72, right:16, background:"linear-gradient(135deg,#CC0000,#FF1A1A)", border:"none", borderRadius:99, padding:"13px 18px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", gap:6, boxShadow:"0 6px 20px rgba(180,0,0,0.45)", zIndex:40 }}>
+        <button onClick={()=>{setEditPrice(null);setShowEntry(true);}} style={{ position:"fixed", bottom:"calc(72px + env(safe-area-inset-bottom, 0px))", right:16, background:"linear-gradient(135deg,#CC0000,#FF1A1A)", border:"none", borderRadius:99, padding:"13px 18px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, color:C.white, cursor:"pointer", display:"flex", alignItems:"center", gap:6, boxShadow:"0 6px 20px rgba(180,0,0,0.45)", zIndex:40 }}>
           ✏️ Saisie manuelle
         </button>
       )}
@@ -5648,7 +5774,8 @@ function PricesTab({ priceDB, setPriceDB, archives, updateArchive, onTicketValid
         </div>
       )}
 
-      {showImport    && <ImportTicketSheet onClose={()=>{setShowImport(false);setResumeDraft(null);setScanDraft(lireScanDraft());onAutoOpenConsumed?.();onInitialScanConsumed?.();onScanSessionFerme?.();}} onImport={importPrices} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))} directCamera={autoOpenCamera} onManualEntry={()=>{ setShowImport(false); setShowEntry(true); }} initialResult={capturedResult} resumeDraft={resumeDraft} estFrancois={estFrancois} magasinSession={magasinSession} onVoirTicketExistant={onVoirTicketExistant} onDoublonTardif={()=>showToast("🧾 Ce ticket a déjà été scanné (doublon détecté)", false)} onPointsCredites={notifierPoints ? (msg)=>showToast(msg) : null}/>}
+      {showImport    && <ImportTicketSheet onClose={()=>{setShowImport(false);setResumeDraft(null);setScanDraft(lireScanDraft());onAutoOpenConsumed?.();onInitialScanConsumed?.();onScanSessionFerme?.();
+        if (ouvertDirectementRef.current && !ticketImporteRef.current) { ouvertDirectementRef.current = false; setTimeout(() => { if (!saisieManuelleRef.current) onAnnulerScanAuto?.(); }, 0); }}} onImport={importPrices} refProducts={produitsRef.map(p=>({ nom: p.produit_generique, categorie: p.sous_categorie }))} directCamera={autoOpenCamera} onManualEntry={()=>{ saisieManuelleRef.current = true; setShowImport(false); setShowEntry(true); }} initialResult={capturedResult} resumeDraft={resumeDraft} estFrancois={estFrancois} magasinSession={magasinSession} coursesActives={magasinSession ? null : coursesActives} onRattacherCourses={onRattacherCourses} onVoirTicketExistant={onVoirTicketExistant} onDoublonTardif={()=>showToast("🧾 Ce ticket a déjà été scanné (doublon détecté)", false)} onPointsCredites={notifierPoints ? (msg)=>showToast(msg) : null}/>}
       {showEntry     && <PriceEntrySheet  onClose={()=>{setShowEntry(false);setEditPrice(null);}} onSave={savePrice} existingPrice={editPrice}/>}
       {toast && <Toast msg={toast.msg} ok={toast.ok} onFermer={toast.reste ? () => setToast(null) : null} action={toast.reste ? toast.action : null}/>}
     </div>
@@ -6409,7 +6536,11 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
     <div style={{ padding:"40px 20px 100px", textAlign:"center" }}>
       <div style={{ fontSize:60, marginBottom:14 }}>🏪</div>
       <div style={{ fontFamily:F, fontWeight:900, fontSize:17, color:"#CC0000", marginBottom:6 }}>Ta liste est vide</div>
-      <div style={{ fontFamily:F, fontSize:13, color:C.textLight }}>Ajoute des produits dans "Liste" pour comparer</div>
+      <div style={{ fontFamily:F, fontSize:13, color:C.textLight, marginBottom:18 }}>Ajoute les produits qu'il te faut dans Ma liste : on te dira dans quel magasin elle coûte le moins cher.</div>
+      {/* Chantier 160 — plus d'impasse : un bouton mène à Ma liste. */}
+      <button onClick={()=>setTab("list")} style={{ width:"100%", maxWidth:320, padding:"14px", border:"none", borderRadius:14, background:"#CC0000", fontFamily:F, fontWeight:900, fontSize:15, color:"#fff", cursor:"pointer" }}>
+        Remplir ma liste
+      </button>
     </div>
   );
 
@@ -7921,7 +8052,7 @@ function MicroLienSheet({ element, onClose, onResolu, onIntrouvable }) {
 // Prise plafonnée à 3 minutes (décision chantier), enchaînable à volonté.
 const MICRO_PRISE_MAX_S = 3 * 60;
 
-function MicroTab({ onAdd, setTab, achats = null, achatsVariantes = null, memoire = null, onRetenir = null }) {
+function MicroTab({ onAdd, setTab, onTaper = null, achats = null, achatsVariantes = null, memoire = null, onRetenir = null }) {
   const F = "'Nunito',sans-serif";
   // Détections une seule fois au montage (pas de setState synchrone au rendu).
   // Le micro exige un contexte sécurisé (https, ou localhost) : en http local,
@@ -8415,6 +8546,12 @@ function MicroTab({ onAdd, setTab, achats = null, achatsVariantes = null, memoir
           ⚠️ Ce navigateur ne permet pas d'enregistrer le micro. Essaie avec Safari (iPhone) ou Chrome (Android) à jour.
         </div>
       )}
+      {/* Chantier 160 — dictée impossible : la saisie au clavier reste à un tap. */}
+      {(!contexteSecurise || !supporte) && onTaper && (
+        <button onClick={onTaper} style={{ width:"100%", marginTop:12, padding:"13px", border:"none", borderRadius:13, background:"#E5181B", fontFamily:F, fontWeight:900, fontSize:14.5, color:"#fff", cursor:"pointer" }}>
+          ⌨️ Taper mes produits à la place
+        </button>
+      )}
 
       {contexteSecurise && supporte && (
         <>
@@ -8463,6 +8600,11 @@ function MicroTab({ onAdd, setTab, achats = null, achatsVariantes = null, memoir
             <div style={{ background:"#FEE", borderRadius:12, padding:"12px 14px", marginBottom:16, fontFamily:F, fontSize:13, color:C.red, fontWeight:700 }}>
               {erreur}
             </div>
+          )}
+          {erreur && onTaper && (
+            <button onClick={onTaper} style={{ width:"100%", marginBottom:16, padding:"13px", border:`1.5px solid ${C.grayLight}`, borderRadius:13, background:"#fff", fontFamily:F, fontWeight:900, fontSize:14.5, color:C.text, cursor:"pointer" }}>
+              ⌨️ Taper mes produits à la place
+            </button>
           )}
 
           {/* Lot 3 — RÉCAPITULATIF unique : toutes les prises + ajouts manuels,
@@ -8638,7 +8780,7 @@ function MicroTab({ onAdd, setTab, achats = null, achatsVariantes = null, memoir
                       Ajout en cours…
                     </>
                   ) : (
-                    <>🛒 Ajouter au caddie ({elementsListe.length})</>
+                    <>🛒 Ajouter à ma liste ({elementsListe.length})</>
                   )}
                 </button>
               )}
@@ -8650,7 +8792,7 @@ function MicroTab({ onAdd, setTab, achats = null, achatsVariantes = null, memoir
           {confirmAjout && (
             <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:9999, padding:24 }} onClick={() => setConfirmAjout(false)}>
               <div onClick={ev => ev.stopPropagation()} style={{ background:"#fff", borderRadius:16, padding:"20px", maxWidth:340, width:"100%" }}>
-                <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:"#1a1a1a", marginBottom:8 }}>Ajouter au caddie ?</div>
+                <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:"#1a1a1a", marginBottom:8 }}>Ajouter à ma liste ?</div>
                 <div style={{ fontFamily:F, fontSize:13, color:"#555", lineHeight:1.5, marginBottom:6 }}>
                   <span style={{ color:C.green, fontWeight:800 }}>{bilanLiaison.ok}</span> produit{bilanLiaison.ok > 1 ? "s" : ""} relié{bilanLiaison.ok > 1 ? "s" : ""} au catalogue
                 </div>
@@ -8680,7 +8822,7 @@ function MicroTab({ onAdd, setTab, achats = null, achatsVariantes = null, memoir
               <div onClick={ev => ev.stopPropagation()} style={{ background:"#fff", borderRadius:16, padding:"20px", maxWidth:340, width:"100%", textAlign:"center" }}>
                 <div style={{ fontSize:36, marginBottom:6 }}>{bilanAjout.echecs > 0 ? "⚠️" : "🎉"}</div>
                 <div style={{ fontFamily:F, fontWeight:900, fontSize:16, color:"#1a1a1a", marginBottom:10 }}>
-                  {bilanAjout.ajoutes > 0 ? `${bilanAjout.ajoutes} produit${bilanAjout.ajoutes > 1 ? "s" : ""} ajouté${bilanAjout.ajoutes > 1 ? "s" : ""} à ton caddie` : "Aucun produit ajouté"}
+                  {bilanAjout.ajoutes > 0 ? `${bilanAjout.ajoutes} produit${bilanAjout.ajoutes > 1 ? "s" : ""} ajouté${bilanAjout.ajoutes > 1 ? "s" : ""} à ta liste` : "Aucun produit ajouté"}
                 </div>
                 <div style={{ fontFamily:F, fontSize:13, color:"#555", lineHeight:1.6, marginBottom:16 }}>
                   {bilanAjout.doublons > 0 && <div>{bilanAjout.doublons} déjà dans ta liste (non dupliqué{bilanAjout.doublons > 1 ? "s" : ""})</div>}
@@ -8688,7 +8830,7 @@ function MicroTab({ onAdd, setTab, achats = null, achatsVariantes = null, memoir
                 </div>
                 <button onClick={() => { setBilanAjout(null); setTab?.("list"); }}
                   style={{ width:"100%", padding:"13px", border:"none", borderRadius:11, background:"#E5181B", fontFamily:F, fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer", marginBottom:8 }}>
-                  Voir ma liste 🛒
+                  Voir ma liste
                 </button>
                 <button onClick={() => setBilanAjout(null)}
                   style={{ background:"none", border:"none", fontFamily:F, fontSize:13, fontWeight:700, color:"#999", cursor:"pointer", padding:"6px" }}>
@@ -8947,8 +9089,9 @@ function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, on
           (somme des articles cochés, recalculée à chaque coche — « + ? »
           quand un article coché n'a pas de prix connu). */}
       <div style={{ marginBottom:18 }}>
-        <div style={{ fontFamily:F, fontWeight:900, fontSize:24, color:"#1a1a1a" }}>Mes courses</div>
-        <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", marginTop:6 }}>
+        {/* Chantier 160 — le titre « Mes courses » est déjà dans l'en-tête et
+            dans la bascule Ma liste / Mes courses : il n'est plus répété ici. */}
+        <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between" }}>
           <div aria-live="polite" style={{ fontFamily:F, fontWeight:800, fontSize:13, color:"#6D6D72" }}>
             {prog.pris} / {prog.total} au caddie
           </div>
@@ -9135,7 +9278,7 @@ function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, on
           la TabBar. Le cochage reste de toute façon réversible depuis « Dans
           le caddie » ; ce raccourci évite d'ouvrir la section repliée. */}
       {derniereCoche && (
-        <div role="status" style={{ position:"fixed", bottom:92, left:"50%", transform:"translateX(-50%)", width:"calc(100% - 48px)", maxWidth:380, background:"rgba(20,20,20,0.92)", borderRadius:12, padding:"10px 14px", display:"flex", alignItems:"center", gap:10, zIndex:60, boxShadow:"0 6px 20px rgba(0,0,0,0.35)" }}>
+        <div role="status" style={{ position:"fixed", bottom:"calc(92px + env(safe-area-inset-bottom, 0px))", left:"50%", transform:"translateX(-50%)", width:"calc(100% - 48px)", maxWidth:380, background:"rgba(20,20,20,0.92)", borderRadius:12, padding:"10px 14px", display:"flex", alignItems:"center", gap:10, zIndex:60, boxShadow:"0 6px 20px rgba(0,0,0,0.35)" }}>
           <span style={{ fontFamily:F, fontWeight:700, fontSize:13, color:"#fff", flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
             ✓ {derniereCoche.nom}
           </span>
@@ -9386,7 +9529,22 @@ export default function App() {
   // une icône du bas, le scan, « C'est parti » — la referme jusqu'à la
   // prochaine ouverture.
   const [gardeOuverte, setGardeOuverte] = useState(true);
-  const setTab = useCallback((ecran) => { setGardeOuverte(false); setTabBrut(ecran); }, []);
+  // Chantier 160 — d'où l'on vient quand on ouvre le catalogue ou le micro
+  // (accueil, Ma liste…) : leur flèche « retour » y ramène.
+  const tabCourantRef = useRef("home");
+  const [originesEcran, setOriginesEcran] = useState({});
+  // Chantier 160 — le catalogue s'ouvre champ de recherche actif (« Rechercher
+  // un produit ») ou sur les rayons (« Parcourir les rayons »).
+  const [modeCatalogue, setModeCatalogue] = useState(null); // 'recherche' | 'rayons' | null
+  const setTab = useCallback((ecran) => {
+    setGardeOuverte(false);
+    const depuis = tabCourantRef.current;
+    setOriginesEcran(o => noterOrigine(o, depuis, ecran));
+    if (ecran !== "catalog") setModeCatalogue(null);
+    tabCourantRef.current = ecran;
+    setTabBrut(ecran);
+  }, []);
+  const ouvrirCatalogue = useCallback((mode) => { setTab("catalog"); setModeCatalogue(mode); }, [setTab]);
   // Chantier 130 — chaque écran s'ouvre en haut : sans ça, on arrivait sur
   // « Moi » déjà défilé parce que l'écran précédent l'était.
   useEffect(() => { window.scrollTo(0, 0); }, [tab]);
@@ -9576,6 +9734,11 @@ export default function App() {
   // modifie jamais archives.items ni aucune donnée en base.
   const [libelleVersNomProduit, setLibelleVersNomProduit] = useState({});
   const [loaded, setLoaded]       = useState(false);
+  // Chantier 160 — « Mes courses » sans liste validée en cours (courses
+  // terminées ou abandonnées ailleurs) : écran vide évité, on montre Ma liste.
+  useEffect(() => {
+    if (loaded && tab === "courses" && !(sessionCoursesAccessible && sessionCoursesActive)) setTab("list");
+  }, [loaded, tab, sessionCoursesAccessible, sessionCoursesActive, setTab]);
 
 
   const [, setStoreRatings] = useState({});
@@ -10457,8 +10620,11 @@ export default function App() {
   // Supabase rate, ticket_id reste simplement null — ni la session ni le
   // scan ne sont jamais cassés. Le « dernier ticket de l'utilisateur » est
   // le même mécanisme que calculerRealizedSavingTicket (#56.5.B).
-  const rattacherTicketScanSession = (ecritureCorePromise) => {
-    const cible = scanCaisseRef.current;
+  // Chantier 160 — `cibleChoisie` : rattachement choisi à la validation d'un
+  // ticket scanné par le bouton Scanner ({ sessionId }) ; sinon, la cible
+  // posée par « Je passe en caisse ».
+  const rattacherTicketScanSession = (ecritureCorePromise, cibleChoisie = null) => {
+    const cible = cibleChoisie || scanCaisseRef.current;
     definirScanCaisse(null);
     if (!cible?.sessionId) return;
     (async () => {
@@ -11210,9 +11376,12 @@ export default function App() {
       )}
       <div style={{ minHeight:"100vh", background:C.bg, maxWidth:430, margin:"0 auto" }}>
         {tab !== "home" && (
-          <EnTete tab={tab} setTab={setTab}/>
+          <EnTete tab={tab} setTab={setTab} retour={ecranRetour(tab, originesEcran)} droite={isAdmin ? <span aria-hidden="true" style={{ width:32, flexShrink:0 }}/> : null}/>
         )}
-        <div style={{ paddingTop: tab === "home" ? 0 : 4 }}>
+        {/* Chantier 160 — la barre de gestes (iPhone, Android plein écran)
+            s'ajoute sous la barre du bas : chaque écran garde cette marge en
+            plus de la sienne, pour que ses derniers boutons restent visibles. */}
+        <div style={{ paddingTop: tab === "home" ? 0 : 4, paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
           {!loaded && (
             <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", height:200, gap:16 }}>
               {loadError ? (
@@ -11230,7 +11399,8 @@ export default function App() {
           )}
           <TabErrorBoundary key={tab}>
           {loaded && tab==="home" && gardeOuverte && <PageDeGarde libelleBouton="C'est parti" onCommencer={()=>setGardeOuverte(false)} />}
-          {loaded && tab==="home" && !gardeOuverte && <AccueilV2 pseudo={pseudo} items={items} archives={archives} setTab={setTab} onDicter={accesAvance ? ()=>setTab("micro") : null} communaute={statsCommunaute} evolutionPrix={evolutionPrix} onScanner={handleFlash} onReprendreScan={handleResumeScan}
+          {loaded && tab==="home" && !gardeOuverte && <AccueilV2 pseudo={pseudo} items={items} archives={archives} setTab={setTab} onDicter={accesAvance ? ()=>setTab("micro") : null}
+            onRechercher={()=>ouvrirCatalogue("recherche")} onRayons={()=>ouvrirCatalogue("rayons")} margeDroite={isAdmin} communaute={statsCommunaute} evolutionPrix={evolutionPrix} onScanner={handleFlash} onReprendreScan={handleResumeScan}
             onEcarterTicket={()=>{ ecarterTicket(dernierTicketAScanner?.ticket?.id); setDernierTicketAScanner(null); }}
             ticketAScanner={dernierTicketAScanner} onOuvrirTicket={scanApresTicketAccessible && dernierTicketAScanner ? ()=>ouvrirHistoriqueTickets(dernierTicketAScanner.ticket) : null}
             sessionCourses={sessionCoursesAccessible ? sessionCoursesActive : null} onReprendreCourses={()=>setTab("courses")} onAbandonnerCourses={abandonnerSessionCourses}
@@ -11245,18 +11415,35 @@ export default function App() {
           {/* Chantier « Micro » Lot 1 — même mécanique shadow que rejets (#56.3b) :
               jamais rendu pour un autre utilisateur, même si tab="micro" traîne en state.
               Lot 5 : onAdd = le addItem OFFICIEL du caddie (même chemin que le Catalogue). */}
-          {loaded && accesAvance && tab==="micro" && <MicroTab onAdd={addItem} setTab={setTab} achats={achatsHabituels} achatsVariantes={achatsVariantes} memoire={memoireListe} onRetenir={retenirChoix}/>}
+          {loaded && accesAvance && tab==="micro" && <MicroTab onAdd={addItem} setTab={setTab} onTaper={()=>ouvrirCatalogue("recherche")} achats={achatsHabituels} achatsVariantes={achatsVariantes} memoire={memoireListe} onRetenir={retenirChoix}/>}
           {/* Chantier « Courses » Lot 1 (shadow estFrancois) — écran de courses,
               accessible uniquement via la validation du comparatif (aucun
               onglet TabBar). Session absente -> rien n'est rendu. */}
           {/* Chantier 87 Lot 1 — jamais rendu sans accès (flag OU François),
               même si tab="courses" traîne en state. */}
+          {/* Chantier 160 — Ma liste et Mes courses coexistent : on passe de
+              l'une à l'autre sans rien recopier ni écraser. */}
+          {loaded && (tab==="courses" || tab==="list") && sessionCoursesAccessible && sessionCoursesActive && (
+            <BasculeCourses ecran={tab} setTab={setTab} nbListe={items.filter(i=>!i.checked).length}
+              progression={calculerProgression(sessionCoursesActive.articles)} magasin={sessionCoursesActive.magasin?.nom ?? null}/>
+          )}
           {loaded && tab==="courses" && sessionCoursesAccessible && sessionCoursesActive && <CoursesTab session={sessionCoursesActive} onChangerEtat={changerEtatArticleSession} onAjouterNote={ajouterNoteCourses} onSupprimerNote={supprimerNoteCourses} onTerminer={demanderTerminerCourses} onPasserEnCaisse={()=>setCaisseCourses(true)} syncEchec={syncCoursesEchec}/>}
           {loaded && tab==="list"      && <ListTab onDicter={accesAvance ? ()=>setTab("micro") : null} liaisonsProposees={liaisonsProposees} onRelier={relierArticle}      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} onSetMarquePref={setMarquePrefItem} itemsReportes={itemsReportes} onReactiverReporte={reactiverReporte} onSupprimerReporte={supprimerReporte}/>}
-          {loaded && tab==="catalog"   && <CatalogTab   items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab} onDicter={accesAvance ? ()=>setTab("micro") : null}/>}
+          {loaded && tab==="catalog"   && <CatalogTab   focusRecherche={modeCatalogue==="recherche"} items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab} onDicter={accesAvance ? ()=>setTab("micro") : null}/>}
+          {/* Chantier 160 — des courses en cours : on peut y revenir d'ici. */}
+          {loaded && tab==="compare" && sessionCoursesAccessible && sessionCoursesActive && (
+            <div style={{ margin:"12px 16px 0", background:"#FFF8DC", borderRadius:14, padding:"10px 12px", display:"flex", alignItems:"center", gap:10 }}>
+              <span style={{ flex:1, minWidth:0, fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:700, color:"#16181D" }}>
+                Tes courses{sessionCoursesActive.magasin?.nom ? ` chez ${sessionCoursesActive.magasin.nom}` : ""} sont en cours.
+              </span>
+              <button onClick={()=>setTab("courses")} style={{ border:"none", background:"#16181D", color:"#fff", borderRadius:10, padding:"8px 12px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:12.5, cursor:"pointer", flexShrink:0 }}>Reprendre</button>
+            </div>
+          )}
           {loaded && tab==="compare"   && <CompareTab liaisonsProposees={liaisonsProposees} onRelier={relierArticle}   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix} sessionCoursesAccessible={sessionCoursesAccessible}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
-          {loaded && tab==="prices"    && <PricesTab    priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} estFrancois={estFrancois} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} magasinSession={scanCaisse?.magasin ?? null} onImportSession={rattacherTicketScanSession} onScanSessionFerme={()=>definirScanCaisse(null)} onCompleterTicket={scanApresTicketAccessible ? completerDernierTicket : null} onVoirTicketExistant={()=>setTab("archive")} notifierPoints={profilVisible} onEchecEcritureCore={setEchecEcritureCore} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
+          {loaded && tab==="prices"    && <PricesTab    onAnnulerScanAuto={()=>setTab(ecranRetour("prices", originesEcran) || "home")}
+            coursesActives={!scanCaisse && sessionCoursesAccessible && sessionCoursesActive?.id ? { sessionId: sessionCoursesActive.id, magasin: sessionCoursesActive.magasin } : null}
+            onRattacherCourses={(promesse)=>{ const id = sessionCoursesActive?.id; if (id) rattacherTicketScanSession(promesse, { sessionId: id }); }} priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} estFrancois={estFrancois} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} magasinSession={scanCaisse?.magasin ?? null} onImportSession={rattacherTicketScanSession} onScanSessionFerme={()=>definirScanCaisse(null)} onCompleterTicket={scanApresTicketAccessible ? completerDernierTicket : null} onVoirTicketExistant={()=>setTab("archive")} notifierPoints={profilVisible} onEchecEcritureCore={setEchecEcritureCore} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;
             const {data,error}=await supabase.from('archives').insert({...rest,user_id:session?.user?.id}).select('id').single();
             // Chantier 112 — le résultat est RENVOYÉ : l'appelant doit pouvoir
@@ -11281,7 +11468,11 @@ export default function App() {
         </div>
         {/* Chantier 137 — tant que la page de garde est là, pas de barre du
             bas : on n'entre dans l'app qu'en appuyant sur « C'est parti ». */}
-        {!(gardeOuverte && tab==="home") && <BarreNavigation tab={tab} setTab={setTab} onScanner={()=>{ setGardeOuverte(false); handleFlash(); }} nbListe={items.filter(i=>!i.checked).length} pastilleMoi={invitationsEnAttente>0}/>}
+        {!(gardeOuverte && tab==="home") && <BarreNavigation tab={tab} setTab={setTab}
+          onCourses={()=>setTab(ecranCourses(sessionCoursesAccessible && !!sessionCoursesActive))}
+          onScanner={()=>{ setGardeOuverte(false); handleFlash(); }}
+          coursesEnCours={sessionCoursesAccessible && !!sessionCoursesActive}
+          nbListe={items.filter(i=>!i.checked).length} pastilleMoi={invitationsEnAttente>0}/>}
         {/* Chantier #73 + "Scan code-barres" 3B — accès discrets réservés admin
             (isAdmin via la RPC est_administrateur() / app_metadata.role==='admin'),
             jamais dans la TabBar, invisibles pour tout autre utilisateur en prod.
@@ -11293,7 +11484,11 @@ export default function App() {
             résultat du scan. On la retire tant qu'une de ces deux feuilles est
             ouverte (elle y est inutile, chaque feuille a sa croix de fermeture). */}
         {isAdmin && !showAValider && !showValidationScan && !showPropositionsCodesBarres && (
-          <div style={{ position:"fixed", top:10, left:10, zIndex:500, display:"flex", flexDirection:"column", gap:6, alignItems:"flex-start" }}>
+          /* Chantier 160 — la pastille était en haut à GAUCHE, pile sur la
+             flèche « retour » de l'en-tête (et sur le logo de l'accueil) :
+             vérifié au banc le 20/11. Elle passe en haut à droite, où l'en-tête
+             lui réserve une place vide. */
+          <div style={{ position:"fixed", top:12, right:"max(10px, calc((100vw - 430px) / 2 + 10px))", zIndex:500, display:"flex", flexDirection:"column", gap:6, alignItems:"flex-end" }}>
             <button onClick={()=>setAdminOutilsOuverts(o=>!o)} aria-label="Outils admin"
               style={{ width:32, height:32, borderRadius:99, border:"none", background:"rgba(0,0,0,0.55)", color:"#fff", fontSize:14, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", position:"relative", padding:0 }}>
               {adminOutilsOuverts ? "✕" : "🛠️"}
@@ -11352,7 +11547,7 @@ export default function App() {
         {appToast && <Toast msg={appToast.msg} ok={appToast.ok} onFermer={appToast.reste ? () => setAppToast(null) : null} action={appToast.reste ? appToast.action : null}/>}
         {showCircleSheet  && <CircleSheet  circles={circles} userId={session.user.id} userEmail={session.user.email} profileMap={profileMap} pseudo={pseudo} archives={archives} onClose={()=>setShowCircleSheet(false)} onInvite={inviteByPseudo} onUpdateStatus={updateCircleStatus}/>}
         {showStatsSheet   && <StatsSheet   userId={session.user.id} archives={archives} onClose={()=>setShowStatsSheet(false)}/>}
-        {showFavorisSheet && <FavorisSheet userId={session?.user?.id} onClose={()=>setShowFavorisSheet(false)}/>}
+        {showFavorisSheet && <FavorisSheet userId={session?.user?.id} items={items} onAdd={addItem} onVoirListe={()=>{ setShowFavorisSheet(false); setTab("list"); }} onClose={()=>setShowFavorisSheet(false)}/>}
         {showProfilSheet && profilVisible && <ProfilSheet userId={session?.user?.id} pseudo={pseudo} onBadgesVus={memoriserBadgesVus} onClose={()=>setShowProfilSheet(false)}/>}
         {/* Chantier 94 — célébration COURTE d'un nouveau badge (popIn existant,
             aucune animation longue), fermable d'un tap, jamais bloquante. */}

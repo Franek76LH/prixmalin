@@ -59,3 +59,28 @@ export function actionPrincipale({ items, sessionCourses }) {
 export function montrerModeDemploi({ archives, items }) {
   return (archives || []).length === 0 && (items || []).length === 0;
 }
+
+// Chantier 160 — carte « Économies estimées » (accueil et Moi). Trois états,
+// jamais de chiffre inventé :
+//   - 'tickets'    : au moins un ticket analysé. Le prix PAYÉ est réel, mais la
+//                    référence est le prix moyen du même produit, même format,
+//                    dans les autres magasins : c'est donc une estimation.
+//   - 'comparaison': aucun ticket analysé, mais des magasins choisis avec un
+//                    écart estimé (produits trouvés dans plusieurs magasins).
+//   - 'vide'       : rien à montrer, on invite à comparer.
+export const PHRASE_ECONOMIES_TICKETS = 'Ce que tu as payé sur tes tickets, comparé au prix moyen du même produit, même format, dans les autres magasins.';
+export const PHRASE_ECONOMIES_COMPARAISON = 'Écart calculé quand tu as choisi ton magasin, sur les produits trouvés dans plusieurs magasins. Scanne ton ticket pour le mesurer sur ce que tu as payé.';
+export const PHRASE_ECONOMIES_VIDE = 'Compare ta liste : on te dira où elle coûte le moins cher.';
+
+export function carteEconomies(archives) {
+  const liste = Array.isArray(archives) ? archives : [];
+  const analyses = liste.filter(a => a?.ticket_scanned && a?.realized_saving != null);
+  if (analyses.length > 0) {
+    return { etat: 'tickets', montant: economiesConfirmees(liste), nbTickets: analyses.length, phrase: PHRASE_ECONOMIES_TICKETS };
+  }
+  const estimees = economiesEstimees(liste);
+  if (estimees > 0) {
+    return { etat: 'comparaison', montant: estimees, nbTickets: 0, phrase: PHRASE_ECONOMIES_COMPARAISON };
+  }
+  return { etat: 'vide', montant: null, nbTickets: 0, phrase: PHRASE_ECONOMIES_VIDE };
+}

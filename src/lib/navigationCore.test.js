@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { titreEcran, ecranParent, entreeActive } from './navigationCore';
+import { titreEcran, ecranParent, entreeActive, ecranRetour, noterOrigine, ecranCourses } from './navigationCore';
 
 describe('navigation — cohérence en-tête / barre du bas', () => {
   const ONGLETS = ['home', 'list', 'catalog', 'micro', 'courses', 'compare', 'prices', 'moi', 'archive', 'economies', 'rejets'];
@@ -10,11 +10,11 @@ describe('navigation — cohérence en-tête / barre du bas', () => {
   });
 
   it('les écrans de premier niveau n\'ont pas de flèche retour', () => {
-    for (const t of ['list', 'moi']) expect(ecranParent(t)).toBeNull();
+    for (const t of ['list', 'courses', 'compare', 'moi']) expect(ecranParent(t)).toBeNull();
   });
 
-  it('un écran secondaire revient vers un écran de la MÊME entrée de la barre du bas', () => {
-    for (const t of ['catalog', 'micro', 'courses', 'compare', 'archive', 'economies', 'rejets']) {
+  it('un écran secondaire revient par défaut vers un écran de la MÊME entrée de la barre du bas', () => {
+    for (const t of ['catalog', 'micro', 'archive', 'economies', 'rejets']) {
       const parent = ecranParent(t);
       expect(parent).not.toBeNull();
       expect(entreeActive(parent)).toBe(entreeActive(t));
@@ -22,13 +22,55 @@ describe('navigation — cohérence en-tête / barre du bas', () => {
     }
   });
 
-  it('chantier 158 — la comparaison est la suite de Ma liste', () => {
-    expect(entreeActive('compare')).toBe('list');
-    expect(ecranParent('compare')).toBe('list');
+  it('chantier 160 — barre Accueil · Courses · Scanner · Comparer · Moi', () => {
+    expect(entreeActive('list')).toBe('courses');
+    expect(entreeActive('courses')).toBe('courses');
+    expect(entreeActive('catalog')).toBe('courses');
+    expect(entreeActive('micro')).toBe('courses');
+    expect(entreeActive('compare')).toBe('compare');
+    expect(entreeActive('prices')).toBe('scan');
+    expect(titreEcran('list')).toBe('Ma liste');
+    expect(titreEcran('courses')).toBe('Mes courses');
+    expect(titreEcran('micro')).toBe('Dicter mes courses');
   });
 
   it('onglet inconnu : l\'accueil est allumé, pas de retour', () => {
     expect(entreeActive('nimporte')).toBe('home');
     expect(ecranParent('nimporte')).toBeNull();
+  });
+});
+
+describe('chantier 160 — retour vers l\'écran d\'origine', () => {
+  it('le micro ouvert depuis l\'accueil revient à l\'accueil', () => {
+    const o = noterOrigine({}, 'home', 'micro');
+    expect(ecranRetour('micro', o)).toBe('home');
+  });
+  it('sans origine connue : le parent par défaut', () => {
+    expect(ecranRetour('micro', {})).toBe('list');
+    expect(ecranRetour('catalog')).toBe('list');
+    expect(ecranRetour('archive', { archive: 'home' })).toBe('moi'); // pas un écran à origine
+  });
+  it('catalogue → micro → retour → catalogue → retour : on retrouve l\'accueil, pas de boucle', () => {
+    let o = noterOrigine({}, 'home', 'catalog');
+    o = noterOrigine(o, 'catalog', 'micro');
+    expect(ecranRetour('micro', o)).toBe('catalog');
+    o = noterOrigine(o, 'micro', 'catalog'); // le retour
+    expect(ecranRetour('catalog', o)).toBe('home');
+  });
+  it('le scan du ticket ouvert depuis Mes courses y revient ; sans origine, l\'accueil', () => {
+    expect(ecranRetour('prices', noterOrigine({}, 'courses', 'prices'))).toBe('courses');
+    expect(ecranRetour('prices', noterOrigine({}, 'list', 'prices'))).toBe('list');
+    expect(ecranRetour('prices', {})).toBe('home');
+  });
+  it('écran de premier niveau : jamais de flèche', () => {
+    expect(ecranRetour('list', { list: 'home' })).toBeNull();
+  });
+  it('origine inconnue ou égale à l\'écran : parent par défaut', () => {
+    expect(ecranRetour('catalog', { catalog: 'nimporte' })).toBe('list');
+    expect(ecranRetour('catalog', { catalog: 'catalog' })).toBe('list');
+  });
+  it('l\'entrée Courses ouvre Mes courses seulement quand une liste validée est en cours', () => {
+    expect(ecranCourses(true)).toBe('courses');
+    expect(ecranCourses(false)).toBe('list');
   });
 });

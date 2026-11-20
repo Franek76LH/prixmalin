@@ -4,7 +4,7 @@
 // derrière le pseudo et des pastilles flottantes.
 import { T } from './theme';
 import { IconeChevron } from './Icones';
-import { economiesConfirmees, economiesEstimees } from '../../lib/accueilCore';
+import { carteEconomies } from '../../lib/accueilCore';
 
 const euros = (n) => `${Number(n).toFixed(2).replace('.', ',')} €`;
 
@@ -41,8 +41,9 @@ export default function EcranMoi({
   onProfil = null, onCercle, invitationsEnAttente = 0, onStats, onMesPrix, onFavoris, onAide, onDeconnexion,
   estAdmin = false,
 }) {
-  const confirmees = economiesConfirmees(archives);
-  const estimees = economiesEstimees(archives);
+  // Chantier 160 — même carte et même phrase que l'accueil : « estimées »,
+  // avec la référence du calcul (jamais « confirmées »).
+  const economies = carteEconomies(archives);
   const nom = (pseudo || '').trim() || (email || '').split('@')[0] || 'Moi';
 
   return (
@@ -61,9 +62,11 @@ export default function EcranMoi({
         </div>
         <button onClick={() => setTab('economies')} style={{ width: '100%', border: 'none', cursor: 'pointer', background: T.vertPale, borderRadius: 14, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left' }}>
           <span style={{ flex: 1 }}>
-            <span style={{ display: 'block', fontFamily: T.police, fontWeight: 800, fontSize: 12.5, color: T.vert }}>Économies confirmées par tes tickets</span>
-            <span style={{ display: 'block', fontFamily: T.police, fontWeight: 900, fontSize: 24, color: T.vert }}>{euros(confirmees)}</span>
-            {estimees > 0 && <span style={{ display: 'block', fontFamily: T.police, fontSize: 12, color: T.texteDoux, marginTop: 1 }}>{euros(estimees)} estimées en choisissant le bon magasin</span>}
+            <span style={{ display: 'block', fontFamily: T.police, fontWeight: 800, fontSize: 12.5, color: T.vert }}>
+              Économies estimées{economies.etat === 'tickets' ? ` · ${economies.nbTickets} ticket${economies.nbTickets > 1 ? 's' : ''}` : ''}
+            </span>
+            {economies.montant != null && <span style={{ display: 'block', fontFamily: T.police, fontWeight: 900, fontSize: 24, color: T.vert }}>{euros(economies.montant)}</span>}
+            <span style={{ display: 'block', fontFamily: T.police, fontSize: 12, color: T.texteDoux, marginTop: 1 }}>{economies.phrase}</span>
           </span>
           <IconeChevron width={20} height={20} style={{ color: T.vert }} />
         </button>
@@ -72,8 +75,8 @@ export default function EcranMoi({
       <Groupe titre="Mes courses">
         <Ligne pastille="🧾" libelle="Mes tickets" detail="Tous tes tickets scannés" onClick={() => setTab('archive')} />
         <Ligne pastille="📈" libelle="Évolution de mes prix" detail="La courbe de tes produits, et ceux qui baissent" onClick={() => setTab('evolution')} pastilleRouge={nbBaisses} />
-        <Ligne pastille="🏷️" libelle="Mes prix" detail="Les prix que tu as relevés" onClick={onMesPrix} />
-        <Ligne pastille="❤️" libelle="Mes favoris" onClick={onFavoris} dernier />
+        <Ligne pastille="🏷️" libelle="Prix que j'ai relevés" detail="Tous tes prix, ticket par ticket" onClick={onMesPrix} />
+        <Ligne pastille="❤️" libelle="Mes favoris" detail="Tes produits préférés, à remettre dans ta liste" onClick={onFavoris} dernier />
       </Groupe>
 
       <Groupe titre="Mon compte">
