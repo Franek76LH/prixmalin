@@ -36,7 +36,7 @@ export const MODELE = "anthropic/claude-sonnet-4-5";
 // en silence chez un autre hébergeur.
 export const FOURNISSEUR = { order: ["anthropic"], allow_fallbacks: false };
 
-export const VERSION_LECTURE = "remise-de-ligne";
+export const VERSION_LECTURE = "articles-avec-remise";
 
 // ── Consignes ajoutées (après le texte v13, avant le catalogue) ────────────
 // L'exigence de ne rien oublier (RÈGLE ABSOLUE v13) reste en place, juste
@@ -86,6 +86,25 @@ REMISE IMPRIMÉE SOUS UN ARTICLE (ex. Carrefour : une ligne "Remise Immédiate 2
 export const CONSIGNE_LIBELLE_REMISE_IMPORT = `
 - Quand tu remplis le champ "remise" d'un article, ajoute aussi "libelle_remise" (texte) : le texte imprimé sur la ligne de la remise, recopié tel quel, sans le montant (ex. "Remise immédiate", "2+1 OFFERT"). Ne le reformule pas, ne devine pas la règle de la promotion.`;
 
+// ── Section « Articles avec Remise » — TOUS les scans (chantier 167, 21/11) ──
+// Constat sur le ticket Auchan Aix de François (21/11, « 50 % sur le 2e » sur
+// des lentilles) : Auchan imprime le 1er paquet dans la liste, puis, AVANT le
+// total, une section « Articles avec Remise » où figure le 2e paquet
+// (« *AUCHAN LENTILLES V.. 1*1,57 0,78 ») suivi de sa remise (« LENTILLES
+// VERTES .. -0,79 »). Le lecteur a pris cette section pour une simple remise
+// sur le 1er paquet : 15 lignes et 41,09 € lus au lieu de 16 lignes et 42,66 €.
+export const CONSIGNE_ARTICLES_AVEC_REMISE = `
+SECTION "ARTICLES AVEC REMISE" (ex. Auchan) : certains tickets impriment, APRÈS la liste des articles et AVANT le total, une section titrée "Articles avec Remise" (ou un titre équivalent). Chaque article de cette section est un article ACHETÉ EN PLUS de ceux de la liste du dessus, même quand il porte EXACTEMENT le même libellé qu'un article déjà lu : c'est souvent le 2e exemplaire d'une offre du type "50 % sur le 2e".
+- Disposition (gabarit : recopie TOUJOURS le libellé réellement imprimé) :
+  "*<libellé de l'article>      1*1,57        0,78"
+  "  <libellé de la remise> ..   -0,79"
+  -> UN objet de "products" EN PLUS : libelle_ticket = le libellé imprimé, qty = le nombre devant "*" (1), unit_price = price = le montant après "*" (1.57), total = unit_price × qty (1.57), "remise" = 0.79, "libelle_remise" = le texte de la ligne de la remise, recopié tel quel (sans le montant).
+- Le montant en fin de ligne (0,78) est le prix APRÈS remise : ne le mets JAMAIS dans price ni dans total.
+- Ne fusionne JAMAIS cet article avec la ligne de même libellé de la liste du dessus, et ne mets pas sa remise sur cette ligne-là (elle garde "remise": 0 si rien n'est imprimé juste sous elle).
+- Le signe "*" entre deux nombres ("2*1,23", "1*1,57") est un multiplicateur, comme "x" : le nombre À GAUCHE est la quantité, celui À DROITE le prix unitaire.
+- Vérification : la somme des "total" moins la somme des "remise" doit donner le total payé, et la somme des "qty" le nombre d'articles imprimé (s'il l'est).
+- "total_remises" reste le total des remises imprimé ("TOTAL REMISES -0,79" -> 0.79).`;
+
 // ── Construction des consignes ─────────────────────────────────────────────
 // Texte v13 recopié mécaniquement depuis index.ts (commit a771c7c) : seul
 // l'ajout CONSIGNES_ANTI_INVENTION, inséré juste avant le catalogue, diffère.
@@ -98,7 +117,8 @@ export function construirePromptTicket({
   antiInvention = true,
   consignesImport = false,
   remiseDeLigne = true,
-}: { nbImages: number; isMulti: boolean; refProducts?: ProduitRef[]; antiInvention?: boolean; consignesImport?: boolean; remiseDeLigne?: boolean }): string {
+  articlesAvecRemise = true,
+}: { nbImages: number; isMulti: boolean; refProducts?: ProduitRef[]; antiInvention?: boolean; consignesImport?: boolean; remiseDeLigne?: boolean; articlesAvecRemise?: boolean }): string {
   // Ajouts v14 : chaîne vide hors import, donc texte inchangé pour un scan photo.
   const v14 = (texte: string) => (consignesImport ? texte : "");
   const images = { length: nbImages };
@@ -108,7 +128,8 @@ export function construirePromptTicket({
       `\n\nPour chaque article du ticket, cherche dans ce catalogue le nom générique le plus proche (ex : "LT DEMI ECR" → "Lait demi-écrémé", "POULET ROT" → "Poulet rôti"). Utilise ce nom officiel dans le champ "name" UNIQUEMENT si la correspondance est franche. Si aucune correspondance n'est évidente, NE force PAS un rapprochement approximatif : laisse "name" vide ou recopie simplement le libellé du ticket normalisé (majuscules → minuscules, abréviations développées), et mets confiance="faible".`
     : `\nNormalise les noms abrégés (ex: LT DEMI ECR → Lait demi-écrémé).`;
   const ajout = (antiInvention ? CONSIGNES_ANTI_INVENTION : "")
-    + (remiseDeLigne ? (consignesImport ? CONSIGNE_LIBELLE_REMISE_IMPORT : CONSIGNE_REMISE_DE_LIGNE) : "");
+    + (remiseDeLigne ? (consignesImport ? CONSIGNE_LIBELLE_REMISE_IMPORT : CONSIGNE_REMISE_DE_LIGNE) : "")
+    + (articlesAvecRemise ? CONSIGNE_ARTICLES_AVEC_REMISE : "");
   return `${isMulti
                 ? `Ces ${images.length} images sont des morceaux successifs d'UN SEUL ticket de caisse, pris dans l'ordre de haut en bas. Les photos peuvent se CHEVAUCHER : un même produit peut apparaître en bas d'une photo et en haut de la suivante. Tu dois reconstituer UNE SEULE liste de produits, dans l'ordre, en supprimant les doublons dus au chevauchement (ne compte chaque produit qu'une seule fois). Le magasin et la date sont en général sur la première image.\n\n` + v14(CONSIGNE_V14_RECOLLAGE)
                 : ""}Analyse ce ticket de caisse et extrait les informations suivantes en JSON uniquement, sans texte avant ou après :

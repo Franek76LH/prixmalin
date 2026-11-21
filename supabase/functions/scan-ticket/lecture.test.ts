@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import {
   construirePromptTicket, construireCorpsOpenRouter, CONSIGNES_ANTI_INVENTION, FOURNISSEUR, MODELE,
   dimensionsJpeg, infosImages, lireImagesRequete, lireTicket,
-  CONSIGNE_REMISE_DE_LIGNE, CONSIGNE_LIBELLE_REMISE_IMPORT, normaliserRemisesDeLigne, VERSION_LECTURE,
+  CONSIGNE_REMISE_DE_LIGNE, CONSIGNE_LIBELLE_REMISE_IMPORT, normaliserRemisesDeLigne, VERSION_LECTURE, CONSIGNE_ARTICLES_AVEC_REMISE,
 } from './lecture.ts';
 
 // En-tête JPEG minimal : SOI, segment APP0 (16 octets), SOF0 1234 × 567.
@@ -267,14 +267,14 @@ describe('import de ticket (chantier 120) — sans effet sur le scan photo', () 
   const refs = [{ nom: 'Lait demi-écrémé', categorie: 'Crèmerie' }, { nom: 'Pâtes', categorie: 'Épicerie' }];
 
   it('scan photo, consigne de remise retirée : texte identique au caractère près à celui du chantier 121', () => {
-    expect(empreinte(construirePromptTicket({ nbImages: 1, isMulti: false, remiseDeLigne: false }))).toBe('78afc88d3f3119441b9fc462c1d7f17450051a9c22d9798716d9a1da2eaee4bd');
-    expect(empreinte(construirePromptTicket({ nbImages: 1, isMulti: false, refProducts: refs, remiseDeLigne: false }))).toBe('bfcb924e98a980882edba220a429e68385f7cbaab34493dd5b7bc4dd20bb088f');
-    expect(empreinte(construirePromptTicket({ nbImages: 3, isMulti: true, refProducts: refs, remiseDeLigne: false }))).toBe('64957fc9283c6d9d54e42e1896c3ee4cf42cb2c527e7267ab088191f240e7d30');
+    expect(empreinte(construirePromptTicket({ nbImages: 1, isMulti: false, remiseDeLigne: false, articlesAvecRemise: false }))).toBe('78afc88d3f3119441b9fc462c1d7f17450051a9c22d9798716d9a1da2eaee4bd');
+    expect(empreinte(construirePromptTicket({ nbImages: 1, isMulti: false, refProducts: refs, remiseDeLigne: false, articlesAvecRemise: false }))).toBe('bfcb924e98a980882edba220a429e68385f7cbaab34493dd5b7bc4dd20bb088f');
+    expect(empreinte(construirePromptTicket({ nbImages: 3, isMulti: true, refProducts: refs, remiseDeLigne: false, articlesAvecRemise: false }))).toBe('64957fc9283c6d9d54e42e1896c3ee4cf42cb2c527e7267ab088191f240e7d30');
     // le corps envoyé = le texte du 121 + la seule consigne de remise, insérée juste avant le catalogue
     const corps = construireCorpsOpenRouter({ images: ['AAAA'], isMulti: false, refProducts: refs });
     const texte = corps.messages[0].content.at(-1).text as string;
     expect(texte.split(CONSIGNE_REMISE_DE_LIGNE)).toHaveLength(2);
-    corps.messages[0].content.at(-1).text = texte.replace(CONSIGNE_REMISE_DE_LIGNE, '');
+    corps.messages[0].content.at(-1).text = texte.replace(CONSIGNE_REMISE_DE_LIGNE, '').replace(CONSIGNE_ARTICLES_AVEC_REMISE, '');
     expect(empreinte(JSON.stringify(corps))).toBe('5fb3c662d1a4ff1cafdf737384f835db6742eff9fb61fa1135bad72af0cf1bf6');
   });
 
@@ -390,13 +390,36 @@ describe('remise imprimée sous un article — scan photo (chantier 148)', () =>
     expect(r.products[1]).toMatchObject({ qty: 3, unit_price: 2.27, total: 6.81, libelle_remise: 'Remise Immédiate' });
     expect(r.total_remises).toBe(2.27);
     expect(JSON.parse(fetchFn.mock.calls[0][1].body).messages[0].content.at(-1).text).toContain(CONSIGNE_REMISE_DE_LIGNE);
-    expect(JSON.parse(journal.log.mock.calls[0][1]).version).toBe('remise-de-ligne');
-    expect(VERSION_LECTURE).toBe('remise-de-ligne');
+    expect(JSON.parse(journal.log.mock.calls[0][1]).version).toBe('articles-avec-remise');
+    expect(VERSION_LECTURE).toBe('articles-avec-remise');
     // le journal porte l'empreinte des consignes en ligne (photo et import)
     const sha = (t: string) => createHash('sha256').update(t).digest('hex');
     expect(JSON.parse(journal.log.mock.calls[0][1]).consignes).toEqual({
       photo: sha(construirePromptTicket({ nbImages: 1, isMulti: false })),
       import: sha(construirePromptTicket({ nbImages: 2, isMulti: true, consignesImport: true })),
     });
+  });
+});
+
+// Chantier 167 — ticket Auchan Aix du 21/11 : 2e paquet de lentilles imprimé
+// dans la section « Articles avec Remise », avant le total.
+describe('section « Articles avec Remise » (chantier 167)', () => {
+  const refs = [{ nom: 'Lentilles vertes', categorie: 'Épicerie' }];
+  it('part avec tout scan (photo, plusieurs photos, import), une seule fois, avant le catalogue, sans rien retirer', () => {
+    for (const args of [{ nbImages: 1, isMulti: false }, { nbImages: 2, isMulti: true, refProducts: refs }, { nbImages: 2, isMulti: true, consignesImport: true, refProducts: refs }]) {
+      const avec = construirePromptTicket(args);
+      const sans = construirePromptTicket({ ...args, articlesAvecRemise: false });
+      expect(avec.split(CONSIGNE_ARTICLES_AVEC_REMISE)).toHaveLength(2);
+      expect(avec.replace(CONSIGNE_ARTICLES_AVEC_REMISE, '')).toBe(sans);
+      if (args.refProducts) expect(avec.indexOf(CONSIGNE_ARTICLES_AVEC_REMISE)).toBeLessThan(avec.indexOf('Catalogue de référence'));
+    }
+  });
+  it('dit : article EN PLUS même libellé, prix avant remise, jamais fusionné, « * » multiplicateur', () => {
+    const c = CONSIGNE_ARTICLES_AVEC_REMISE;
+    expect(c).toMatch(/ACHETÉ EN PLUS/);
+    expect(c).toMatch(/EXACTEMENT le même libellé/);
+    expect(c).toMatch(/ne le mets JAMAIS dans price ni dans total/);
+    expect(c).toMatch(/Ne fusionne JAMAIS/);
+    expect(c).toMatch(/"\*" entre deux nombres/);
   });
 });

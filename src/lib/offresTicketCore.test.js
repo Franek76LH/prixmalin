@@ -74,3 +74,30 @@ describe('parametresOffre', () => {
     expect(parametresOffre(null)).toEqual({});
   });
 });
+
+// Chantier 167 — ticket Auchan Aix du 21/11 : 1er paquet de lentilles au prix
+// normal, 2e paquet dans « Articles avec Remise » avec −0,79 (affiche :
+// « 50 % sur le 2e au choix »).
+describe('Auchan — « 50 % sur le 2e » déduit des chiffres (chantier 167)', () => {
+  const lecture = { products: [
+    { libelle_ticket: '*AUCHAN LENTILLES V..', qty: 1, price: 1.57, remise: 0 },
+    { libelle_ticket: '*OIGNON', qty: 1, price: 0.33, remise: 0 },
+    { libelle_ticket: '*AUCHAN LENTILLES V..', qty: 1, price: 1.57, remise: 0.79, libelle_remise: 'LENTILLES VERTES ..' },
+  ] };
+  const lignes = [{ id: 'l2', libelle_ticket: '*AUCHAN LENTILLES V..', quantite: 1, prix_unitaire: 1.57, montant_remise: 0.79 }];
+  it('donne « le 2e à −50 % », déduit des chiffres, avec le texte imprimé', () => {
+    expect(construireOffresDuTicket(lignes, lecture)).toEqual([{
+      ligne_ticket_id: 'l2', mecanique: 'nieme_remise', parametres: { rang: 2, pourcentage: 50 },
+      origine: 'ticket_chiffres', texte_imprime: 'LENTILLES VERTES ..',
+    }]);
+  });
+  it('un seul paquet sur le ticket : on ne devine pas (remise sans règle)', () => {
+    const seul = { products: [lecture.products[2]] };
+    expect(construireOffresDuTicket(lignes, seul)[0].mecanique).toBe('inconnue');
+  });
+  it('remise qui ne tombe pas juste : on ne devine pas', () => {
+    const l = [{ ...lignes[0], montant_remise: 0.61 }];
+    const lu = { products: [lecture.products[0], { ...lecture.products[2], remise: 0.61 }] };
+    expect(construireOffresDuTicket(l, lu)[0].mecanique).toBe('inconnue');
+  });
+});

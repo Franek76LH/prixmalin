@@ -48,6 +48,17 @@ export function libelleRemisePourLigne(ligne, lecture) {
   return textes.length === 1 ? textes[0] : '';
 }
 
+// Chantier 167 — nombre d'articles portant ce libellé sur tout le ticket lu
+// (somme des quantités), remisés ou non. null si la lecture ne dit rien.
+export function unitesDuLibelle(ligne, lecture) {
+  const produits = Array.isArray(lecture?.products) ? lecture.products : [];
+  const cle = propre(ligne?.libelle_ticket);
+  if (!cle) return null;
+  const memes = produits.filter(p => p && propre(p.libelle_ticket) === cle);
+  if (memes.length === 0) return null;
+  return memes.reduce((n, p) => n + (Number(p.qty ?? p.quantite) || 1), 0);
+}
+
 // Lignes remisées du ticket (lues en base) -> offres à envoyer. Pure.
 export function construireOffresDuTicket(lignes, lecture) {
   return (Array.isArray(lignes) ? lignes : [])
@@ -59,6 +70,7 @@ export function construireOffresDuTicket(lignes, lecture) {
         prixNormal: Number(l.prix_unitaire),
         quantite: Number(l.quantite) || 1,
         montantRemise: Number(l.montant_remise),
+        unitesTicket: unitesDuLibelle(l, lecture),
       });
       if (!offre) return null;
       return {

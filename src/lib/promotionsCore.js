@@ -86,14 +86,36 @@ export function deduireOffreDesChiffres(prixNormal, quantite, montantRemise) {
   return { type: OFFRE_LOT_GRATUIT, achetes: q - offerts, offerts, deduite: true };
 }
 
+// Chantier 167 — Auchan (ticket du 21/11, lentilles « 50 % sur le 2e ») :
+// le 2e article est imprimé SEUL, avec sa remise, dans la section « Articles
+// avec Remise » ; le 1er est plus haut, au prix normal, sans remise. Donc une
+// ligne d'UN article remisée, et exactement 2 articles de ce libellé sur le
+// ticket : la remise ne porte que sur l'un des deux -> « le 2e à −p % ».
+// p doit tomber juste (multiple de 5, au centime près) ; sinon on ne devine
+// pas. « −25 % sur les deux » aurait remisé les DEUX articles : autre cas.
+export function deduireNiemeRemiseDesChiffres(prixNormal, quantiteLigne, unitesTicket, montantRemise) {
+  const prix = Number(prixNormal);
+  const remise = Number(montantRemise);
+  if (Number(quantiteLigne) !== 1 || Number(unitesTicket) !== 2) return null;
+  if (!(prix > 0) || !(remise > 0) || remise >= prix) return null;
+  const pourcentage = Math.round((remise / prix) * 100 / 5) * 5;
+  if (pourcentage <= 0 || pourcentage >= 100) return null;
+  if (Math.abs(remise - (prix * pourcentage) / 100) > 0.011) return null;
+  return { type: OFFRE_NIEME_REMISE, rang: 2, pourcentage, deduite: true };
+}
+
 // Tout ensemble, pour une ligne de ticket : d'abord le texte imprimé ; s'il ne
 // dit que « une remise de tant », on essaie les chiffres ; sinon on garde le
 // simple montant. Une règle lue dans le texte n'est jamais remplacée.
-export function comprendreRemiseDeLigne({ libelleRemise = '', prixNormal, quantite = 1, montantRemise = 0 } = {}) {
+// `unitesTicket` (chantier 167, facultatif) : nombre d'articles de ce même
+// libellé sur tout le ticket, remisés ou non.
+export function comprendreRemiseDeLigne({ libelleRemise = '', prixNormal, quantite = 1, montantRemise = 0, unitesTicket = null } = {}) {
   const lue = lireOffre(libelleRemise, montantRemise);
   if (!lue) return null;
   if (lue.type !== OFFRE_MONTANT && lue.type !== OFFRE_INCONNUE) return lue;
-  return deduireOffreDesChiffres(prixNormal, quantite, montantRemise) ?? lue;
+  return deduireOffreDesChiffres(prixNormal, quantite, montantRemise)
+    ?? (unitesTicket != null ? deduireNiemeRemiseDesChiffres(prixNormal, quantite, unitesTicket, montantRemise) : null)
+    ?? lue;
 }
 
 // Combien d'articles faut-il prendre pour que l'offre joue ?
