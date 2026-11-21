@@ -61,6 +61,7 @@ import BarreNavigation from "./components/v2/BarreNavigation";
 import EcranMoi from "./components/v2/EcranMoi";
 import EnTete from "./components/v2/EnTete";
 import BasculeCourses from "./components/v2/BasculeCourses";
+import EcranFinCourses from "./components/v2/EcranFinCourses";
 import { lireRetourLien, verifierNouveauMotDePasse, emailPlausible, messageErreurMotDePasse, traduireErreurConnexion } from "./lib/motDePasseCore";
 import { ecranRetour, noterOrigine, ecranCourses } from "./lib/navigationCore";
 import ListeCourses from "./components/v2/ListeCourses";
@@ -9673,6 +9674,8 @@ export default function App() {
   // étape à la place de l'ancien toast, par-dessus l'accueil — la session est
   // déjà close quand il apparaît, le fermer ne détruit rien.
   const [bilanCourses, setBilanCourses] = useState(null);
+  // Chantier 163 — écran unique de fin de courses (bilan + choix).
+  const [finCourses, setFinCourses] = useState(false);
   // Chantier 90 Lot 4 — « Je passe en caisse » : caisseCourses affiche la
   // confirmation du magasin ; scanCaisse mémorise le scan en attente de
   // rattachement ({ sessionId, magasin }) — magasin null = « changer de
@@ -10696,10 +10699,12 @@ export default function App() {
   // Lot 6 — demande de clôture depuis l'écran de courses : s'il reste des
   // articles à prendre, confirmation d'abord (jamais de clôture silencieuse) ;
   // sinon, directement le choix du sort du caddie.
+  // Chantier 163 — « Terminer mes courses » ouvre l'écran unique de fin de
+  // courses (remplace la confirmation, le choix du caddie et « pour plus
+  // tard »). Ces anciens dialogues ne sont plus appelés.
   const demanderTerminerCourses = () => {
     if (!sessionCoursesActive) return;
-    const prog = calculerProgression(sessionCoursesActive.articles);
-    setClotureCourses(prog.restants > 0 ? 'confirmation' : 'choixCaddie');
+    setFinCourses(true);
   };
 
   // Chantier 90 Lot 4 — « Je passe en caisse » : confirmation du magasin de
@@ -10817,7 +10822,7 @@ export default function App() {
       setSessionCourses(prev => {
         const base = (prev && prev.id === sessionId) ? prev : null;
         if (!base) return prev;
-        const suivante = appliquerRapprochementSession(base, resultat, totalReel, maintenant);
+        const suivante = appliquerRapprochementSession(base, resultat, totalReel, maintenant, lignes);
         try { ecrireSessionCourses(suivante); } catch { /* best effort */ }
         return suivante;
       });
@@ -10924,15 +10929,21 @@ export default function App() {
   // en statut 'reporte' (« À acheter plus tard ») AU LIEU d'être supprimées.
   // Best effort aussi : en cas d'échec, la ligne reste dans son état actuel
   // (toujours visible dans « Ma liste »), jamais de perte ni de blocage.
-  const executerClotureCourses = async (actionCaddie, { reporteIds = [] } = {}) => {
+  // Chantier 163 — `plan` (facultatif) : écritures décidées sur l'écran de fin
+  // de courses ({ supprimer: [id], majQuantite: [{ id, quantite }] }, calculé
+  // par planClotureListe : uniquement des lignes des courses). Remplace alors
+  // le sort du caddie ; `bilanFin` est figé dans le document terminé.
+  const executerClotureCourses = async (actionCaddie, { reporteIds = [], plan = null, bilanFin = null } = {}) => {
     const sessionAClore = sessionCoursesActive;
     setPlusTardCourses(null);
+    setFinCourses(false);
     if (!sessionAClore) { setClotureCourses(null); return; }
     // Chantier 89 Lot 3 — comptes du vidage calculés AVANT la clôture (purs),
     // pour figer le bilan dans le document de session : mêmes règles que les
     // écritures plus bas (garde-fou compris), aucune divergence possible.
     const maintenantISO = new Date().toISOString();
-    const idsSupprimables = actionCaddie === 'garder' ? [] : idsCaddieASupprimer(sessionAClore, { garderIntrouvables: actionCaddie === 'garder_introuvables' });
+    const idsSupprimables = plan ? plan.supprimer.map(String)
+      : actionCaddie === 'garder' ? [] : idsCaddieASupprimer(sessionAClore, { garderIntrouvables: actionCaddie === 'garder_introuvables' });
     // Garde-fou : on ne reporte que des lignes que le vidage allait supprimer.
     const aReporter = reporteIds.filter(id => idsSupprimables.includes(id));
     const ids = idsSupprimables.filter(id => !aReporter.includes(id));
@@ -10941,7 +10952,12 @@ export default function App() {
     const bilan = construireBilanCourses(sessionAClore.articles, { nbReportes: aReporter.length, figeLeISO: maintenantISO, totalReel: sessionAClore.ticket_total_reel ?? null });
     // Bilan figé DANS le doc terminé (jsonb donnees / localStorage) — champ
     // additif, aucune migration.
-    const terminee = { ...cloreSession(sessionAClore, maintenantISO), bilan };
+    const terminee = { ...cloreSession(sessionAClore, maintenantISO), bilan,
+      ...(bilanFin ? { bilan_fin: {
+        retrouves: bilanFin.retrouves.length, en_plus: bilanFin.enPlus.length, total_en_plus: bilanFin.totalEnPlus,
+        reste_garde: bilanFin.reste.filter(r => !(plan?.supprimer || []).map(String).includes(String(r.cle))).length,
+        a_verifier: bilanFin.aVerifier.length, non_reconnues: bilanFin.nonReconnues.length, avec_ticket: bilanFin.avecTicket,
+      } } : {}) };
     setClotureCourses(null);
     // Chantier 91 — dialogues de rapprochement purgés : la session se ferme,
     // les décisions restantes vivent déjà dans donnees (réversibles).
@@ -10957,7 +10973,10 @@ export default function App() {
     // Chantier 89 Lot 3 — l'écran-bilan remplace l'ancien toast « 🎉 Courses
     // terminées ! » : affiché depuis l'état local, donc visible même si toutes
     // les écritures Supabase ci-dessous échouent.
-    setBilanCourses(bilan);
+    // Chantier 163 — avec l'écran de fin de courses, le bilan vient d'être vu :
+    // simple message de fin.
+    if (plan) showAppToast("🎉 Courses terminées !");
+    else setBilanCourses(bilan);
 
     try {
       // Correctif (test 2026-08-12) — un doc d'avant le Lot 4 (sans id, vieux
@@ -10983,6 +11002,21 @@ export default function App() {
 
     if (actionCaddie === 'garder') return;
     let listeATouchee = false;
+    // Chantier 163 — reste à acheter gardé sur la MÊME ligne, avec la
+    // quantité restante (jamais de nouvelle ligne → jamais de doublon).
+    for (const m of plan?.majQuantite || []) {
+      try {
+        const { error } = await supabase.from('liste_courses')
+          .update({ quantite: m.quantite })
+          .eq('utilisateur_id', session?.user?.id)
+          .eq('id', m.id);
+        if (error) throw error;
+        listeATouchee = true;
+      } catch (e) {
+        console.error("Quantité restante post-courses :", e);
+        showAppToast("⚠️ Une quantité n'a pas pu être mise à jour — vérifie « Ma liste ».", false);
+      }
+    }
     if (ids.length > 0) {
       try {
         const { error } = await supabase.from('liste_courses')
@@ -11754,6 +11788,13 @@ export default function App() {
         )}
         {/* Lot 6 (shadow estFrancois) — étape 1 : il reste des articles à
             prendre, jamais de clôture silencieuse. */}
+        {/* Chantier 163 — écran unique de fin de courses. */}
+        {finCourses && sessionCoursesActive && (
+          <EcranFinCourses session={sessionCoursesActive} items={items}
+            onPlusTard={()=>setFinCourses(false)}
+            onScannerTicket={()=>{ setFinCourses(false); setCaisseCourses(true); }}
+            onTerminer={({ bilan, plan }) => executerClotureCourses('bilan', { plan, bilanFin: bilan })} />
+        )}
         {clotureCourses === 'confirmation' && sessionCoursesActive && (() => {
           const prog = calculerProgression(sessionCoursesActive.articles);
           return (

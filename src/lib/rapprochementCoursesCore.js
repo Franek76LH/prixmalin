@@ -168,7 +168,20 @@ export function rapprocherSessionTicket(articles, lignesTicket, { normaliser = n
 // par cle (concurrence-sûr : si un article a bougé entre-temps, seul son
 // champ achat est posé, rien d'autre n'est écrasé). totalReel = montant_total
 // du ticket (nullable). Pure — l'appelant persiste (localStorage + upsert).
-export function appliquerRapprochementSession(session, resultat, totalReel, modifieLeISO) {
+// Chantier 163 — `lignesTicket` (facultatif) : les lignes du ticket rattaché,
+// réduites à ce qui sert au bilan de fin de courses (produit, format, libellé,
+// quantité, prix), gardées dans le document de session (champ additif).
+export function resumerLignesTicket(lignes) {
+  return (lignes || []).filter(l => l && typeof l === 'object').map(l => ({
+    produit_id: l.produit_id ?? null,
+    variante_produit_id: l.variante_produit_id ?? null,
+    libelle: l.libelle_ticket || l.libelle_brut || null,
+    quantite: Number(l.quantite) > 0 ? Number(l.quantite) : 1,
+    prix_unitaire: l.prix_unitaire != null && Number.isFinite(Number(l.prix_unitaire)) ? Number(l.prix_unitaire) : null,
+  }));
+}
+
+export function appliquerRapprochementSession(session, resultat, totalReel, modifieLeISO, lignesTicket = null) {
   if (!session || !resultat || resultat.aucuneLigne) return session;
   const achatsParCle = new Map(
     (resultat.articles || []).filter(a => a?.type === 'caddie' && a.achat).map(a => [a.cle, a.achat])
@@ -182,6 +195,7 @@ export function appliquerRapprochementSession(session, resultat, totalReel, modi
     achats_hors_liste: resultat.achats_hors_liste || [],
     lignes_non_reconnues: resultat.lignes_non_reconnues || 0,
     ticket_total_reel: totalReel ?? null,
+    ...(lignesTicket ? { ticket_lignes: resumerLignesTicket(lignesTicket) } : {}),
     rapprochement_le: modifieLeISO,
     modifie_le: modifieLeISO,
   };

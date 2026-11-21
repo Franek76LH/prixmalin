@@ -159,6 +159,10 @@ export function construireArticlesSession({ items, lignesPrix, rayons, marquesVa
       // Variante du PRIX retenu (le produit concret du magasin) pour la photo ;
       // repli sur la variante du caddie.
       variante_produit_id: prix?.variante_produit_id ?? item.variante_produit_id ?? null,
+      // Chantier 163 — format choisi DANS LA LISTE (null = format indifférent) :
+      // le bilan de fin de courses ne signale « autre format » que si un
+      // format précis avait été demandé.
+      variante_liste: item.variante_produit_id ?? null,
       rayon: (item.produit_id != null && mapRayons.get(item.produit_id)) || RAYON_AUTRES,
       etat: 'a_prendre',
       coche_le: null,
