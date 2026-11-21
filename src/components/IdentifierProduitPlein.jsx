@@ -134,7 +134,7 @@ export default function IdentifierProduitPlein({ lignes, ligneDepartId, deps, on
 
   // La croix : fermer ≠ passer — rien n'est marqué ni écrit.
   const fermer = () => onFermer?.(p.fermer());
-  const LIBELLE_SANS_CODE = 'Pas de code-barres (vrac, boucherie…)';
+  const LIBELLE_SANS_CODE = 'Pas de code-barres (fruits, légumes, vrac, boucherie…)';
 
   const { rang, total } = p.position();
   const ligne = e.ligne;
@@ -170,8 +170,9 @@ export default function IdentifierProduitPlein({ lignes, ligneDepartId, deps, on
       {/* Sur la caméra aussi : une banane n'a pas de code à viser. */}
       {!avecFermer && ligne && (
         <button onClick={() => p.sansCodeBarres()}
-          style={{ marginTop: 8, background: 'rgba(255,255,255,0.14)', border: '1px solid rgba(255,255,255,0.35)', borderRadius: 99, padding: '6px 12px', color: '#fff', fontFamily: F, fontWeight: 800, fontSize: 12, cursor: 'pointer' }}>
-          {LIBELLE_SANS_CODE}
+          style={{ marginTop: 10, width: '100%', background: '#fff', border: 'none', borderRadius: 12, padding: '12px 14px', color: '#16181D', fontFamily: F, fontWeight: 900, fontSize: 14, cursor: 'pointer' }}>
+          {/* Chantier 169 — constat François (21/11) : la petite pastille n'était pas vue ; persil, oignons et clémentines restaient « à identifier ». */}
+          🥕 {LIBELLE_SANS_CODE}
         </button>
       )}
     </div>
