@@ -46,7 +46,10 @@ describe('présélection : uniquement quand la correspondance est SÛRE et UNIQU
 
   it('pas d\'adresse, pas de code postal, liste absente -> rien, jamais d\'exception', () => {
     expect(magasinReconnuPourTicket({ adresse: '', enseigneId: 'utile', magasins: [UTILE] })).toBeNull();
-    expect(magasinReconnuPourTicket({ adresse: 'AIX-EN-PROVENCE', enseigneId: 'utile', magasins: [UTILE] })).toBeNull();
+    // Chantier 165 (21/11) — ville seule + UN SEUL magasin de l'enseigne dans
+    // cette ville : désormais présélectionné (avant : rien). Deux magasins : rien.
+    expect(magasinReconnuPourTicket({ adresse: 'AIX-EN-PROVENCE', enseigneId: 'utile', magasins: [UTILE] })?.id).toBe('utile-aix');
+    expect(magasinReconnuPourTicket({ adresse: 'AIX-EN-PROVENCE', enseigneId: 'utile', magasins: [UTILE, { ...UTILE, id: 'utile-2', adresse: 'rue Z' }] })).toBeNull();
     expect(magasinReconnuPourTicket({ adresse: lue, enseigneId: 'utile', magasins: null })).toBeNull();
   });
 });

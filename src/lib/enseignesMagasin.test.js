@@ -195,8 +195,10 @@ describe('défaut 3 — carte « Nouveau magasin détecté »', () => {
 
   it('FALLBACK : pas de nom, pas d\'adresse ou liste pas chargée -> pas de carte', () => {
     expect(doitProposerNouveauMagasin({ nom: '', adresse: TICKET.adresse, enseigneId: 'utile', magasins: MAGASINS })).toBe(false);
-    expect(doitProposerNouveauMagasin({ nom: TICKET.nom, adresse: '  ', enseigneId: 'utile', magasins: MAGASINS })).toBe(false);
-    expect(doitProposerNouveauMagasin({ nom: TICKET.nom, adresse: null, enseigneId: 'utile', magasins: MAGASINS })).toBe(false);
+    // Chantier 165 (21/11) — sans adresse imprimée, la carte est proposée
+    // quand l'enseigne est connue (elle demande la ville) ; pas si « autre ».
+    expect(doitProposerNouveauMagasin({ nom: TICKET.nom, adresse: '  ', enseigneId: 'utile', magasins: MAGASINS })).toBe(true);
+    expect(doitProposerNouveauMagasin({ nom: TICKET.nom, adresse: null, enseigneId: 'autre', magasins: MAGASINS })).toBe(false);
     expect(doitProposerNouveauMagasin({ ...TICKET, enseigneId: 'utile', magasins: null })).toBe(false);
   });
 

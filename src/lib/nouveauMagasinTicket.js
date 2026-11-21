@@ -46,12 +46,50 @@ export function similariteTrigramme(a, b) {
   return commun / (A.size + B.size - commun);
 }
 
+// ── Chantier 165 — tickets SANS adresse imprimée ───────────────────────────
+// Constat réel (Auchan Aix, 21/11) : le ticket n'imprime que la ville. La
+// carte « Nouveau magasin détecté » exigeait une adresse : impasse, rien
+// d'enregistré. Désormais, sans code postal, on raisonne sur ENSEIGNE + VILLE.
+
+// « AIX-EN-PROVENCE », « Aix en Provence » → « aix en provence ».
+export function normaliserVille(v) {
+  return String(v ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ').replace(/\b(cedex|france)\b/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+// Ville seule lue sur le ticket : texte sans code postal ni chiffre (sinon
+// c'est une adresse, traitée comme avant). null si rien d'exploitable.
+export function villeSansAdresse(adresse) {
+  const t = String(adresse ?? '').trim();
+  if (!t || /\d/.test(t)) return null;
+  const v = normaliserVille(t);
+  return v.length >= 2 ? v : null;
+}
+
+// Magasins de la MÊME enseigne (connue) dans la même ville.
+export function magasinsEnseigneVille({ ville, enseigneId, magasins }) {
+  const ens = idEnseigneDepuisSlug(enseigneId);
+  const v = normaliserVille(ville);
+  if (!ens || ens === 'autre' || !v || !Array.isArray(magasins)) return [];
+  return magasins.filter((m) => m
+    && idEnseigneDepuisSlug(m?.enseignes?.slug) === ens
+    && (normaliserVille(m.ville) === v
+      || (!m.ville && m.adresse && normaliserVille(m.adresse).endsWith(v))));
+}
+
 // Magasin connu le plus proche de l'adresse du ticket (même règle que la RPC),
 // ou null. `enseigneId` : identifiant d'enseigne du ticket ("utile", "autre"…).
 export function magasinConnuPourTicket({ adresse, enseigneId, magasins }) {
   const adr = String(adresse ?? '').trim();
   const cp = extraireCodePostal(adr);
-  if (!adr || !cp || !Array.isArray(magasins)) return null;
+  // Chantier 165 — ville seule : connu s'il existe déjà un magasin de la même
+  // enseigne dans cette ville (pas de carte « nouveau » : on choisit).
+  if (!cp) {
+    const ville = villeSansAdresse(adr);
+    const memes = ville ? magasinsEnseigneVille({ ville, enseigneId, magasins }) : [];
+    return memes[0] || null;
+  }
+  if (!adr || !Array.isArray(magasins)) return null;
 
   // Comme la RPC : on ne compare qu'à la même enseigne quand elle est connue
   // en base ; sinon (enseigne "autre" ou absente des magasins), à tous.
@@ -82,13 +120,20 @@ export function magasinConnuPourTicket({ adresse, enseigneId, magasins }) {
 }
 
 // Faut-il afficher la carte « Nouveau magasin détecté » ?
-//   - nom ET adresse lus sur le ticket (sinon : comportement d'avant) ;
+//   - nom lu sur le ticket ;
+//   - adresse lue, OU (chantier 165) pas d'adresse mais une enseigne connue :
+//     la carte demande alors la ville (et l'adresse si on la connaît) ;
 //   - liste des magasins connue (pas pendant le chargement) ;
-//   - aucun magasin connu proche.
+//   - aucun magasin connu proche (même adresse, ou même enseigne dans la même
+//     ville quand le ticket n'imprime que la ville).
 export function doitProposerNouveauMagasin({ nom, adresse, enseigneId, magasins }) {
   try {
-    if (!String(nom ?? '').trim() || !String(adresse ?? '').trim()) return false;
+    if (!String(nom ?? '').trim()) return false;
     if (!Array.isArray(magasins)) return false;
+    if (!String(adresse ?? '').trim()) {
+      const ens = idEnseigneDepuisSlug(enseigneId);
+      return !!ens && ens !== 'autre';
+    }
     return magasinConnuPourTicket({ adresse, enseigneId, magasins }) === null;
   } catch (e) {
     console.error('[C115] détection nouveau magasin', e);
@@ -138,6 +183,13 @@ export function magasinReconnuPourTicket({ adresse, enseigneId, magasins }) {
   try {
     const adr = String(adresse ?? '').trim();
     const cp = extraireCodePostal(adr);
+    // Chantier 165 — ticket qui n'imprime que la ville : présélection si UN
+    // SEUL magasin de la même enseigne (connue) existe dans cette ville.
+    if (!cp) {
+      const ville = villeSansAdresse(adr);
+      const memes = ville ? magasinsEnseigneVille({ ville, enseigneId, magasins }) : [];
+      return memes.length === 1 ? memes[0] : null;
+    }
     if (!adr || !cp || !Array.isArray(magasins)) return null;
     const ens = idEnseigneDepuisSlug(enseigneId);
     if (!ens || ens === 'autre') return null;

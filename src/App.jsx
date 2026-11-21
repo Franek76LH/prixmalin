@@ -1957,6 +1957,10 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     if (cp) {
       const apres = (adresse.split(cp)[1] || '').replace(/^[,\s]+/, '').trim();
       ville = apres && apres.toLowerCase() !== 'france' ? apres.replace(/,?\s*france$/i, '').trim() : null;
+    } else if (adresse && !/\d/.test(adresse)) {
+      // Chantier 165 — ville seule (ticket sans adresse) : gardée en VILLE,
+      // pour que le magasin soit reconnu au prochain ticket.
+      ville = adresse.split(',').pop().trim() || null;
     }
     try {
       const { data, error } = await supabase.rpc('resoudre_ou_creer_magasin_core', {
@@ -2621,6 +2625,9 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                     && doitProposerNouveauMagasin({ nom: result?.store, adresse: result?.address, enseigneId: selectedStore, magasins: magasinsCore.tous }) && (()=>{
                     const enseigneLue = trouverEnseigneDansNom(result?.store, enseignesEnCache());
                     const peutValider = storeNameEdit.trim() && storeLocation.trim() && !manualGeocoding;
+                    // Chantier 165 — le ticket n'imprime pas d'adresse : on
+                    // demande la ville (et l'adresse si on la connaît) tout de suite.
+                    const sansAdresseLue = !String(result?.address ?? '').trim();
                     const champ = (valeur, onChange, placeholder) => (
                       <input value={valeur} onChange={e=>onChange(e.target.value)} placeholder={placeholder}
                         style={{ width:"100%", padding:"10px 12px", borderRadius:10, border:`2px solid ${valeur.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:14, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:8, background:C.white }} />
@@ -2630,7 +2637,15 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                         <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.orange, marginBottom:8 }}>
                           🏪 Nouveau magasin détecté
                         </div>
-                        {carteNouveauMagasinEdition ? (
+                        {sansAdresseLue && !carteNouveauMagasinEdition ? (
+                          <>
+                            <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.text, marginBottom:4 }}>{storeNameEdit.trim() || result?.store}</div>
+                            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12.5, color:C.textLight, marginBottom:8 }}>
+                              Ce ticket n'indique pas l'adresse du magasin. Écris au moins la ville (et la rue si tu la connais) :
+                            </div>
+                            {champ(storeLocation, setStoreLocation, "Ville (ex. Aix-en-Provence) ou adresse")}
+                          </>
+                        ) : carteNouveauMagasinEdition ? (
                           <>
                             {champ(storeNameEdit, setStoreNameEdit, "Nom du magasin")}
                             {champ(storeLocation, setStoreLocation, "Adresse, code postal et ville")}
