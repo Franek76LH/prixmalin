@@ -175,6 +175,11 @@ export function annulerScanLigneRpc(ligneId) {
   return supabase.rpc('annuler_scan_ligne_ticket', { p_ligne_ticket_id: ligneId });
 }
 
+// Chantier 170 — « Ce n'est pas ça » sur une ligne déjà rattachée.
+export function detacherLigneRpc(ligneId) {
+  return supabase.rpc('detacher_ligne_ticket', { p_ligne_ticket_id: ligneId });
+}
+
 // Chantier 119 — « Pas de code-barres » / « Finalement j'ai un code ».
 export function marquerLigneSansCodeBarresRpc(ligneId, valeur = true) {
   return supabase.rpc('marquer_ligne_sans_code_barres', { p_ligne_ticket_id: ligneId, p_valeur: valeur });

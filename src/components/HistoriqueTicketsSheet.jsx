@@ -29,8 +29,9 @@ import {
 import {
   chargerTicketsUtilisateur, chargerLignesAIdentifier, chargerDetailTicket,
   confirmerSuggestion, chargerVarianteAffichage, depsScanLigne, chargerProduitsACompleter,
-  annulerScanLigneRpc, marquerLigneSansCodeBarresRpc,
+  annulerScanLigneRpc, marquerLigneSansCodeBarresRpc, detacherLigneRpc,
 } from '../lib/historiqueTicketsCore';
+import { motsQuiClochent, phraseMotsQuiClochent } from '../lib/motsQuiClochent';
 
 const F = "'Nunito',sans-serif";
 const ROUGE = '#CC0000';
@@ -282,6 +283,34 @@ export default function HistoriqueTicketsSheet({ userId, onClose, onCompteChange
     }
   };
 
+  // Chantier 170 — « Ce n'est pas ça ? » sur une ligne déjà rattachée :
+  // 1er appui -> demande de confirmation dans la ligne ; « Oui, détacher » ->
+  // RPC detacher_ligne_ticket (prix, alias et mémoire d'enseigne défaits),
+  // la ligne redevient « à identifier ». Échec -> message, rien ne bouge.
+  const [aDetacher, setADetacher] = useState(null);
+  const detacher = async (ligne, nom) => {
+    if (!ticketOuvert) return;
+    setRetour(null);
+    setEnCours('Un instant…');
+    try {
+      let rep;
+      try { rep = await detacherLigneRpc(ligne.id); } catch (e) { rep = { error: e || true }; }
+      const d = rep?.data;
+      if (rep?.error || !d || d.succes !== true) {
+        setRetour({ ton: 'erreur', titre: rep?.error ? (estFonctionAbsente(rep.error) ? MESSAGE_INDISPONIBLE : 'Impossible de détacher la ligne pour le moment.') : (d?.message || 'Détachement refusé.') });
+        return;
+      }
+      setADetacher(null);
+      setRetour({ ton: 'attente', titre: `↩ Détaché : ${nom}`, detail: 'La ligne est de nouveau à identifier : scanne le bon code-barres.' });
+      setEnEvidence(ligne.id);
+      const dd = await rechargerDetail(ticketOuvert.id);
+      if (dd) setTimeout(() => refsLignes.current[ligne.id]?.scrollIntoView?.({ behavior: 'smooth', block: 'center' }), 60);
+      chargerLignesAIdentifier(userId).then(l => { if (!l.error) { setComptes(compterAIdentifierParTicket(l.data)); onCompteChange?.(l.data.length); } });
+    } finally {
+      setEnCours(null);
+    }
+  };
+
   // Retour de l'écran plein : relecture du ticket et des compteurs EN BASE
   // (qui fait foi), ligne suivante à identifier mise en évidence.
   const finIdentification = async () => {
@@ -454,9 +483,36 @@ export default function HistoriqueTicketsSheet({ userId, onClose, onCompteChange
                       <div style={{ fontFamily: F, fontSize: 12, color: GRIS, marginTop: 2 }}>
                         {[v?.marques?.nom, formatVariante(v)].filter(Boolean).join(' · ') || 'Sans marque'}
                       </div>
+                      {l.libelle_ticket && (
+                        <div style={{ fontFamily: F, fontSize: 11, color: GRIS, marginTop: 2 }}>Ticket : {l.libelle_ticket}</div>
+                      )}
+                      {(() => {
+                        const phrase = phraseMotsQuiClochent(motsQuiClochent(l.libelle_ticket, p?.nom_reference), p?.nom_reference || '');
+                        return phrase ? <div style={{ fontFamily: F, fontSize: 12, fontWeight: 800, color: '#9A5B00', marginTop: 4 }}>⚠️ {phrase}</div> : null;
+                      })()}
                     </div>
                     {prixTxt}
                   </div>
+                  {aDetacher === l.id ? (
+                    <div style={{ marginTop: 10, padding: '10px 12px', background: '#FFF4E0', borderRadius: 10 }}>
+                      <div style={{ fontFamily: F, fontSize: 13, fontWeight: 800, color: TEXTE, marginBottom: 8 }}>Détacher « {p?.nom_reference || 'ce produit'} » de cette ligne ? Son prix sera retiré, et tu pourras scanner le bon produit.</div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button onClick={() => detacher(l, p?.nom_reference || 'produit')} disabled={!!enCours}
+                          style={{ flex: 1, padding: '10px', border: 'none', borderRadius: 10, background: ROUGE, color: '#fff', fontFamily: F, fontWeight: 900, fontSize: 14, cursor: 'pointer' }}>
+                          Oui, détacher
+                        </button>
+                        <button onClick={() => setADetacher(null)} disabled={!!enCours}
+                          style={{ flex: 1, padding: '10px', border: '1.5px solid #ccc', borderRadius: 10, background: '#fff', color: TEXTE, fontFamily: F, fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
+                          Annuler
+                        </button>
+                      </div>
+                    </div>
+                  ) : annulable?.ligneId !== l.id && (
+                    <button onClick={() => setADetacher(l.id)} disabled={!!enCours}
+                      style={{ marginTop: 6, background: 'none', border: 'none', padding: 0, fontFamily: F, fontSize: 12, fontWeight: 800, color: BLEU, textDecoration: 'underline', cursor: 'pointer' }}>
+                      Ce n'est pas ça ?
+                    </button>
+                  )}
                   {blocAnnulable(l)}
                 </div>
               );
@@ -466,19 +522,22 @@ export default function HistoriqueTicketsSheet({ userId, onClose, onCompteChange
               const p = detail.produits[l.produit_suggere_ia_id];
               const v = detail.variantes[l.variante_suggeree_ia_id];
               const nomSuggere = [p?.nom_reference || 'ce produit', v?.marques?.nom, formatVariante(v)].filter(Boolean).join(' · ');
+              // Chantier 170 — le mot du ticket qui manque à la fiche proposée.
+              const phraseDoute = phraseMotsQuiClochent(motsQuiClochent(l.libelle_ticket, p?.nom_reference), p?.nom_reference || '');
               return (
                 <div key={l.id} ref={el => { refsLignes.current[l.id] = el; }} style={cadre}>
                   <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontFamily: F, fontWeight: 900, fontSize: 14, color: TEXTE }}><span style={{ color: BLEU }}>? </span>{titreLigneInconnue(l)}</div>
                       <div style={{ fontFamily: F, fontSize: 13, color: '#333', marginTop: 4 }}>Est-ce bien <b>{nomSuggere}</b> ?</div>
+                      {phraseDoute && <div style={{ fontFamily: F, fontSize: 12.5, fontWeight: 800, color: '#9A5B00', background: '#FFF4E0', borderRadius: 8, padding: '7px 9px', marginTop: 6 }}>⚠️ {phraseDoute}</div>}
                     </div>
                     {prixTxt}
                   </div>
                   <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                     <button onClick={() => confirmer(l)} disabled={!!enCours}
-                      style={{ flex: 1, padding: '10px', border: 'none', borderRadius: 10, background: VERT, color: '#fff', fontFamily: F, fontWeight: 900, fontSize: 14, cursor: 'pointer' }}>
-                      ✓ Oui
+                      style={{ flex: 1, padding: '10px', border: phraseDoute ? '2px solid #9A5B00' : 'none', borderRadius: 10, background: phraseDoute ? '#fff' : VERT, color: phraseDoute ? '#9A5B00' : '#fff', fontFamily: F, fontWeight: 900, fontSize: 14, cursor: 'pointer' }}>
+                      {phraseDoute ? 'Oui quand même' : '✓ Oui'}
                     </button>
                     <BoutonScanner onClick={() => scanner(l)} desactive={!!enCours} />
                   </div>
