@@ -2635,6 +2635,10 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                     // Chantier 165 — le ticket n'imprime pas d'adresse : on
                     // demande la ville (et l'adresse si on la connaît) tout de suite.
                     const sansAdresseLue = !String(result?.address ?? '').trim();
+                    // Chantier 168 — le ticket ne donne que la ville (Auchan Aix,
+                    // 21/11) : sans rue, le magasin est placé au centre-ville et
+                    // la distance est fausse. On propose la rue tout de suite.
+                    const villeSeuleLue = !sansAdresseLue && !/\d/.test(String(result?.address ?? ''));
                     const champ = (valeur, onChange, placeholder) => (
                       <input value={valeur} onChange={e=>onChange(e.target.value)} placeholder={placeholder}
                         style={{ width:"100%", padding:"10px 12px", borderRadius:10, border:`2px solid ${valeur.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:14, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:8, background:C.white }} />
@@ -2644,7 +2648,15 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                         <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.orange, marginBottom:8 }}>
                           🏪 Nouveau magasin détecté
                         </div>
-                        {sansAdresseLue && !carteNouveauMagasinEdition ? (
+                        {villeSeuleLue && !carteNouveauMagasinEdition ? (
+                          <>
+                            <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.text, marginBottom:4 }}>{storeNameEdit.trim() || result?.store}</div>
+                            <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12.5, color:C.textLight, marginBottom:8 }}>
+                              Le ticket n'indique que la ville. Ajoute la rue si tu la connais : la distance jusqu'au magasin sera juste.
+                            </div>
+                            {champ(storeLocation, setStoreLocation, "Rue et ville (ex. 12 av. de la Gare, Aix)")}
+                          </>
+                        ) : sansAdresseLue && !carteNouveauMagasinEdition ? (
                           <>
                             <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.text, marginBottom:4 }}>{storeNameEdit.trim() || result?.store}</div>
                             <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12.5, color:C.textLight, marginBottom:8 }}>

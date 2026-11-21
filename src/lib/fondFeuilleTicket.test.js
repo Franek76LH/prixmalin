@@ -13,3 +13,13 @@ describe('feuille « Importer un ticket » — fermeture par le fond', () => {
     expect(corps).not.toContain('onClick={(status==="idle"||status==="camera")?onClose:undefined}');
   });
 });
+
+// Chantier 168 — ticket qui ne donne que la ville : champ de la rue proposé
+// d'emblée sur la carte « Nouveau magasin détecté ».
+describe('carte « Nouveau magasin détecté » — ville seule', () => {
+  const src = readFileSync(new URL('../App.jsx', import.meta.url), 'utf8');
+  it('propose la rue tout de suite quand le ticket ne donne que la ville', () => {
+    expect(src).toContain("const villeSeuleLue = !sansAdresseLue && !/\\d/.test(String(result?.address ?? ''));");
+    expect(src).toContain("Le ticket n'indique que la ville. Ajoute la rue si tu la connais");
+  });
+});
