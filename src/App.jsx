@@ -2366,7 +2366,14 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   };
 
   return (
-    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", zIndex:200, animation:"fadeIn 0.2s ease" }} onClick={(status==="idle"||status==="camera")?onClose:undefined}>
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", zIndex:200, animation:"fadeIn 0.2s ease" }} onClick={(e)=>{
+      // Chantier 166 — seul un appui sur le FOND ferme la feuille. Avant, un
+      // clic dans un écran posé par-dessus (« Continuer quand même » de la
+      // lecture douteuse, arrivée d'un « Ticket long ») remontait jusqu'ici
+      // et fermait tout, le ticket perdu (constat Auchan Aix, 21/11).
+      if (e.target !== e.currentTarget) return;
+      if (status==="idle"||status==="camera") onClose();
+    }}>
       {/* Chantier 160 — rattacher ce ticket aux courses en cours ? */}
       {choixCourses && (
         <ChoixRattachementCourses choix={choixCourses} magasinCourses={coursesActives?.magasin?.nom || null}
