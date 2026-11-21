@@ -134,3 +134,20 @@ describe('rangerProduit — de bout en bout, modèle simulé', () => {
     expect(r.produit).toBeNull();
   });
 });
+
+// Chantier 169 — « SH FB 5% 4X » rangé dans « Steak haché pur bœuf 15% MG » (21/11).
+import { pourcentageIncompatible as pctInc, consigneRangement as cR, consigneFiche as cF } from './logique.ts';
+describe('matière grasse (chantier 169)', () => {
+  const p = (libelleTicket: string, nom = '') => ({ nom, nomGenerique: '', marques: 'Auchan', quantite: '500 g', categories: [], libelleTicket });
+  it('refuse une fiche dont le pourcentage diffère de celui lu', () => {
+    expect(pctInc(p('*AUCHAN SH FB 5% 4X..'), 'Steak haché pur bœuf 15% MG')).toBe(true);
+    expect(pctInc(p('STEAK HACHE 15%'), 'Steak haché pur bœuf 15% MG')).toBe(false);
+    expect(pctInc(p('STEAK HACHE'), 'Steak haché pur bœuf 15% MG')).toBe(false);
+    expect(pctInc(p('LAIT 1,5%'), 'Lait 1.5% MG')).toBe(false);
+    expect(pctInc(p('SH FB 5%'), 'Steak haché')).toBe(false);
+  });
+  it('les consignes nomment la matière grasse comme sous-type', () => {
+    expect(cR(p('SH FB 5%'), [{ id: 'r', nom: 'Bœuf', categorie: 'Boucherie' }])).toMatch(/MATIÈRE GRASSE/);
+    expect(cF(p('SH FB 5%'), 'Steak haché pur bœuf 5% MG', [{ id: 'f', nom: 'Steak haché pur bœuf 15% MG' }])).toMatch(/ne rejoint PAS "Steak haché pur bœuf 15% MG"/);
+  });
+});

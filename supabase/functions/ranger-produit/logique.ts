@@ -18,7 +18,7 @@
 
 export const MODELE = "anthropic/claude-haiku-4.5";
 export const FOURNISSEUR = { order: ["anthropic"], allow_fallbacks: false };
-export const VERSION = "ranger-produit-2";
+export const VERSION = "ranger-produit-3";
 export const MAX_FICHES = 250;
 
 export type Rayon = { id: string; nom: string; categorie: string };
@@ -89,8 +89,9 @@ RÈGLES :
   - JAMAIS de marque, de gamme ni de slogan ("La Laitière", "Fleury Michon", "8.6", "Le Petit Pot de", "et ses Légumes du Soleil").
   - JAMAIS de quantité ni de conditionnement ("350 g", "x36", "4 pots", "1,5 L").
   - JAMAIS de niveau de gamme, de degré d'alcool ni d'adjectif commercial (forte, extra, premium, intense, original, tradition, sélection) : une "bière spéciale forte" est une "Bière".
-  - Garde le SOUS-TYPE qui change vraiment le produit : parfum (vanille, chocolat), recette (bœuf, canard), type (nature, aromatisé, zéro, bio seulement si c'est le cœur du produit), forme (dosettes, capsules, moulu, en grains).
-  - Exemples : "La Tajine de Boeuf et ses Légumes du Soleil" -> "Tajine de bœuf aux légumes" ; "Le Petit Pot de Crème Saveur Vanille" -> "Crème dessert vanille" ; "8.6 Extreme" (bière) -> "Bière" ; "Café n 5 doux subtile et délicat" avec le ticket "X36 DOSETTE DOUX" -> "Café en dosettes" ; "Chips Lay's saveur barbecue 120g" -> "Chips aromatisées" ; "Pepsi Zéro Sucres" -> "Cola zéro".
+  - Garde le SOUS-TYPE qui change vraiment le produit : parfum (vanille, chocolat), recette (bœuf, canard), type (nature, aromatisé, zéro, bio seulement si c'est le cœur du produit), forme (dosettes, capsules, moulu, en grains), taux de MATIÈRE GRASSE (5 % MG, 15 % MG ; lait écrémé, demi-écrémé, entier), mode d'ÉLEVAGE des œufs (plein air, cage, sol), eau PLATE ou GAZEUSE.
+  - Un pourcentage de matière grasse écrit sur l'emballage ou sur le ticket ("5% MG", "SH FB 5%") se garde TOUJOURS dans le nom, écrit "5% MG".
+  - Exemples : "La Tajine de Boeuf et ses Légumes du Soleil" -> "Tajine de bœuf aux légumes" ; "Le Petit Pot de Crème Saveur Vanille" -> "Crème dessert vanille" ; "8.6 Extreme" (bière) -> "Bière" ; "Café n 5 doux subtile et délicat" avec le ticket "X36 DOSETTE DOUX" -> "Café en dosettes" ; "Chips Lay's saveur barbecue 120g" -> "Chips aromatisées" ; "Pepsi Zéro Sucres" -> "Cola zéro" ; "Steak haché façon bouchère" avec le ticket "SH FB 5% 4X" -> "Steak haché pur bœuf 5% MG".
   - Si tu ne sais pas ce qu'est le produit : chaîne vide.
 - "marque" : la marque COMMERCIALE imprimée en gros sur l'emballage, telle qu'un client la nomme (ex. marques "Nestlé, La Laitière" -> "La Laitière" ; nom "8.6 Extreme" avec marque "Bavaria" -> "8.6"). Seulement si elle figure dans les informations ci-dessus. Sinon chaîne vide. N'invente jamais une marque.
 - "certain" : true seulement si le rayon ET le nom te paraissent sûrs.`;
@@ -111,10 +112,10 @@ ${liste}
 Réponds UNIQUEMENT en JSON : {"fiche": <numéro de la fiche à rejoindre, ou null>}
 
 RÈGLES :
-- Choisis une fiche seulement si elle désigne EXACTEMENT le même type de produit, que l'on comparerait au kilo ou au litre : même produit, même sous-type (parfum, recette, nature/aromatisé, classique/zéro, dosettes/capsules/moulu).
+- Choisis une fiche seulement si elle désigne EXACTEMENT le même type de produit, que l'on comparerait au kilo ou au litre : même produit, même sous-type (parfum, recette, nature/aromatisé, classique/zéro, dosettes/capsules/moulu, taux de matière grasse, élevage des œufs, plate/gazeuse).
 - La marque et la contenance ne comptent PAS : une bière "8.6 Extreme" rejoint la fiche "Bière".
 - Le degré d'alcool, le niveau de gamme et les adjectifs commerciaux (forte, extra, premium, intense, original) ne sont PAS des sous-types : une bière forte rejoint la fiche "Bière".
-- Un sous-type différent = une autre fiche : une crème dessert à la vanille ne rejoint PAS "Crème dessert chocolat" ; un cola zéro ne rejoint PAS "Cola".
+- Un sous-type différent = une autre fiche : une crème dessert à la vanille ne rejoint PAS "Crème dessert chocolat" ; un cola zéro ne rejoint PAS "Cola" ; un steak haché à 5 % de matière grasse ne rejoint PAS "Steak haché pur bœuf 15% MG" ; des œufs plein air ne rejoignent PAS "Œufs de cage".
 - Une fiche qui porte une marque ou un nom commercial dans son nom ne convient que si c'est précisément ce produit.
 - Dans le doute : null. Créer une fiche en trop se corrige ; ranger un produit dans la mauvaise fiche fausse les comparaisons.`;
 }
@@ -181,6 +182,17 @@ export function interpreterFiche(json: Record<string, unknown> | null, fiches: F
   return n ? { id: fiches[n - 1].id, nom: fiches[n - 1].nom } : null;
 }
 
+// Chantier 169 — garde sûre, sans modèle : un pourcentage lu sur le produit
+// (emballage, ticket) différent de celui du nom de la fiche = fiche refusée.
+// Constat du 21/11 : « SH FB 5% 4X » rangé dans « Steak haché pur bœuf 15% MG ».
+const POURCENT = /(\d+(?:[.,]\d+)?)\s*%/g;
+const pourcentages = (t: string) => [...t.matchAll(POURCENT)].map((m) => m[1].replace(",", "."));
+export function pourcentageIncompatible(p: Produit, nomFiche: string): boolean {
+  const lus = pourcentages(`${p.nom} | ${p.nomGenerique} | ${p.libelleTicket}`);
+  if (lus.length === 0) return false;
+  return pourcentages(nomFiche).some((x) => !lus.includes(x));
+}
+
 type Journal = { log: (...a: unknown[]) => void; error: (...a: unknown[]) => void };
 
 // ── Le rangement complet ───────────────────────────────────────────────────
@@ -224,10 +236,11 @@ export async function rangerProduit({
       // Une fiche du rayon porte déjà exactement ce nom : inutile de demander.
       const sans = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
       const meme = fiches.find((f) => sans(f.nom) === sans(proposition.nom_generique as string));
-      if (meme) proposition.produit = { id: meme.id, nom: meme.nom };
+      if (meme && !pourcentageIncompatible(p, meme.nom)) proposition.produit = { id: meme.id, nom: meme.nom };
       else if (fiches.length > 0) {
         try {
-          proposition.produit = interpreterFiche(await demander(consigneFiche(p, proposition.nom_generique, fiches), 60), fiches);
+          const choisie = interpreterFiche(await demander(consigneFiche(p, proposition.nom_generique, fiches), 60), fiches);
+          proposition.produit = choisie && !pourcentageIncompatible(p, choisie.nom) ? choisie : null;
         } catch (e) {
           journal.error("[ranger-produit] question fiche en échec", (e as Error)?.message);
         }
