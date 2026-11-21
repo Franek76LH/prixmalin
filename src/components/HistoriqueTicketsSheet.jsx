@@ -265,6 +265,23 @@ export default function HistoriqueTicketsSheet({ userId, onClose, onCompteChange
     }
   };
 
+  // Chantier 169 — « Pas de code-barres » directement depuis la liste du ticket
+  // (constat François, 21/11 : persil, oignon, clémentines — le bouton n'était
+  // visible qu'après avoir ouvert la caméra). Échec -> message, rien ne bouge.
+  const pasDeCode = async (ligne) => {
+    if (!ticketOuvert) return;
+    setRetour(null);
+    setEnCours('Un instant…');
+    try {
+      const r = await marquerSansCodeBarres({ ligneId: ligne.id, valeur: true, deps: depsIdentification });
+      if (!r.ok) { setRetour({ ton: 'erreur', titre: r.message }); return; }
+      await rechargerDetail(ticketOuvert.id);
+      chargerLignesAIdentifier(userId).then(l => { if (!l.error) { setComptes(compterAIdentifierParTicket(l.data)); onCompteChange?.(l.data.length); } });
+    } finally {
+      setEnCours(null);
+    }
+  };
+
   // Retour de l'écran plein : relecture du ticket et des compteurs EN BASE
   // (qui fait foi), ligne suivante à identifier mise en évidence.
   const finIdentification = async () => {
@@ -484,6 +501,10 @@ export default function HistoriqueTicketsSheet({ userId, onClose, onCompteChange
                   <button onClick={() => scanner(l)} disabled={!!enCours}
                     style={{ width: '100%', padding: '13px', border: 'none', borderRadius: 10, background: enCours ? '#ccc' : BLEU, color: '#fff', fontFamily: F, fontWeight: 900, fontSize: 15, cursor: 'pointer' }}>
                     📷 Scanner le code-barres
+                  </button>
+                  <button onClick={() => pasDeCode(l)} disabled={!!enCours}
+                    style={{ width: '100%', marginTop: 8, padding: '11px', border: `2px solid ${enCours ? '#ccc' : BLEU}`, borderRadius: 10, background: '#fff', color: enCours ? '#999' : BLEU, fontFamily: F, fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
+                    🥕 Pas de code-barres (fruits, légumes, vrac…)
                   </button>
                 </div>
                 {blocAnnulable(l)}
