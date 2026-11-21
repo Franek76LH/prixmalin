@@ -41,7 +41,10 @@ function Ligne({ gauche, sous = null, droite = null, avant = null }) {
   );
 }
 
-export default function EcranFinCourses({ session, items = [], onTerminer, onPlusTard, onScannerTicket = null }) {
+// `demo` : courses fictives (adresse « ?demo=bilan ») — « Terminer » n'écrit
+// rien et montre ce que l'app AURAIT fait dans Ma liste.
+export default function EcranFinCourses({ session, items = [], onTerminer, onPlusTard, onScannerTicket = null, demo = false }) {
+  const [resultatDemo, setResultatDemo] = useState(null);
   const [decisions, setDecisions] = useState({});
   const [garder, setGarder] = useState({});
   const [voirVerif, setVoirVerif] = useState(false);
@@ -61,6 +64,19 @@ export default function EcranFinCourses({ session, items = [], onTerminer, onPlu
     if (envoi) return;
     setEnvoi(true);
     const plan = planClotureListe({ articles: session?.articles, bilan, quantitesListe, garder });
+    if (demo) {
+      const nomDe = (id) => (session?.articles || []).find(a => String(a.cle) === String(id))?.nom_affiche || id;
+      const touches = new Set([...plan.supprimer, ...plan.majQuantite.map(m => m.id)].map(String));
+      setResultatDemo([
+        ...plan.majQuantite.map(m => `${nomDe(m.id)} : reste dans Ma liste, quantité ${quantitesListe.get(String(m.id))} → ${m.quantite}`),
+        ...bilan.reste.filter(r => garder[r.cle] !== false && !touches.has(String(r.cle))).map(r => `${r.nom} : reste dans Ma liste (× ${r.quantite})`),
+        ...plan.supprimer.map(id => `${nomDe(id)} : retiré de Ma liste`),
+        ...(items || []).filter(i => !(session?.articles || []).some(a => String(a.cle) === String(i.id))).map(i => `${i.nom || 'Autre article'} : pas touché, il ne faisait pas partie de ces courses`),
+        ...bilan.enPlus.map(e => `${e.nom} : acheté en plus, Ma liste n'est pas touchée`),
+      ]);
+      setEnvoi(false);
+      return;
+    }
     try { await onTerminer?.({ bilan, plan }); } finally { setEnvoi(false); }
   };
 
@@ -71,6 +87,18 @@ export default function EcranFinCourses({ session, items = [], onTerminer, onPlu
           <div style={{ flex: 1, fontFamily: T.police, fontWeight: 900, fontSize: 22, color: T.texte }}>Terminer mes courses</div>
           <button onClick={onPlusTard} aria-label="Fermer" style={{ border: 'none', background: '#ECEEF1', borderRadius: 99, width: 34, height: 34, fontSize: 16, cursor: 'pointer', color: T.texteDoux }}>✕</button>
         </div>
+        {demo && (
+          <div style={{ background: T.jaunePale, borderRadius: 12, padding: '10px 12px', marginBottom: 12, fontFamily: T.police, fontSize: 13, fontWeight: 800, color: T.texte }}>
+            🧪 Démo avec des courses fictives : rien n'est enregistré, ta vraie liste n'est pas touchée.
+          </div>
+        )}
+        {resultatDemo && (
+          <div style={{ background: T.vertPale, borderRadius: 14, padding: '12px 14px', marginBottom: 12 }}>
+            <div style={{ fontFamily: T.police, fontWeight: 900, fontSize: 14.5, color: T.vert, marginBottom: 6 }}>Voici ce que l'app aurait fait :</div>
+            {resultatDemo.map((t, i) => <div key={i} style={{ fontFamily: T.police, fontSize: 13, color: T.texte, padding: '3px 0' }}>• {t}</div>)}
+            <div style={{ fontFamily: T.police, fontSize: 12.5, color: T.texteDoux, marginTop: 6 }}>Change les cases ou « Pas pris », puis retouche « Terminer » pour comparer.</div>
+          </div>
+        )}
         <div style={{ fontFamily: T.police, fontSize: 13.5, color: T.texteDoux, marginBottom: 14 }}>
           {magasin ? `${magasin} · ` : ''}
           {bilan.avecTicket

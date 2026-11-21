@@ -62,6 +62,7 @@ import EcranMoi from "./components/v2/EcranMoi";
 import EnTete from "./components/v2/EnTete";
 import BasculeCourses from "./components/v2/BasculeCourses";
 import EcranFinCourses from "./components/v2/EcranFinCourses";
+import { demoDemandee, SESSION_DEMO_BILAN, LISTE_DEMO_BILAN } from "./lib/demoBilanCourses";
 import { lireRetourLien, verifierNouveauMotDePasse, emailPlausible, messageErreurMotDePasse, traduireErreurConnexion } from "./lib/motDePasseCore";
 import { ecranRetour, noterOrigine, ecranCourses } from "./lib/navigationCore";
 import ListeCourses from "./components/v2/ListeCourses";
@@ -9537,6 +9538,9 @@ class TabErrorBoundary extends Component {
 export default function App() {
   const [session,   setSession]   = useState(null);
   const [authReady, setAuthReady] = useState(false);
+  // Chantier 163 — démo du bilan (« ?demo=bilan ») : courses fictives en
+  // mémoire, aucune lecture ni écriture en base, connexion non nécessaire.
+  const [demoBilan, setDemoBilan] = useState(() => typeof window !== 'undefined' && demoDemandee(window.location.search));
   // Chantier 161 — arrivée par le lien « mot de passe oublié » : écran du nouveau mot de passe.
   const [recuperationMdp, setRecuperationMdp] = useState(RETOUR_LIEN_MDP.recuperation);
   // #56.3b — statut admin, dérivé de la session (jamais true par défaut ni
@@ -11480,6 +11484,13 @@ export default function App() {
     `}</style>
   );
 
+  if (demoBilan) return (
+    <>{globalStyle}
+      <EcranFinCourses demo session={SESSION_DEMO_BILAN} items={LISTE_DEMO_BILAN}
+        onPlusTard={() => { setDemoBilan(false); try { window.history.replaceState(null, '', window.location.pathname); } catch { /* sans effet */ } }}
+        onTerminer={() => {}} />
+    </>
+  );
   if (!authReady) return (
     <>{globalStyle}
       <div style={{ minHeight:"100vh", background:C.bg, display:"flex", alignItems:"center", justifyContent:"center" }}>

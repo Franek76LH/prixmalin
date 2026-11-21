@@ -136,3 +136,24 @@ describe('chantier 163 — ce que la clôture écrit dans Ma liste', () => {
     expect(planClotureListe({ articles: [art('1', 'Steak', { produit: 'steak' })], bilan: b, quantitesListe: { 1: 1 } })).toEqual({ majQuantite: [], supprimer: [] });
   });
 });
+
+describe('chantier 163 — démo « ?demo=bilan »', () => {
+  it('ouverte seulement par ?demo=bilan', async () => {
+    const { demoDemandee } = await import('./demoBilanCourses');
+    expect(demoDemandee('?demo=bilan')).toBe(true);
+    expect(demoDemandee('?compte=x&demo=bilan')).toBe(true);
+    expect(demoDemandee('')).toBe(false);
+    expect(demoDemandee('?demo=autre')).toBe(false);
+  });
+  it('le scénario de démo donne les rubriques attendues', async () => {
+    const { SESSION_DEMO_BILAN, LISTE_DEMO_BILAN } = await import('./demoBilanCourses');
+    const b = construireBilanFin({ articles: SESSION_DEMO_BILAN.articles, lignesTicket: SESSION_DEMO_BILAN.ticket_lignes,
+      quantitesListe: Object.fromEntries(LISTE_DEMO_BILAN.map(i => [i.id, i.qty])) });
+    expect(b.reste.map(r => [r.cle, r.quantite, r.raison])).toEqual([['steak', 1, 'introuvable'], ['pates', 2, 'partiel'], ['cafe', 1, 'pas_pris']]);
+    expect(b.enPlus.map(e => e.nom)).toEqual(['POULET FERMIER', 'CHOCOLAT NOIR 70%']);
+    expect(b.retrouves.find(r => r.cle === 'lait').autreFormat).toBe(true);
+    expect(b.retrouves.find(r => r.cle === 'yaourt')).toMatchObject({ achete: 2, montant: 2.9 });
+    expect(b.aVerifier.map(v => v.cle)).toEqual(['beurre']);
+    expect(b.nonReconnues).toHaveLength(1);
+  });
+});
