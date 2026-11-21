@@ -61,7 +61,7 @@ import BarreNavigation from "./components/v2/BarreNavigation";
 import EcranMoi from "./components/v2/EcranMoi";
 import EnTete from "./components/v2/EnTete";
 import BasculeCourses from "./components/v2/BasculeCourses";
-import { lireRetourLien, verifierNouveauMotDePasse, emailPlausible, messageErreurMotDePasse } from "./lib/motDePasseCore";
+import { lireRetourLien, verifierNouveauMotDePasse, emailPlausible, messageErreurMotDePasse, traduireErreurConnexion } from "./lib/motDePasseCore";
 import { ecranRetour, noterOrigine, ecranCourses } from "./lib/navigationCore";
 import ListeCourses from "./components/v2/ListeCourses";
 // Chantier 126 — produits de la liste en texte libre : fiches proposées.
@@ -578,6 +578,9 @@ function AuthScreen() {
   const [success,  setSuccess]  = useState('');
   const [cguAccepted, setCguAccepted] = useState(false);
   const [lienPerime, setLienPerime] = useState(RETOUR_LIEN_MDP.lienInvalide);
+  // Chantier 162 — sous certaines erreurs (compte déjà existant, mot de passe
+  // refusé), un bouton mène directement à « Mot de passe oublié ».
+  const [proposerOubli, setProposerOubli] = useState(false);
 
   // Chantier 161 — envoi du lien. Message identique que le compte existe ou
   // non : l'app ne révèle jamais quels e-mails sont inscrits.
@@ -593,12 +596,12 @@ function AuthScreen() {
     } finally { setLoading(false); }
   };
 
-  const switchMode = (m) => { setMode(m); setError(''); setSuccess(''); setConfirm(''); setShowPwd(false); setShowConf(false); setCguAccepted(false); };
+  const switchMode = (m) => { setMode(m); setError(''); setSuccess(''); setConfirm(''); setShowPwd(false); setShowConf(false); setCguAccepted(false); setProposerOubli(false); };
 
   const handle = async () => {
     if (!email.trim() || !password.trim()) { setError("Remplis tous les champs"); return; }
     if (mode === 'register' && password !== confirm) { setError("Les mots de passe ne correspondent pas"); return; }
-    setLoading(true); setError(''); setSuccess('');
+    setLoading(true); setError(''); setSuccess(''); setProposerOubli(false);
     try {
       const { error } = mode === 'login'
         ? await supabase.auth.signInWithPassword({ email: email.trim(), password })
@@ -606,7 +609,9 @@ function AuthScreen() {
       if (error) throw error;
       if (mode === 'register') { switchMode('register_success'); }
     } catch(e) {
-      setError(e.message);
+      const t = traduireErreurConnexion(e);
+      setError(t.message);
+      setProposerOubli(t.proposerOubli);
     } finally {
       setLoading(false);
     }
@@ -725,6 +730,11 @@ function AuthScreen() {
         </>)}
 
         {error   && <div style={{ background:"#FEE", borderRadius:8, padding:"10px 12px", marginBottom:12, fontFamily:F, fontSize:13, color:C.red,   fontWeight:700 }}>⚠️ {error}</div>}
+        {error && proposerOubli && mode !== 'oubli' && (
+          <button onClick={()=>switchMode('oubli')} style={{ width:"100%", padding:"12px", marginBottom:12, border:`2px solid ${C.red}`, borderRadius:12, background:C.white, fontFamily:F, fontWeight:900, fontSize:14, color:C.red, cursor:"pointer" }}>
+            Mot de passe oublié ?
+          </button>
+        )}
         {success && <div style={{ background:"#F0FFF5", borderRadius:8, padding:"10px 12px", marginBottom:12, fontFamily:F, fontSize:13, color:C.green, fontWeight:700 }}>✓ {success}</div>}
 
         <button onClick={mode === 'oubli' ? envoyerLien : handle} disabled={loading}
@@ -732,7 +742,7 @@ function AuthScreen() {
           {loading ? "…" : mode === 'login' ? 'Se connecter' : mode === 'oubli' ? 'Recevoir le lien' : 'Créer mon compte'}
         </button>
 
-        {mode === 'login' && (
+        {mode === 'login' && !(error && proposerOubli) && (
           <button onClick={()=>switchMode('oubli')}
             style={{ width:"100%", padding:"6px 10px 12px", border:"none", background:"none", fontFamily:F, fontSize:13, color:C.gray, fontWeight:700, cursor:"pointer" }}>
             Mot de passe oublié ?

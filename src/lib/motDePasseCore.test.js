@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { lireRetourLien, verifierNouveauMotDePasse, emailPlausible, messageErreurMotDePasse } from './motDePasseCore';
+import { lireRetourLien, verifierNouveauMotDePasse, emailPlausible, messageErreurMotDePasse, traduireErreurConnexion } from './motDePasseCore';
 
 describe('chantier 161 — retour du lien « mot de passe oublié »', () => {
   it('lien valable : type=recovery', () => {
@@ -34,5 +34,24 @@ describe('chantier 161 — nouveau mot de passe', () => {
     expect(messageErreurMotDePasse({ message: 'New password should be different from the old password.' })).toMatch(/différent/);
     expect(messageErreurMotDePasse({ message: 'Auth session missing!' })).toMatch(/plus valable/);
     expect(messageErreurMotDePasse(null)).toBeNull();
+  });
+});
+
+describe('chantier 162 — erreurs de connexion en français', () => {
+  it('compte déjà existant → message + bouton « mot de passe oublié »', () => {
+    const t = traduireErreurConnexion({ message: 'User already registered' });
+    expect(t.message).toMatch(/déjà un compte/);
+    expect(t.proposerOubli).toBe(true);
+  });
+  it('identifiants refusés → message + bouton', () => {
+    expect(traduireErreurConnexion({ message: 'Invalid login credentials' })).toEqual({ message: 'E-mail ou mot de passe incorrect.', proposerOubli: true });
+  });
+  it('autres cas, sans bouton', () => {
+    expect(traduireErreurConnexion({ message: 'Email not confirmed' }).message).toMatch(/pas encore confirmé/);
+    expect(traduireErreurConnexion({ message: 'Password should be at least 6 characters.' }).message).toMatch(/6 caractères/);
+    expect(traduireErreurConnexion({ message: 'Unable to validate email address: invalid format' }).message).toMatch(/pas l'air valide/);
+    expect(traduireErreurConnexion({ message: 'Failed to fetch' }).message).toMatch(/internet/);
+    expect(traduireErreurConnexion({ message: 'quelque chose d\'inconnu' })).toEqual({ message: 'Ça n\'a pas marché. Réessaie dans un instant.', proposerOubli: false });
+    expect(traduireErreurConnexion(null).message).toBeNull();
   });
 });

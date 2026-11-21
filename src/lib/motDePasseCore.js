@@ -41,3 +41,26 @@ export function messageErreurMotDePasse(erreur) {
     return 'Ce lien n\'est plus valable. Redemande un lien depuis « Mot de passe oublié ? ».';
   return 'Ça n\'a pas marché. Réessaie dans un instant.';
 }
+
+// Chantier 162 — erreurs de connexion et d'inscription en français simple.
+// `proposerOubli` : afficher un bouton « Mot de passe oublié ? » sous le
+// message (compte déjà existant, ou e-mail / mot de passe refusés).
+export function traduireErreurConnexion(erreur) {
+  const m = String(erreur?.message || erreur || '').toLowerCase();
+  if (!m) return { message: null, proposerOubli: false };
+  if (m.includes('already registered') || m.includes('already been registered') || m.includes('already exists'))
+    return { message: 'Tu as déjà un compte avec cet e-mail. Connecte-toi, ou choisis un nouveau mot de passe si tu l\'as oublié.', proposerOubli: true };
+  if (m.includes('invalid login credentials') || m.includes('invalid credentials'))
+    return { message: 'E-mail ou mot de passe incorrect.', proposerOubli: true };
+  if (m.includes('email not confirmed'))
+    return { message: 'Ton e-mail n\'est pas encore confirmé : clique sur le lien reçu à l\'inscription (pense à regarder dans les indésirables).', proposerOubli: false };
+  if (m.includes('password should be at least') || m.includes('weak'))
+    return { message: `Mot de passe trop court : au moins ${LONGUEUR_MIN_MOT_DE_PASSE} caractères.`, proposerOubli: false };
+  if (m.includes('unable to validate email') || m.includes('invalid format') || m.includes('email address') && m.includes('invalid'))
+    return { message: 'Cet e-mail n\'a pas l\'air valide. Vérifie-le.', proposerOubli: false };
+  if (m.includes('rate limit') || m.includes('security purposes') || m.includes('too many'))
+    return { message: 'Trop de tentatives d\'un coup. Attends quelques minutes puis réessaie.', proposerOubli: false };
+  if (m.includes('fetch') || m.includes('network'))
+    return { message: 'Pas de connexion internet ? Réessaie dans un instant.', proposerOubli: false };
+  return { message: 'Ça n\'a pas marché. Réessaie dans un instant.', proposerOubli: false };
+}
