@@ -63,6 +63,7 @@ import EnTete from "./components/v2/EnTete";
 import BasculeCourses from "./components/v2/BasculeCourses";
 import EcranFinCourses from "./components/v2/EcranFinCourses";
 import { demoDemandee, SESSION_DEMO_BILAN, LISTE_DEMO_BILAN } from "./lib/demoBilanCourses";
+import { chercherProduitParCodeBarres } from "./lib/rechercheCodeBarres";
 import { lireRetourLien, verifierNouveauMotDePasse, emailPlausible, messageErreurMotDePasse, traduireErreurConnexion } from "./lib/motDePasseCore";
 import { ecranRetour, noterOrigine, ecranCourses } from "./lib/navigationCore";
 import ListeCourses from "./components/v2/ListeCourses";
@@ -3609,7 +3610,7 @@ function PriceEntrySheet({ onClose, onSave, existingPrice, prefill = null, magas
 
 
 // ── CATALOG TAB ───────────────────────────────────────────────────────────────
-function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, items }) {
+function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, items, varianteInitiale = null }) {
   const [variantes,        setVariantes]        = useState([]);
   const [varianteId,       setVarianteId]       = useState(null);
   const [variantesLoading, setVariantesLoading] = useState(true);
@@ -3650,6 +3651,17 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
       const aUneMdd = data.some(v => v.marques?.est_mdd === true);
       if (!aUneNationale && aUneMdd) { setSegmentMarque('mdd'); setBasculeAutoMdd(true); }
       else { setSegmentMarque('nationale'); setBasculeAutoMdd(false); }
+      // Chantier 164 — ouverte depuis un code-barres : le format scanné est
+      // présélectionné (segment, marque, format), l'utilisateur peut changer.
+      const scannee = varianteInitiale ? data.find(v => v.id === varianteInitiale) : null;
+      if (scannee) {
+        const mdd = scannee.marques?.est_mdd === true;
+        setSegmentMarque(mdd ? 'mdd' : 'nationale');
+        setBasculeAutoMdd(false);
+        if (!mdd && scannee.marque_id) setMarqueSelectionnee(scannee.marque_id);
+        const f = formatFormatStructure(scannee);
+        if (f) setFormatSelectionne(f);
+      }
     } catch (e) {
       console.error("Erreur chargement variantes :", e);
       setVariantes([]);
@@ -9680,6 +9692,20 @@ export default function App() {
   const [bilanCourses, setBilanCourses] = useState(null);
   // Chantier 163 — écran unique de fin de courses (bilan + choix).
   const [finCourses, setFinCourses] = useState(false);
+  // Chantier 164 — « Scanner un code-barres » depuis l'accueil : null |
+  // { etape: 'camera' | 'recherche' | 'inconnu' | 'erreur' | 'cameraIndispo', code?, message? }.
+  const [scanProduit, setScanProduit] = useState(null);
+  const [ficheScannee, setFicheScannee] = useState(null); // { produit, varianteId }
+  const codeLuScanProduit = async (code) => {
+    setScanProduit({ etape: 'recherche', code });
+    const r = await chercherProduitParCodeBarres(supabase, code);
+    if (r.statut === 'trouve') {
+      setScanProduit(null);
+      setFicheScannee({ produit: { id: r.variante.produit_id, nom_reference: r.variante.produits?.nom_reference || r.variante.libelle || 'Produit' }, varianteId: r.variante.id });
+    } else {
+      setScanProduit({ etape: r.statut === 'erreur' ? 'erreur' : 'inconnu', code: r.code });
+    }
+  };
   // Chantier 90 Lot 4 — « Je passe en caisse » : caisseCourses affiche la
   // confirmation du magasin ; scanCaisse mémorise le scan en attente de
   // rattachement ({ sessionId, magasin }) — magasin null = « changer de
@@ -11549,7 +11575,8 @@ export default function App() {
           <TabErrorBoundary key={tab}>
           {loaded && tab==="home" && gardeOuverte && <PageDeGarde libelleBouton="C'est parti" onCommencer={()=>setGardeOuverte(false)} />}
           {loaded && tab==="home" && !gardeOuverte && <AccueilV2 pseudo={pseudo} items={items} archives={archives} setTab={setTab} onDicter={accesAvance ? ()=>setTab("micro") : null}
-            onRechercher={()=>ouvrirCatalogue("recherche")} onRayons={()=>ouvrirCatalogue("rayons")} margeDroite={isAdmin} communaute={statsCommunaute} evolutionPrix={evolutionPrix} onScanner={handleFlash} onReprendreScan={handleResumeScan}
+            onRechercher={()=>ouvrirCatalogue("recherche")} onRayons={()=>ouvrirCatalogue("rayons")} margeDroite={isAdmin}
+            onScannerCodeBarres={()=>setScanProduit({ etape: 'camera' })} communaute={statsCommunaute} evolutionPrix={evolutionPrix} onScanner={handleFlash} onReprendreScan={handleResumeScan}
             onEcarterTicket={()=>{ ecarterTicket(dernierTicketAScanner?.ticket?.id); setDernierTicketAScanner(null); }}
             ticketAScanner={dernierTicketAScanner} onOuvrirTicket={scanApresTicketAccessible && dernierTicketAScanner ? ()=>ouvrirHistoriqueTickets(dernierTicketAScanner.ticket) : null}
             sessionCourses={sessionCoursesAccessible ? sessionCoursesActive : null} onReprendreCourses={()=>setTab("courses")} onAbandonnerCourses={abandonnerSessionCourses}
@@ -11799,6 +11826,42 @@ export default function App() {
         )}
         {/* Lot 6 (shadow estFrancois) — étape 1 : il reste des articles à
             prendre, jamais de clôture silencieuse. */}
+        {/* Chantier 164 — « Scanner un code-barres » : scanner, recherche en
+            lecture seule, puis la fiche du produit sur le bon format. */}
+        {scanProduit?.etape === 'camera' && (
+          <BarcodeScannerSheet entete="Scanner un code-barres"
+            onDetected={(code)=>codeLuScanProduit(code)}
+            onClose={()=>setScanProduit(null)}
+            onErreurCamera={(message)=>setScanProduit({ etape: 'cameraIndispo', message })} />
+        )}
+        {scanProduit && scanProduit.etape !== 'camera' && (
+          <div onClick={()=>setScanProduit(null)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:450, padding:24 }}>
+            <div role="dialog" aria-label="Résultat du scan" onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:18, padding:20, maxWidth:340, width:"100%", boxSizing:"border-box", fontFamily:"'Nunito',sans-serif" }}>
+              {scanProduit.etape === 'recherche' ? (
+                <div style={{ textAlign:"center", padding:"10px 0", fontWeight:800, fontSize:15, color:"#16181D" }}>🔎 Recherche du produit…</div>
+              ) : (<>
+                <div style={{ fontWeight:900, fontSize:16, color:"#16181D", marginBottom:6 }}>
+                  {scanProduit.etape === 'inconnu' ? "Produit pas encore dans PrixMalin" : scanProduit.etape === 'erreur' ? "Recherche impossible" : "Caméra indisponible"}
+                </div>
+                <div style={{ fontSize:13.5, color:"#5B616E", marginBottom:16 }}>
+                  {scanProduit.etape === 'inconnu' ? `Le code ${scanProduit.code} est bien lu, mais ce produit n'est pas encore dans le catalogue. Cherche-le par son nom.`
+                    : scanProduit.etape === 'erreur' ? "La connexion a échoué. Réessaie, ou cherche le produit par son nom."
+                    : `${scanProduit.message || "La caméra n'a pas pu s'ouvrir."} Tu peux chercher le produit par son nom.`}
+                </div>
+                <button onClick={()=>{ setScanProduit(null); ouvrirCatalogue("recherche"); }} style={{ width:"100%", padding:"13px", border:"none", borderRadius:12, background:"#CC0000", color:"#fff", fontWeight:900, fontSize:14.5, cursor:"pointer", marginBottom:8 }}>⌨️ Chercher par le nom</button>
+                {scanProduit.etape !== 'cameraIndispo' && (
+                  <button onClick={()=>setScanProduit({ etape: 'camera' })} style={{ width:"100%", padding:"13px", border:"1.5px solid #E2E5EA", borderRadius:12, background:"#fff", color:"#16181D", fontWeight:900, fontSize:14.5, cursor:"pointer", marginBottom:8 }}>Scanner un autre produit</button>
+                )}
+                <button onClick={()=>setScanProduit(null)} style={{ width:"100%", padding:"8px", border:"none", background:"none", color:"#8A909C", fontWeight:800, fontSize:13, cursor:"pointer" }}>Fermer</button>
+              </>)}
+            </div>
+          </div>
+        )}
+        {ficheScannee && (
+          <ProductPickerSheet produit={ficheScannee.produit} varianteInitiale={ficheScannee.varianteId}
+            categoryPresentation={getCategoryPresentation({})} items={items} onAdd={addItem}
+            onClose={()=>setFicheScannee(null)} />
+        )}
         {/* Chantier 163 — écran unique de fin de courses. */}
         {finCourses && sessionCoursesActive && (
           <EcranFinCourses session={sessionCoursesActive} items={items}

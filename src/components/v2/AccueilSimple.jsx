@@ -92,6 +92,7 @@ export default function AccueilSimple({
   contributionVisible = false, onContribuer,
   communaute = null, evolutionPrix = null, onDicter = null,
   onRechercher = null, onRayons = null, onEconomies = null, margeDroite = false,
+  onScannerCodeBarres = null,
 }) {
   const rechercher = onRechercher || (() => setTab('catalog'));
   const rayons = onRayons || (() => setTab('catalog'));
@@ -136,13 +137,28 @@ export default function AccueilSimple({
             </div>
           </div>
         )}
-        <button onClick={rechercher} aria-label="Rechercher un produit" style={{
-          width: '100%', border: 'none', background: '#fff', borderRadius: 14, padding: '13px 14px', cursor: 'pointer', boxSizing: 'border-box',
-          display: 'flex', alignItems: 'center', gap: 10, color: T.texteLeger, boxShadow: '0 4px 14px rgba(0,0,0,0.12)',
-        }}>
-          <IconeLoupe width={20} height={20} style={{ flexShrink: 0 }} />
-          <span style={{ fontFamily: T.police, fontWeight: 700, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Rechercher un produit…</span>
-        </button>
+        {/* Chantier 164 — à droite de la recherche : retrouver un produit
+            en scannant son code-barres. */}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={rechercher} aria-label="Rechercher un produit" style={{
+            flex: 1, minWidth: 0, border: 'none', background: '#fff', borderRadius: 14, padding: '13px 14px', cursor: 'pointer', boxSizing: 'border-box',
+            display: 'flex', alignItems: 'center', gap: 10, color: T.texteLeger, boxShadow: '0 4px 14px rgba(0,0,0,0.12)',
+          }}>
+            <IconeLoupe width={20} height={20} style={{ flexShrink: 0 }} />
+            <span style={{ fontFamily: T.police, fontWeight: 700, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Rechercher un produit…</span>
+          </button>
+          {onScannerCodeBarres && (
+            <button onClick={onScannerCodeBarres} aria-label="Scanner un code-barres" style={{
+              flexShrink: 0, width: 50, border: 'none', background: '#fff', borderRadius: 14, cursor: 'pointer', color: T.texte,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 14px rgba(0,0,0,0.12)',
+            }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" />
+                <path d="M7 8v8M10 8v8M13 8v8M16 8v8" />
+              </svg>
+            </button>
+          )}
+        </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
           <button onClick={rayons} style={{
             flex: 1, minWidth: 0, border: 'none', background: T.jaune, color: T.texte, borderRadius: 14, padding: '12px 10px', cursor: 'pointer',
