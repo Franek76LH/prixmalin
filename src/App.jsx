@@ -83,6 +83,7 @@ import EcranEvolutionPrix from "./components/v2/EcranEvolutionPrix";
 import { alertesBaisse, avecExemple, exempleDemande } from "./lib/evolutionPrixCore";
 import ResultatComparaison from "./components/v2/ResultatComparaison";
 import ChoixMagasinComparaison from "./components/v2/ChoixMagasinComparaison";
+import ChoixMagasinAnnuaire from "./components/v2/ChoixMagasinAnnuaire";
 import PastilleNutriScore from "./components/v2/PastilleNutriScore";
 import CarteNutriCaddie from "./components/v2/CarteNutriCaddie";
 import SuggestionsCatalogue from "./components/v2/SuggestionsCatalogue";
@@ -6373,6 +6374,8 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
   // proposé par défaut) et dépliage de « Voir les autres magasins ».
   const [magasinChoisiId, setMagasinChoisiId] = useState(null);
   const [autresMagasinsOuverts, setAutresMagasinsOuverts] = useState(false);
+  // Chantier 187 — feuille « Dans quel magasin vas-tu ? » (annuaire).
+  const [choixAnnuaire, setChoixAnnuaire] = useState(false);
 
   useEffect(() => {
     if (!utiliserCore) { setCoreResultat(null); setCoreErreur(null); return; }
@@ -6839,6 +6842,31 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
     // honnête : produits communs seulement, 0 si non comparable.
     onValidate(bestAffiche, verdict.economie, extrasCourses);
   };
+  // Chantier 187 — courses dans un magasin de l'annuaire, sans prix connu :
+  // la session démarre avec tous les articles « prix inconnu » ; le magasin
+  // sera reconnu (ou créé en un appui) au scan du ticket.
+  const validerMagasinAnnuaire = (l) => {
+    setChoixAnnuaire(false);
+    const nom = l.nom || l.enseigne_nom || 'Magasin';
+    onValidate({ id: `annuaire:${l.osm_id}`, name: nom, total: null }, 0, {
+      magasinId: null,
+      nomEnseigne: l.enseigne_nom ?? null,
+      adresse: { adresse: l.adresse ?? null, code_postal: l.code_postal ?? null, ville: l.ville ?? null },
+      lignesPrix: [],
+    });
+  };
+  // Chantier 187 — en haut de l'écran quand on n'a rien de solide à
+  // conseiller (pas de prix, ou trop peu), sinon discret sous le conseil.
+  const boutonAutreMagasinEnHaut = rankedAffiche.length === 0 || classementMagasins.etat === CLASSEMENT_INSUFFISANT;
+  const boutonAutreMagasin = (sessionCoursesAccessible && userPos) ? (
+    <button onClick={()=>setChoixAnnuaire(true)} style={{
+      width:"100%", marginBottom:14, padding: boutonAutreMagasinEnHaut ? "15px" : "12px", minHeight:48, borderRadius:14, cursor:"pointer",
+      border: boutonAutreMagasinEnHaut ? "none" : `1.5px solid ${C.grayLight}`, background: boutonAutreMagasinEnHaut ? "#CC0000" : "#fff",
+      color: boutonAutreMagasinEnHaut ? "#fff" : C.text, fontFamily:F, fontWeight:900, fontSize: boutonAutreMagasinEnHaut ? 15 : 14,
+    }}>
+      📍 Je fais mes courses dans un autre magasin
+    </button>
+  ) : null;
 
   // Chantier 83 — magasins de chaque catégorie réellement présents dans la zone
   // (rayon), indépendamment des produits : distingue « aucun magasin de cette
@@ -7025,6 +7053,8 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
         </div>
       )}
 
+      {boutonAutreMagasinEnHaut && boutonAutreMagasin}
+
       {/* Chantier 177 — les autres magasins comparés, repliés par défaut : le
           conseil reste un seul magasin en grand. */}
       {rankedAffiche.length>0 && nbAutresMagasins>0 && (
@@ -7054,6 +7084,14 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
           dernierReleve={lastVerified ? `Dernier prix relevé ${lastVerified.dateLabel} par ${lastVerified.pseudo}` : null}
           lienItineraire={mapsUrlAffiche} onValider={validerMagasinGagnant}
         />
+      )}
+
+      {/* Chantier 187 — toujours possible : faire ses courses ailleurs, même
+          dans un magasin sans aucun prix. Bouton principal quand on n'a rien
+          de solide à conseiller, discret sinon. */}
+      {!boutonAutreMagasinEnHaut && boutonAutreMagasin}
+      {choixAnnuaire && userPos && (
+        <ChoixMagasinAnnuaire position={{ lat: userPos.lat, lon: userPos.lng }} onChoisir={validerMagasinAnnuaire} onFermer={()=>setChoixAnnuaire(false)} />
       )}
         </>
       )}

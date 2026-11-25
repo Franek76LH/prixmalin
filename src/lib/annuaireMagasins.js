@@ -161,3 +161,20 @@ export function positionDuTelephone(delaiMs = 10000) {
     } catch { resolve(null); }
   });
 }
+
+// Chantier 187 — « Je fais mes courses dans un autre magasin » : les magasins
+// de l'annuaire les plus proches d'une position (toutes enseignes), triés par
+// distance. `position` : { lat, lon }. Chaque ligne reçoit `distance` (m).
+export function plusProches(lignes, position, max = 10) {
+  return (Array.isArray(lignes) ? lignes : [])
+    .filter(l => l && l.latitude != null && l.longitude != null)
+    .map(l => ({ ...l, distance: distanceMetres(position, { lat: Number(l.latitude), lon: Number(l.longitude) }) }))
+    .filter(l => l.distance != null)
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, max);
+}
+
+export function texteDistance(m) {
+  if (m == null) return '';
+  return m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1).replace('.', ',')} km`;
+}

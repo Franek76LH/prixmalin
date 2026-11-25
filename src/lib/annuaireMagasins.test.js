@@ -59,3 +59,18 @@ describe('171 — affichage et tri', () => {
     expect(re.test('Salon-de-Provence')).toBe(false);
   });
 });
+
+describe('Chantier 187 — magasins les plus proches', () => {
+  it('trie par distance et garde les plus proches', async () => {
+    const { plusProches, texteDistance } = await import('./annuaireMagasins');
+    const pos = { lat: 43.256, lon: 5.39 };
+    const r = plusProches([
+      { osm_id: 1, latitude: 43.27, longitude: 5.39 },
+      { osm_id: 2, latitude: 43.257, longitude: 5.39 },
+      { osm_id: 3, latitude: null, longitude: null },
+    ], pos, 5);
+    expect(r.map(l => l.osm_id)).toEqual([2, 1]);
+    expect(texteDistance(r[0].distance)).toBe('110 m');
+    expect(texteDistance(1560)).toBe('1,6 km');
+  });
+});
