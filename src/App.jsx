@@ -8,6 +8,7 @@ import { supabase } from "./lib/supabase";
 // carte « Nouveau magasin détecté » à l'étape magasin du scan.
 import { storeIdFromName as storeIdFromNameEnseignes, chargerEnseignes, enseignesEnCache, trouverEnseigneDansNom } from "./lib/enseignesMagasin";
 import { doitProposerNouveauMagasin, magasinReconnuPourTicket } from "./lib/nouveauMagasinTicket";
+import { motsQuiClochent, phraseMotsQuiClochent } from "./lib/motsQuiClochent";
 import { enseigneAnnuaire, lieuDuTicket, chercherDansLaVille, chercherAutour, classerCandidats, libelleAnnuaire, adressePourCreation, positionDuTelephone } from "./lib/annuaireMagasins";
 import { mapperLigneListeCourses, chargerVariantes, getCategoryPresentation, formatFormatStructure, calculerPrixUnitaire, prixEstFiable, offresPrioritaires, MENTION_PRIX_A_VERIFIER } from "./lib/catalogueCore";
 import { calculerPrixReferenceParUnite } from "./lib/unitesCore";
@@ -2198,6 +2199,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   // informatif : fire-and-forget, jamais bloquant, échec = comportement
   // d'avant (aucun badge vert).
   const [reconnaissanceParId, setReconnaissanceParId] = useState({});
+  const [nomsFichesProposees, setNomsFichesProposees] = useState({});
   const signatureReconnaissanceRef = useRef(null);
 
   const chargerReconnaissance = async (magasinCoreId, produits) => {
@@ -2218,8 +2220,15 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
       const map = {};
       // Chantier 118 — on garde la METHODE (et plus seulement le booléen
       // reconnu) : seule 'memoire_exacte' donne le badge vert.
-      for (const r of data) { if (r && r.i != null) map[r.i] = { methode: r.methode ?? null }; }
+      for (const r of data) { if (r && r.i != null) map[r.i] = { methode: r.methode ?? null, produit_id: r.produit_id ?? null }; }
       setReconnaissanceParId(map);
+      // Chantier 173 — nom de la fiche proposée, pour « le mot qui cloche »
+      // (même avertissement que dans Mes tickets). Jamais bloquant.
+      const ids = [...new Set(Object.values(map).map(x => x.produit_id).filter(Boolean))];
+      if (ids.length > 0) {
+        const { data: fiches } = await supabase.from('produits').select('id, nom_reference').in('id', ids);
+        if (Array.isArray(fiches)) setNomsFichesProposees(Object.fromEntries(fiches.map(f => [f.id, f.nom_reference])));
+      }
     } catch { /* jamais bloquant */ }
   };
 
@@ -3258,6 +3267,18 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                               <span style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, fontWeight:900, color:"#B25900", background:"#FFE7C2", borderRadius:99, padding:"2px 8px" }}>⚠ à vérifier</span>
                             ) : null}
                           </div>
+                          {/* Chantier 173 — « le mot qui cloche » : le ticket dit ZÉRO, BIO,
+                              5 %… et la fiche proposée par la base ne le dit pas. */}
+                          {(() => {
+                            const badge = badgeProduit(p, reconnaissanceParId);
+                            if (badge !== 'reconnu' && badge !== 'suggere') return null;
+                            const nomFiche = nomsFichesProposees[reconnaissanceParId?.[p.id]?.produit_id];
+                            if (!nomFiche) return null;
+                            const phrase = phraseMotsQuiClochent(motsQuiClochent(p.libelle_ticket || p.name, nomFiche), nomFiche);
+                            return phrase ? (
+                              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:800, color:"#9A5B00", background:"#FFF4E0", borderRadius:8, padding:"6px 8px", marginTop:4, whiteSpace:"normal" }}>⚠️ {phrase}</div>
+                            ) : null;
+                          })()}
                           {/* Chantier 120 — remise rattachée à la ligne. */}
                           {affichageRemise(Number(p.price) * Number(p.qty || 1), p.remise) && (
                             <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:800, color:C.green, marginTop:2 }}>{affichageRemise(Number(p.price) * Number(p.qty || 1), p.remise)}</div>
