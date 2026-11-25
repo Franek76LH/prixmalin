@@ -5528,6 +5528,7 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
         )}
         onCocher={toggleCheck} onModifier={setEditItem} onSupprimer={removeItem} onMarque={onSetMarquePref}
         onRetirerPris={() => items.filter(i => i.checked).forEach(i => onRemove(i.id))}
+        onComparer={() => setTab("compare")}
         onReactiverReporte={onReactiverReporte} onSupprimerReporte={onSupprimerReporte}
         onAjouter={()=>setTab("catalog")} onFavoris={()=>setShowFavModal(true)} onDicter={onDicter}
         propositions={liaisonsProposees} onRelier={onRelier}

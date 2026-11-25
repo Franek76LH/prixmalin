@@ -79,7 +79,7 @@ function Ligne({ item, fait, dernier, vignette, onCocher, onModifier, onSupprime
 export default function ListeCourses({
   items = [], itemsReportes = [], nbFavoris = 0, vignette = null,
   onCocher, onModifier, onSupprimer, onMarque, onReactiverReporte, onSupprimerReporte,
-  onAjouter, onFavoris, propositions = {}, onRelier, onDicter = null, onRetirerPris = null,
+  onAjouter, onFavoris, propositions = {}, onRelier, onDicter = null, onRetirerPris = null, onComparer = null,
 }) {
   // Chantier 184 — « Retirer les articles pris » en deux appuis (le second
   // confirme, pendant 4 s) : on ne vide pas une section par erreur.
@@ -118,7 +118,20 @@ export default function ListeCourses({
   }
 
   return (
-    <div style={{ padding: '16px 16px 110px' }}>
+    <div style={{ padding: `16px 16px ${onComparer && aAcheter.length > 0 ? 180 : 110}px` }}>
+      {/* Chantier 186 (proposition 9 de l'audit, décision de François du
+          25/11) — la suite naturelle de la liste, toujours sous le pouce :
+          « Où c'est le moins cher ? », au-dessus de la barre du bas. */}
+      {onComparer && aAcheter.length > 0 && (
+        <div style={{ position: 'fixed', left: '50%', transform: 'translateX(-50%)', bottom: 'calc(84px + env(safe-area-inset-bottom, 0px))', width: 'calc(100% - 24px)', maxWidth: 406, zIndex: 45 }}>
+          <button onClick={onComparer} style={{
+            width: '100%', border: 'none', background: T.rouge, color: '#fff', borderRadius: 16, padding: '14px 16px', minHeight: 52,
+            fontFamily: T.police, fontWeight: 900, fontSize: 15.5, cursor: 'pointer', boxShadow: '0 6px 18px rgba(204,0,0,0.3)',
+          }}>
+            Où c'est le moins cher ? <span style={{ fontWeight: 700, opacity: 0.85 }}>({aAcheter.length} article{aAcheter.length > 1 ? 's' : ''})</span>
+          </button>
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
         <button onClick={onAjouter} style={{
           flex: 1, minWidth: 0, border: 'none', background: T.texte, color: '#fff', borderRadius: 14, padding: '12px 10px', cursor: 'pointer',
