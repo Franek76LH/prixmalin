@@ -92,3 +92,34 @@ describe('Chantier 176 — ouvrirSurCourses', () => {
     expect(ouvrirSurCourses({ statut: 'active', cree_le: '2026-11-25T17:00:00Z' }, maintenant)).toBe(true);
   });
 });
+
+import { lireEtatHistorique, etatHistorique, ecranApresRechargement, reculerDansHistorique, ecranValide } from './navigationCore';
+
+describe('chantier 185 — historique de navigation', () => {
+  it('relit un écran rangé dans l\'historique', () => {
+    expect(lireEtatHistorique(etatHistorique('list', 3))).toEqual({ ecran: 'list', n: 3 });
+  });
+  it('ignore une page qui ne vient pas de PrixMalin', () => {
+    expect(lireEtatHistorique(null)).toBeNull();
+    expect(lireEtatHistorique({ autre: 1 })).toBeNull();
+    expect(lireEtatHistorique({ prixmalin: 'inconnu', n: 1 })).toBeNull();
+  });
+  it('un numéro de page abîmé vaut 0', () => {
+    expect(lireEtatHistorique({ prixmalin: 'moi', n: -2 })).toEqual({ ecran: 'moi', n: 0 });
+  });
+  it('après un rechargement, ni le scan ni le micro ne se rouvrent', () => {
+    expect(ecranApresRechargement('prices')).toBe('home');
+    expect(ecranApresRechargement('micro')).toBe('list');
+    expect(ecranApresRechargement('archive')).toBe('archive');
+    expect(ecranApresRechargement('nimporte')).toBeNull();
+  });
+  it('la flèche retour recule dans l\'historique seulement si la page d\'avant est la bonne', () => {
+    const pile = ['home', 'list', 'catalog'];
+    expect(reculerDansHistorique(pile, 2, 'list')).toBe(true);
+    expect(reculerDansHistorique(pile, 2, 'home')).toBe(false);
+    expect(reculerDansHistorique(pile, 0, 'home')).toBe(false);
+  });
+  it('tous les écrans de la barre sont connus', () => {
+    ['home', 'list', 'courses', 'compare', 'moi', 'prices'].forEach(e => expect(ecranValide(e)).toBe(true));
+  });
+});

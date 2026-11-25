@@ -68,7 +68,7 @@ import EcranFinCourses from "./components/v2/EcranFinCourses";
 import { demoDemandee, SESSION_DEMO_BILAN, LISTE_DEMO_BILAN } from "./lib/demoBilanCourses";
 import { chercherProduitParCodeBarres } from "./lib/rechercheCodeBarres";
 import { lireRetourLien, verifierNouveauMotDePasse, emailPlausible, messageErreurMotDePasse, traduireErreurConnexion } from "./lib/motDePasseCore";
-import { ecranRetour, noterOrigine, ecranCourses, ouvrirSurCourses } from "./lib/navigationCore";
+import { ecranRetour, noterOrigine, ecranCourses, ouvrirSurCourses, lireEtatHistorique, etatHistorique, ecranApresRechargement, reculerDansHistorique, CLE_ECRAN_SESSION } from "./lib/navigationCore";
 import ListeCourses from "./components/v2/ListeCourses";
 // Chantier 126 — produits de la liste en texte libre : fiches proposées.
 import ProduitsARelier from "./components/v2/ProduitsARelier";
@@ -539,7 +539,7 @@ function NouveauMotDePasse({ onFini }) {
       const { error } = await supabase.auth.updateUser({ password: mdp });
       if (error) throw error;
       setFait(true);
-      try { window.history.replaceState(null, '', window.location.pathname); } catch { /* sans effet */ }
+      try { window.history.replaceState(window.history.state, '', window.location.pathname); } catch { /* sans effet */ }
     } catch (e) {
       setErreur(messageErreurMotDePasse(e));
     } finally { setEnvoi(false); }
@@ -9988,13 +9988,81 @@ export default function App() {
   // Chantier 160 — le catalogue s'ouvre champ de recherche actif (« Rechercher
   // un produit ») ou sur les rayons (« Parcourir les rayons »).
   const [modeCatalogue, setModeCatalogue] = useState(null); // 'recherche' | 'rayons' | null
-  const setTab = useCallback((ecran) => {
+  // Chantier 185 — miroir de l'historique du téléphone : pileEcrans[i] =
+  // l'écran de la page n° i, indexHistorique = la page où l'on est.
+  const pileEcrans = useRef(["home"]);
+  const indexHistorique = useRef(0);
+  const noterHistorique = useCallback((ecran, mode) => {
+    if (typeof window === 'undefined') return;
+    try {
+      if (mode === 'pousser') {
+        const n = indexHistorique.current + 1;
+        pileEcrans.current = [...pileEcrans.current.slice(0, n), ecran];
+        indexHistorique.current = n;
+        window.history.pushState(etatHistorique(ecran, n), '');
+      } else if (mode === 'remplacer') {
+        pileEcrans.current[indexHistorique.current] = ecran;
+        window.history.replaceState(etatHistorique(ecran, indexHistorique.current), '');
+      }
+      window.sessionStorage.setItem(CLE_ECRAN_SESSION, ecran);
+      window.sessionStorage.setItem(CLE_ECRAN_SESSION + '_pile', JSON.stringify(pileEcrans.current));
+    } catch { /* historique indisponible : la navigation marche quand même */ }
+  }, []);
+  // options.historique : 'pousser' (par défaut), 'remplacer' (correction
+  // d'écran, sans nouvelle page) ou 'aucun' (on vient du bouton retour).
+  const setTab = useCallback((ecran, options) => {
     setGardeOuverte(false);
     const depuis = tabCourantRef.current;
     setOriginesEcran(o => noterOrigine(o, depuis, ecran));
     if (ecran !== "catalog") setModeCatalogue(null);
     tabCourantRef.current = ecran;
     setTabBrut(ecran);
+    const mode = options?.historique || 'pousser';
+    if (mode === 'aucun') return;
+    noterHistorique(ecran, depuis === ecran ? 'remplacer' : mode);
+  }, [noterHistorique]);
+  // Flèche « retour » de l'en-tête et scan annulé : si l'écran visé est la
+  // page d'avant, on recule dans l'historique au lieu d'en ajouter une.
+  const revenirA = useCallback((cible) => {
+    if (reculerDansHistorique(pileEcrans.current, indexHistorique.current, cible)) {
+      try { window.history.back(); return; } catch { /* on retombe sur setTab */ }
+    }
+    setTab(cible);
+  }, [setTab]);
+  const setTabRef = useRef(setTab);
+  useEffect(() => { setTabRef.current = setTab; }, [setTab]);
+  // Au démarrage : un rechargement rouvre l'écran où l'on était (sauf scan et
+  // micro) ; une ouverture neuve range l'accueil comme première page.
+  useEffect(() => {
+    let lu = null;
+    try { lu = lireEtatHistorique(window.history.state); } catch { /* rien */ }
+    let ecran = lu?.ecran || null;
+    if (!ecran) { try { ecran = window.sessionStorage.getItem(CLE_ECRAN_SESSION); } catch { /* rien */ } }
+    const rouvrir = ecranApresRechargement(ecran);
+    indexHistorique.current = lu?.n || 0;
+    let pileLue = null;
+    try { pileLue = JSON.parse(window.sessionStorage.getItem(CLE_ECRAN_SESSION + '_pile') || 'null'); } catch { /* rien */ }
+    pileEcrans.current = (lu && Array.isArray(pileLue) && pileLue[lu.n] === lu.ecran) ? pileLue : [];
+    pileEcrans.current[indexHistorique.current] = rouvrir || "home";
+    if (rouvrir && rouvrir !== "home") {
+      setGardeOuverte(false);
+      tabCourantRef.current = rouvrir;
+      setTabBrut(rouvrir);
+    }
+    try { window.history.replaceState(etatHistorique(rouvrir || "home", indexHistorique.current), ''); } catch { /* rien */ }
+    const surRetour = (ev) => {
+      const etat = lireEtatHistorique(ev.state);
+      indexHistorique.current = etat?.n || 0;
+      const ecranVise = etat?.ecran || "home";
+      pileEcrans.current[indexHistorique.current] = ecranVise;
+      try {
+        window.sessionStorage.setItem(CLE_ECRAN_SESSION, ecranVise);
+        window.sessionStorage.setItem(CLE_ECRAN_SESSION + '_pile', JSON.stringify(pileEcrans.current));
+      } catch { /* rien */ }
+      setTabRef.current(ecranVise, { historique: 'aucun' });
+    };
+    window.addEventListener('popstate', surRetour);
+    return () => window.removeEventListener('popstate', surRetour);
   }, []);
   const ouvrirCatalogue = useCallback((mode) => { setTab("catalog"); setModeCatalogue(mode); }, [setTab]);
   // Chantier 130 — chaque écran s'ouvre en haut : sans ça, on arrivait sur
@@ -10229,7 +10297,7 @@ export default function App() {
   // Chantier 160 — « Mes courses » sans liste validée en cours (courses
   // terminées ou abandonnées ailleurs) : écran vide évité, on montre Ma liste.
   useEffect(() => {
-    if (loaded && tab === "courses" && !(sessionCoursesAccessible && sessionCoursesActive)) setTab("list");
+    if (loaded && tab === "courses" && !(sessionCoursesAccessible && sessionCoursesActive)) setTab("list", { historique: 'remplacer' });
   }, [loaded, tab, sessionCoursesAccessible, sessionCoursesActive, setTab]);
 
 
@@ -11895,7 +11963,7 @@ export default function App() {
   if (demoBilan) return (
     <>{globalStyle}
       <EcranFinCourses demo session={SESSION_DEMO_BILAN} items={LISTE_DEMO_BILAN}
-        onPlusTard={() => { setDemoBilan(false); try { window.history.replaceState(null, '', window.location.pathname); } catch { /* sans effet */ } }}
+        onPlusTard={() => { setDemoBilan(false); try { window.history.replaceState(window.history.state, '', window.location.pathname); } catch { /* sans effet */ } }}
         onTerminer={() => {}} />
     </>
   );
@@ -11936,7 +12004,7 @@ export default function App() {
       )}
       <div style={{ minHeight:"100vh", background:C.bg, maxWidth:430, margin:"0 auto" }}>
         {tab !== "home" && (
-          <EnTete tab={tab} setTab={setTab} retour={ecranRetour(tab, originesEcran)} droite={isAdmin ? <span aria-hidden="true" style={{ width:32, flexShrink:0 }}/> : null}/>
+          <EnTete tab={tab} setTab={revenirA} retour={ecranRetour(tab, originesEcran)} droite={isAdmin ? <span aria-hidden="true" style={{ width:32, flexShrink:0 }}/> : null}/>
         )}
         {/* Chantier 160 — la barre de gestes (iPhone, Android plein écran)
             s'ajoute sous la barre du bas : chaque écran garde cette marge en
@@ -12002,7 +12070,7 @@ export default function App() {
           )}
           {loaded && tab==="compare"   && <CompareTab liaisonsProposees={liaisonsProposees} onRelier={relierArticle}   items={itemsAAcheter} nbDejaPris={items.length - itemsAAcheter.length} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix} sessionCoursesAccessible={sessionCoursesAccessible}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
-          {loaded && tab==="prices"    && <PricesTab    onAnnulerScanAuto={()=>setTab(ecranRetour("prices", originesEcran) || "home")}
+          {loaded && tab==="prices"    && <PricesTab    onAnnulerScanAuto={()=>revenirA(ecranRetour("prices", originesEcran) || "home")}
             coursesActives={!scanCaisse && !scanSepare && sessionCoursesAccessible && sessionCoursesActive?.id ? { sessionId: sessionCoursesActive.id, magasin: sessionCoursesActive.magasin } : null}
             onRattacherCourses={(promesse)=>{ const id = sessionCoursesActive?.id; if (id) rattacherTicketScanSession(promesse, { sessionId: id }); }} priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} estFrancois={estFrancois} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} magasinSession={scanCaisse?.magasin ?? null} onImportSession={rattacherTicketScanSession} onScanSessionFerme={()=>definirScanCaisse(null)} onCompleterTicket={scanApresTicketAccessible ? completerDernierTicket : null} onVoirTicketExistant={()=>setTab("archive")} notifierPoints={profilVisible} onEchecEcritureCore={setEchecEcritureCore} onTicketValidated={(id,store)=>{ setScanSepare(false); setShowRating({id,store}); }} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;
