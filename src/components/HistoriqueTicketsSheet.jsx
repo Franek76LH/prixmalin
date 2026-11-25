@@ -84,7 +84,7 @@ const depsIdentification = {
   marquer: (ligneId, valeur) => marquerLigneSansCodeBarresRpc(ligneId, valeur),
 };
 
-export default function HistoriqueTicketsSheet({ userId, onClose, onCompteChange, ticketInitial = null, onRetourAccueil = null }) {
+export default function HistoriqueTicketsSheet({ userId, onClose, onCompteChange, ticketInitial = null, ligneInitiale = null, onRetourAccueil = null }) {
   const [vue, setVue] = useState(ticketInitial ? 'detail' : 'liste');
   const [tickets, setTickets] = useState(null);
   const [comptes, setComptes] = useState(() => new Map());
@@ -96,7 +96,8 @@ export default function HistoriqueTicketsSheet({ userId, onClose, onCompteChange
   const [erreurDetail, setErreurDetail] = useState(null);
   const [enCours, setEnCours] = useState(null); // texte d'attente
   const [retour, setRetour] = useState(null); // { ton, titre, detail, aCompleter }
-  const [enEvidence, setEnEvidence] = useState(null);
+  // Chantier 192 — ouvert depuis une ligne de « Mes tickets » : elle est en évidence.
+  const [enEvidence, setEnEvidence] = useState(ligneInitiale);
   const [scanOuvert, setScanOuvert] = useState(false);
   const scanCibleRef = useRef(null);
   const refsLignes = useRef({});
@@ -152,7 +153,9 @@ export default function HistoriqueTicketsSheet({ userId, onClose, onCompteChange
 
   // Ouverture directe sur le ticket demandé (une seule fois, au montage).
   useEffect(() => {
-    if (ticketInitial?.id) rechargerDetail(ticketInitial.id);
+    if (ticketInitial?.id) rechargerDetail(ticketInitial.id).then(d => {
+      if (d && ligneInitiale) setTimeout(() => refsLignes.current[ligneInitiale]?.scrollIntoView?.({ behavior: 'smooth', block: 'center' }), 60);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

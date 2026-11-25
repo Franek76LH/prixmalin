@@ -7193,7 +7193,7 @@ function ArchiveTab({ archives, onDelete, onAddToList, priceDB, onImport, onSave
       // Chantier 111 — la devinette de la base, quand il y en a une. produit_id
       // reste NULL tant que François n'a pas confirmé : ces colonnes ne
       // rattachent rien par elles-mêmes.
-      .select('id, libelle_brut, libelle_ticket, produit_suggere_ia_id, variante_suggeree_ia_id, confiance_produit_ia, tickets!inner(date_ticket, magasin_id)')
+      .select('id, libelle_brut, libelle_ticket, produit_suggere_ia_id, variante_suggeree_ia_id, confiance_produit_ia, tickets!inner(id, date_ticket, magasin_id, montant_total, magasins(nom))')
       .eq('tickets.date_ticket', jour);
     if (error) return { candidats: [], error };
     const cible = normName(item.product);
@@ -7502,7 +7502,19 @@ function ArchiveTab({ archives, onDelete, onAddToList, priceDB, onImport, onSave
           enseigneResolue={enseigneResolue}
           estFrancois={estFrancois}
           accesAvance={accesAvance}
-          onCreerProduit={onOuvrirHistoriqueTickets ? ()=>{ setCorrectionCible(null); onOuvrirHistoriqueTickets(); } : null}
+          onCreerProduit={onOuvrirHistoriqueTickets ? async ()=>{
+            // Chantier 192 — une seule porte : on ouvre « Mes tickets — identifier
+            // les produits » directement sur le ticket de cette ligne, ligne en évidence.
+            const cible = correctionCible;
+            setCorrectionCible(null);
+            let ouverture = null;
+            try {
+              const { candidats } = await trouverLignesTicket(cible.arc, cible.item);
+              const l = candidats?.[0];
+              if (l?.tickets?.id) ouverture = { ticket: { ...l.tickets }, ligneId: l.id };
+            } catch { /* on ouvre la liste des tickets */ }
+            onOuvrirHistoriqueTickets(ouverture);
+          } : null}
           onClose={()=>setCorrectionCible(null)}
           onChoisir={(produit,varianteId,methode)=>rattacherProduit(correctionCible.arc, correctionCible.item, produit, varianteId, methode)}
         />
@@ -7834,7 +7846,7 @@ function CorrigerProduitSheet({ item, libelleTicket = null, suggestion = null, e
     // Code décodé mais absent (ou variante inactive) : gardé pour apprentissage.
     const inconnu = () => {
       setScanDiag(d => ({ ...(d || {}), resultat: 'non trouvé' }));
-      if (estFrancois) setCodeBarresEnAttente(code);
+      setCodeBarresEnAttente(code);
       // Chantier 159 — cette feuille ne sait pas créer une fiche (essai de
       // François, 19/11 : trois scans d'un produit inconnu, trois impasses).
       // Quand l'écran qui sait le faire est accessible, on y envoie.
@@ -7934,7 +7946,8 @@ function CorrigerProduitSheet({ item, libelleTicket = null, suggestion = null, e
     const liste = data || [];
     if (liste.length <= 1) {
       const varianteId = liste[0]?.id ?? null;
-      if (codeBarresEnAttente) await procederApprentissage(produit, varianteId);
+      // Chantier 192 — seul un administrateur enregistre un nouveau code (règle de la base).
+      if (codeBarresEnAttente && estFrancois) await procederApprentissage(produit, varianteId);
       // Chantier 110 — relecture obligatoire avant d'appliquer.
       else demanderRelecture(produit, varianteId, liste[0] ?? null);
       return;
@@ -7953,7 +7966,7 @@ function CorrigerProduitSheet({ item, libelleTicket = null, suggestion = null, e
 
   const validerVariante = () => {
     if (!varianteChoisie || !produitEnAttente) return;
-    if (codeBarresEnAttente) procederApprentissage(produitEnAttente, varianteChoisie);
+    if (codeBarresEnAttente && estFrancois) procederApprentissage(produitEnAttente, varianteChoisie);
     // Chantier 110 — relecture obligatoire, avec la variante réellement cochée.
     else demanderRelecture(
       produitEnAttente,
@@ -10384,8 +10397,10 @@ export default function App() {
     });
     return () => { annule = true; };
   }, [scanApresTicketAccessible, loaded, tab, showHistoriqueTickets, session?.user?.id]);
-  const ouvrirHistoriqueTickets = (ticketInitial = null) => {
+  const [historiqueLigneInitiale, setHistoriqueLigneInitiale] = useState(null);
+  const ouvrirHistoriqueTickets = (ticketInitial = null, ligneInitiale = null) => {
     setHistoriqueTicketInitial(ticketInitial);
+    setHistoriqueLigneInitiale(ligneInitiale);
     setShowHistoriqueTickets(true);
   };
   // Chantier 155 — bouton « Compléter » du bilan de scan : ouvre le ticket qui
@@ -12102,7 +12117,7 @@ export default function App() {
             setShowRating({id:data.id,store:newArc.store});
             return { ok:true };
           }} userId={session?.user?.id} produitsRef={produitsRef}/>}
-          {loaded && tab==="archive"   && <ArchiveTab   archives={archives} onDelete={deleteArchive} priceDB={priceDB} onImport={handleImportPrices} onSavePrice={handleSavePrice} produitsRef={produitsRef} libelleVersNomProduit={libelleVersNomProduit} onLibelleResolu={(cle,nom)=>setLibelleVersNomProduit(prev=>({...prev,[cle]:nom}))} estFrancois={estFrancois} accesAvance={accesAvance} onOuvrirHistoriqueTickets={scanApresTicketAccessible ? ()=>ouvrirHistoriqueTickets(null) : null} onAddToList={arcItem=>{
+          {loaded && tab==="archive"   && <ArchiveTab   archives={archives} onDelete={deleteArchive} priceDB={priceDB} onImport={handleImportPrices} onSavePrice={handleSavePrice} produitsRef={produitsRef} libelleVersNomProduit={libelleVersNomProduit} onLibelleResolu={(cle,nom)=>setLibelleVersNomProduit(prev=>({...prev,[cle]:nom}))} estFrancois={estFrancois} accesAvance={accesAvance} onOuvrirHistoriqueTickets={scanApresTicketAccessible ? (o)=>ouvrirHistoriqueTickets(o?.ticket ? o.ticket : null, o?.ligneId || null) : null} onAddToList={arcItem=>{
             const newItem={id:Date.now()+Math.random(),product:arcItem.product,format:arcItem.format||"",brand:arcItem.brand||"",qty:arcItem.qty||1,checked:false};
             addItem(newItem);
             showAppToast(`✓ ${arcItem.product} ajouté à ta liste`);
@@ -12179,7 +12194,7 @@ export default function App() {
             garde-fou 105 — pour tout autre utilisateur il n'existe pas, et sa
             proposition part en file au lieu d'écrire quoi que ce soit. */}
         {showHistoriqueTickets && scanApresTicketAccessible && (
-          <HistoriqueTicketsSheet userId={session?.user?.id} ticketInitial={historiqueTicketInitial} onClose={()=>{ setShowHistoriqueTickets(false); setHistoriqueTicketInitial(null); }}
+          <HistoriqueTicketsSheet userId={session?.user?.id} ticketInitial={historiqueTicketInitial} ligneInitiale={historiqueLigneInitiale} onClose={()=>{ setShowHistoriqueTickets(false); setHistoriqueTicketInitial(null); setHistoriqueLigneInitiale(null); }}
             onRetourAccueil={()=>{ setShowHistoriqueTickets(false); setHistoriqueTicketInitial(null); setTab("home"); }}/>
         )}
         {showContributionCodeBarres && (contributionCodesBarresActive || isAdmin) && (

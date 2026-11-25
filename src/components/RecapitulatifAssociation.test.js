@@ -91,7 +91,9 @@ describe('relecture avant d\'appliquer', () => {
 
   it('le chemin code-barres garde son propre écran (rien n\'est retiré)', () => {
     expect(app).toContain('const relierViaBarcode = () => {');
-    expect(app).toMatch(/if \(codeBarresEnAttente\) await procederApprentissage\(produit, varianteId\);/);
+    // Chantier 192 — seul un administrateur enregistre le code ; un testeur
+    // passe par la relecture normale.
+    expect(app).toMatch(/if \(codeBarresEnAttente && estFrancois\) await procederApprentissage\(produit, varianteId\);/);
   });
 
   it('la relecture compare et affiche le texte BRUT du ticket', () => {
