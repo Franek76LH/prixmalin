@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   economiesConfirmees, economiesEstimees, apercuListe, actionPrincipale, montrerModeDemploi,
   ACTION_REPRENDRE_COURSES, ACTION_COMPARER, ACTION_COMMENCER_LISTE,
+  carteEconomies, PHRASE_ECONOMIES_SANS_GAIN, PHRASE_ECONOMIES_TICKETS,
 } from './accueilCore';
 
 describe('économies de l\'accueil', () => {
@@ -66,7 +67,7 @@ describe('chantier 160 — carte « Économies estimées »', () => {
       { ticket_scanned: true, realized_saving: 3.2 }, { ticket_scanned: true, realized_saving: 1.1 },
       { ticket_scanned: false, potential_saving: 50 },
     ]);
-    expect(c).toEqual({ etat: 'tickets', montant: 4.3, nbTickets: 2, phrase: PHRASE_ECONOMIES_TICKETS });
+    expect(c).toEqual({ etat: 'tickets', montant: 4.3, nbTickets: 2, sansGain: false, phrase: PHRASE_ECONOMIES_TICKETS });
   });
   it('sans ticket analysé mais avec une comparaison validée : l\'écart estimé', async () => {
     const { carteEconomies } = await import('./accueilCore');
@@ -81,5 +82,18 @@ describe('chantier 160 — carte « Économies estimées »', () => {
       expect(c.etat).toBe('vide');
       expect(c.montant).toBeNull();
     }
+  });
+});
+
+describe('Chantier 184 — économies à 0 €', () => {
+  it('des tickets sans économie mesurée : pas de « 0,00 € », une autre phrase', () => {
+    const archives = [{ ticket_scanned: true, realized_saving: 0 }, { ticket_scanned: true, realized_saving: 0 }];
+    const c = carteEconomies(archives);
+    expect(c).toMatchObject({ etat: 'tickets', nbTickets: 2, sansGain: true, phrase: PHRASE_ECONOMIES_SANS_GAIN });
+  });
+  it('avec une économie : comme avant', () => {
+    const c = carteEconomies([{ ticket_scanned: true, realized_saving: 3.2 }]);
+    expect(c.sansGain).toBe(false);
+    expect(c.phrase).toBe(PHRASE_ECONOMIES_TICKETS);
   });
 });

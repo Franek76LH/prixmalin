@@ -5527,6 +5527,7 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
             fallback={<div style={{ width:"100%", height:"100%", borderRadius:10, background:C.grayLight }} />} />
         )}
         onCocher={toggleCheck} onModifier={setEditItem} onSupprimer={removeItem} onMarque={onSetMarquePref}
+        onRetirerPris={() => items.filter(i => i.checked).forEach(i => onRemove(i.id))}
         onReactiverReporte={onReactiverReporte} onSupprimerReporte={onSupprimerReporte}
         onAjouter={()=>setTab("catalog")} onFavoris={()=>setShowFavModal(true)} onDicter={onDicter}
         propositions={liaisonsProposees} onRelier={onRelier}
@@ -6991,7 +6992,7 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
         <div style={{ background:C.orangeLight, borderRadius:14, padding:"24px 20px", textAlign:"center", border:`2px dashed ${C.orange}` }}>
           <div style={{ fontSize:40, marginBottom:10 }}>💰</div>
           <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:C.orange, marginBottom:6 }}>Aucun prix correspondant</div>
-          <div style={{ fontFamily:F, fontSize:13, color:C.textLight }}>Vérifie le <strong>nom</strong> et le <strong>format</strong> dans "Mes prix".</div>
+          <div style={{ fontFamily:F, fontSize:13, color:C.textLight }}>Pas encore de prix relevé pour ta liste dans ta zone. Scanne ton prochain ticket : ses prix serviront à toute la communauté.</div>
         </div>
       )}
 
@@ -11867,10 +11868,13 @@ export default function App() {
           flottante juste au-dessus de la barre du bas, qui ne cache rien. */}
       {needRefresh && (
         <div role="status" style={{ position:"fixed", left:"50%", transform:"translateX(-50%)", bottom:"calc(96px + env(safe-area-inset-bottom, 0px))", width:"calc(100% - 32px)", maxWidth:398, zIndex:600, display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, padding:"10px 10px 10px 16px", background:"#16181D", borderRadius:16, boxShadow:"0 8px 28px rgba(0,0,0,0.28)" }}>
-          <span style={{ fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13.5, color:"#fff" }}>Nouvelle version disponible</span>
+          <span style={{ flex:1, minWidth:0, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13.5, color:"#fff" }}>Nouvelle version disponible</span>
           <button onClick={() => applyUpdate()} style={{ padding:"8px 14px", borderRadius:11, border:"none", background:"#fff", color:"#16181D", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:13, cursor:"pointer", flexShrink:0 }}>
             Mettre à jour
           </button>
+          {/* Chantier 184 — « Plus tard » : la pastille ne cache plus l'écran
+              (elle reviendra à la prochaine ouverture de l'app). */}
+          <button onClick={() => setNeedRefresh(false)} aria-label="Plus tard" style={{ width:32, height:32, borderRadius:99, border:"none", background:"rgba(255,255,255,0.14)", color:"#fff", fontSize:14, cursor:"pointer", flexShrink:0 }}>✕</button>
         </div>
       )}
       <div style={{ minHeight:"100vh", background:C.bg, maxWidth:430, margin:"0 auto" }}>

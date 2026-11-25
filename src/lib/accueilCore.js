@@ -71,12 +71,18 @@ export function montrerModeDemploi({ archives, items }) {
 export const PHRASE_ECONOMIES_TICKETS = 'Ce que tu as payé sur tes tickets, comparé au prix moyen du même produit, même format, dans les autres magasins.';
 export const PHRASE_ECONOMIES_COMPARAISON = 'Écart calculé quand tu as choisi ton magasin, sur les produits trouvés dans plusieurs magasins. Scanne ton ticket pour le mesurer sur ce que tu as payé.';
 export const PHRASE_ECONOMIES_VIDE = 'Compare ta liste : on te dira où elle coûte le moins cher.';
+// Chantier 184 — des tickets, mais aucune économie mesurée : jamais de
+// « 0,00 € » démotivant, on dit ce que les tickets apportent et comment
+// économiser la prochaine fois.
+export const PHRASE_ECONOMIES_SANS_GAIN = 'Pas encore d\'économie mesurée. Tes tickets font avancer les prix de la communauté ; compare ta liste avant tes courses pour aller au moins cher.';
 
 export function carteEconomies(archives) {
   const liste = Array.isArray(archives) ? archives : [];
   const analyses = liste.filter(a => a?.ticket_scanned && a?.realized_saving != null);
   if (analyses.length > 0) {
-    return { etat: 'tickets', montant: economiesConfirmees(liste), nbTickets: analyses.length, phrase: PHRASE_ECONOMIES_TICKETS };
+    const montant = economiesConfirmees(liste);
+    const sansGain = !(Number(montant) > 0.005);
+    return { etat: 'tickets', montant, nbTickets: analyses.length, sansGain, phrase: sansGain ? PHRASE_ECONOMIES_SANS_GAIN : PHRASE_ECONOMIES_TICKETS };
   }
   const estimees = economiesEstimees(liste);
   if (estimees > 0) {

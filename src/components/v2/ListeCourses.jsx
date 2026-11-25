@@ -5,6 +5,7 @@
 // haut de la liste (et non plus en petit rond flottant). Le bandeau « Où c'est
 // le moins cher ? » est retiré : l'onglet Comparer de la barre ouvre le même
 // écran (CompareTab), avec la même liste, les mêmes quantités et préférences.
+import { useState, useEffect } from 'react';
 import { T } from './theme';
 import { IconePlus, IconeCroix, IconeCrayon, IconeCoche, IconeMicro } from './Icones';
 
@@ -78,8 +79,16 @@ function Ligne({ item, fait, dernier, vignette, onCocher, onModifier, onSupprime
 export default function ListeCourses({
   items = [], itemsReportes = [], nbFavoris = 0, vignette = null,
   onCocher, onModifier, onSupprimer, onMarque, onReactiverReporte, onSupprimerReporte,
-  onAjouter, onFavoris, propositions = {}, onRelier, onDicter = null,
+  onAjouter, onFavoris, propositions = {}, onRelier, onDicter = null, onRetirerPris = null,
 }) {
+  // Chantier 184 — « Retirer les articles pris » en deux appuis (le second
+  // confirme, pendant 4 s) : on ne vide pas une section par erreur.
+  const [confirmerRetrait, setConfirmerRetrait] = useState(false);
+  useEffect(() => {
+    if (!confirmerRetrait) return;
+    const t = setTimeout(() => setConfirmerRetrait(false), 4000);
+    return () => clearTimeout(t);
+  }, [confirmerRetrait]);
   const aAcheter = items.filter(i => !i.checked);
   const pris = items.filter(i => i.checked);
 
@@ -142,6 +151,12 @@ export default function ListeCourses({
               onCocher={() => onCocher(item.id)} onSupprimer={() => onSupprimer(item.id)} />
           ))}
         </Section>
+      )}
+      {pris.length > 0 && onRetirerPris && (
+        <button onClick={() => { if (confirmerRetrait) { setConfirmerRetrait(false); onRetirerPris(); } else setConfirmerRetrait(true); }}
+          style={{ display: 'block', margin: '-8px 4px 16px auto', border: 'none', background: confirmerRetrait ? T.rougePale : 'none', color: T.rouge, borderRadius: 10, padding: '8px 10px', minHeight: 40, fontFamily: T.police, fontWeight: 800, fontSize: 13, cursor: 'pointer' }}>
+          {confirmerRetrait ? `Confirmer : retirer ${pris.length} article${pris.length > 1 ? 's' : ''}` : `Retirer les articles pris (${pris.length})`}
+        </button>
       )}
       {itemsReportes.length > 0 && (
         <Section titre={`Pour plus tard (${itemsReportes.length})`}>

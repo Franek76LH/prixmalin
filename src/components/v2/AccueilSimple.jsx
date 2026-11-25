@@ -252,9 +252,11 @@ export default function AccueilSimple({
           <span style={{ width: 42, height: 42, borderRadius: 13, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 21, flexShrink: 0 }}>💶</span>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontFamily: T.police, fontWeight: 900, fontSize: 15, color: economies.etat === 'vide' ? T.texte : T.vert }}>
-              {economies.etat === 'vide' ? 'Économies estimées' : `Économies estimées : ${euros(economies.montant)}`}
+              {economies.etat === 'vide' ? 'Économies estimées'
+                : economies.sansGain ? `Tes ${economies.nbTickets} ticket${economies.nbTickets > 1 ? 's' : ''} scanné${economies.nbTickets > 1 ? 's' : ''}`
+                : `Économies estimées : ${euros(economies.montant)}`}
             </div>
-            {economies.etat === 'tickets' && (
+            {economies.etat === 'tickets' && !economies.sansGain && (
               <div style={{ fontFamily: T.police, fontWeight: 800, fontSize: 12, color: T.texteDoux, marginTop: 1 }}>
                 Sur {economies.nbTickets} ticket{economies.nbTickets > 1 ? 's' : ''} scanné{economies.nbTickets > 1 ? 's' : ''}
               </div>

@@ -65,7 +65,7 @@ export default function EcranMoi({
             <span style={{ display: 'block', fontFamily: T.police, fontWeight: 800, fontSize: 12.5, color: T.vert }}>
               Économies estimées{economies.etat === 'tickets' ? ` · ${economies.nbTickets} ticket${economies.nbTickets > 1 ? 's' : ''}` : ''}
             </span>
-            {economies.montant != null && <span style={{ display: 'block', fontFamily: T.police, fontWeight: 900, fontSize: 24, color: T.vert }}>{euros(economies.montant)}</span>}
+            {economies.montant != null && !economies.sansGain && <span style={{ display: 'block', fontFamily: T.police, fontWeight: 900, fontSize: 24, color: T.vert }}>{euros(economies.montant)}</span>}
             <span style={{ display: 'block', fontFamily: T.police, fontSize: 12, color: T.texteDoux, marginTop: 1 }}>{economies.phrase}</span>
           </span>
           <IconeChevron width={20} height={20} style={{ color: T.vert }} />
