@@ -83,6 +83,8 @@ import EcranEvolutionPrix from "./components/v2/EcranEvolutionPrix";
 import { alertesBaisse, avecExemple, exempleDemande } from "./lib/evolutionPrixCore";
 import ResultatComparaison from "./components/v2/ResultatComparaison";
 import ChoixMagasinComparaison from "./components/v2/ChoixMagasinComparaison";
+import PastilleNutriScore from "./components/v2/PastilleNutriScore";
+import { resumeNutri, lettreNutri, COULEURS_NUTRI } from "./lib/nutriScoreCore";
 import { classerMagasinsComparables, ETAT_INSUFFISANT as CLASSEMENT_INSUFFISANT } from "./lib/classementHonnete";
 import EcranEconomies from "./components/v2/EcranEconomies";
 import ChoixScan from "./components/v2/ChoixScan";
@@ -4081,6 +4083,16 @@ function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, ite
             </div>
           )}
 
+          {/* Chantier 178 — Nutri-Score : la lettre du format choisi s'il est
+              unique, sinon l'éventail des lettres connues pour ce choix. Rien
+              si aucune variante n'est notée (jamais de lettre inventée). */}
+          {!variantesLoading && !varianteError && variantes.length > 0 && (() => {
+            const resume = resumeNutri(variantesResolues.length > 0 ? variantesResolues : variantes);
+            if (!resume) return null;
+            const unique = variantesResolues.length === 1 ? variantesResolues[0].nutri_score : null;
+            return <PastilleNutriScore lettre={unique} resume={resume} />;
+          })()}
+
           {alreadyInList && !submitting && (
             <div style={{ background:"#F0FFF5", border:`1.5px solid ${C.green}`, borderRadius:12, padding:"10px 12px", marginBottom:14, fontFamily:"'Nunito',sans-serif", fontSize:12, fontWeight:700, color:C.green }}>
               ✓ Déjà dans ta liste
@@ -4344,6 +4356,8 @@ function FamilleDepliee({ membres, items, onAdd, onUpdate, onRemove, modeRayon =
         parFormat.set(row.variante_produit_id, {
           varianteId: row.variante_produit_id, produitId: row.produit_id,
           nomProduit: row.nom_produit, estMdd: !!row.est_mdd,
+          // Chantier 178 — Nutri-Score de CETTE variante (Open Food Facts).
+          nutri: lettreNutri(row.nutri_score),
           // Masquage MDD (AFFICHAGE seul) : toutes les variantes est_mdd=true sont
           // regroupées sous une marque virtuelle unique « Marques distributeurs »
           // (fusion, pas renommage). La vraie marque en base reste intacte.
@@ -4580,6 +4594,10 @@ function FamilleDepliee({ membres, items, onAdd, onUpdate, onRemove, modeRayon =
           )}
           <div style={{ fontFamily:F, fontSize:12.5, color:M.ink2, marginTop:2, lineHeight:1.35 }}>
             {!mdd && `${f.nomProduit} · `}{f.label} · le paquet {rng(f.paqMin, f.paqMax)} €
+            {/* Chantier 178 — Nutri-Score du format (jamais sur le groupe MDD fusionné). */}
+            {!mdd && f.nutri && (
+              <span aria-label={`Nutri-Score ${f.nutri}`} style={{ display:"inline-flex", alignItems:"center", justifyContent:"center", marginLeft:6, minWidth:18, height:18, padding:"0 4px", borderRadius:5, background:COULEURS_NUTRI[f.nutri].fond, color:COULEURS_NUTRI[f.nutri].texte, fontWeight:900, fontSize:11, verticalAlign:"middle" }}>{f.nutri}</span>
+            )}
           </div>
           {blocBadges(estBest, gap, ratio, fr)}
         </div>

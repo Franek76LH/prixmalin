@@ -83,7 +83,7 @@ export async function chargerVariantes(produitId) {
     // Chantier 104 — quantite_fiable remonté ici pour que les sélecteurs de
     // format puissent signaler une fiche dont le prix est à vérifier AVANT
     // qu'elle soit choisie.
-    .select('id, produit_id, libelle, quantite_nette, unite_quantite, nombre_unites, marque_id, quantite_fiable, marques(nom, est_mdd)')
+    .select('id, produit_id, libelle, quantite_nette, unite_quantite, nombre_unites, marque_id, quantite_fiable, nutri_score, marques(nom, est_mdd)')
     .eq('produit_id', produitId)
     .eq('actif', true)
     .order('quantite_nette', { ascending: true, nullsFirst: false });
