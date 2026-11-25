@@ -8,6 +8,7 @@ import { supabase } from "./lib/supabase";
 // carte « Nouveau magasin détecté » à l'étape magasin du scan.
 import { storeIdFromName as storeIdFromNameEnseignes, chargerEnseignes, enseignesEnCache, trouverEnseigneDansNom } from "./lib/enseignesMagasin";
 import { doitProposerNouveauMagasin, magasinReconnuPourTicket } from "./lib/nouveauMagasinTicket";
+import { enseigneAnnuaire, lieuDuTicket, chercherDansLaVille, chercherAutour, classerCandidats, libelleAnnuaire, adressePourCreation, positionDuTelephone } from "./lib/annuaireMagasins";
 import { mapperLigneListeCourses, chargerVariantes, getCategoryPresentation, formatFormatStructure, calculerPrixUnitaire, prixEstFiable, offresPrioritaires, MENTION_PRIX_A_VERIFIER } from "./lib/catalogueCore";
 import { calculerPrixReferenceParUnite } from "./lib/unitesCore";
 import { urlPhotoVariante, offLargeSource, offFullUrl, cloudinaryAgrandi } from "./lib/photosProduits";
@@ -1599,6 +1600,14 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   // un autre magasin » ; édition du nom/adresse lus avant validation.
   const [carteNouveauMagasinMasquee, setCarteNouveauMagasinMasquee] = useState(false);
   const [carteNouveauMagasinEdition, setCarteNouveauMagasinEdition] = useState(false);
+  // Chantier 171 — annuaire des magasins : propositions en un appui dans la
+  // carte « Nouveau magasin détecté » (ville du ticket, ou « 📍 Je suis dans
+  // ce magasin »). La saisie de l'adresse ne sert plus qu'en dernier recours.
+  const [annuaireCandidats,  setAnnuaireCandidats]  = useState(null); // null = pas cherché
+  const [annuaireOrigine,    setAnnuaireOrigine]    = useState('ville'); // 'ville' | 'gps'
+  const [annuaireRecherche,  setAnnuaireRecherche]  = useState(false);
+  const [annuaireMessage,    setAnnuaireMessage]    = useState('');
+  const [saisieAdresseOuverte, setSaisieAdresseOuverte] = useState(false);
   const fileInputRef    = useRef(null);
   const galleryInputRef = useRef(null);
 
@@ -1613,6 +1622,40 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   // Chantier 115 — préchargement de la table `enseignes` pendant que l'OCR
   // travaille. Jamais bloquant : en cas d'échec, la liste en dur sert.
   useEffect(() => { chargerEnseignes(); }, []);
+
+  // Chantier 171 — dès que la carte « Nouveau magasin détecté » a lieu d'être,
+  // on cherche dans l'annuaire les magasins de l'enseigne dans le lieu du
+  // ticket. Muet en cas de panne (la saisie d'avant reste là).
+  useEffect(() => {
+    let annule = false;
+    setAnnuaireCandidats(null); setAnnuaireOrigine('ville'); setAnnuaireMessage(''); setSaisieAdresseOuverte(false);
+    if (!result?.store || !magasinsCore || magasinsCoreLoading) return undefined;
+    let aProposer = false;
+    try { aProposer = doitProposerNouveauMagasin({ nom: result.store, adresse: result.address, enseigneId: selectedStore, magasins: magasinsCore.tous }); } catch { aProposer = false; }
+    if (!aProposer) return undefined;
+    const slug = enseigneAnnuaire(result.store, selectedStore);
+    const { cp, ville } = lieuDuTicket(result.address);
+    if (!slug || (!cp && !ville)) { setAnnuaireCandidats([]); return undefined; }
+    setAnnuaireRecherche(true);
+    chercherDansLaVille({ slug, cp, ville })
+      .then((lignes) => { if (!annule) setAnnuaireCandidats(classerCandidats(lignes, { adresseTicket: result.address })); })
+      .finally(() => { if (!annule) setAnnuaireRecherche(false); });
+    return () => { annule = true; };
+  }, [result?.store, result?.address, selectedStore, magasinsCore, magasinsCoreLoading]);
+
+  // « 📍 Je suis dans ce magasin » : magasins de l'enseigne autour du téléphone.
+  const chercherAnnuaireAutourDeMoi = async () => {
+    setAnnuaireMessage(''); setAnnuaireRecherche(true);
+    try {
+      const position = await positionDuTelephone();
+      if (!position) { setAnnuaireMessage("Position indisponible : autorise la localisation, ou choisis dans la liste."); return; }
+      const slug = enseigneAnnuaire(result?.store, selectedStore);
+      const lignes = await chercherAutour({ slug, position, rayonMetres: 2000 });
+      const classes = classerCandidats(lignes, { position, max: 5 });
+      if (!classes.length) { setAnnuaireMessage("Aucun magasin de cette enseigne à moins de 2 km de toi."); return; }
+      setAnnuaireCandidats(classes); setAnnuaireOrigine('gps');
+    } finally { setAnnuaireRecherche(false); }
+  };
 
   // Chantier 108 — LE portillon. Appelé par tous les chemins d'arrivée d'une
   // lecture (caméra, galerie, autre-options, résultat déjà scanné en amont).
@@ -1930,6 +1973,36 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
       }
     } catch (e) {
       console.error('[C115] création magasin depuis le ticket', e);
+      setError("Magasin non enregistré — réessaie, ou choisis-le dans la liste");
+    } finally {
+      setManualGeocoding(false);
+    }
+  };
+
+  // Chantier 171 — un appui sur un magasin de l'annuaire : même chemin que
+  // « Oui, c'est là », avec l'adresse et la position de l'annuaire (pas de
+  // géocodage : la position est déjà juste).
+  const validerMagasinAnnuaire = async (l) => {
+    setError("");
+    const nom = storeNameEdit.trim() || result?.store || l?.nom || 'Magasin';
+    const adresse = adressePourCreation(l);
+    if (!adresse) return;
+    setManualGeocoding(true);
+    try {
+      const creation = await resoudreOuCreerStore(selectedStore, adresse, l.latitude ?? null, l.longitude ?? null, nom);
+      if (creation?.magasinCoreId) {
+        if (creation.legacyId) setResolvedStoreId(creation.legacyId);
+        const nomFinal = creation.magasinCoreNom || nom;
+        setStoreNameEdit(nomFinal);
+        setStoreLocation(adresse);
+        definirMagasinCore({ id: creation.magasinCoreId, nom: nomFinal, adresse: l.adresse || '', code_postal: l.code_postal || '', ville: l.ville || '' });
+        setCarteNouveauMagasinMasquee(true);
+        goToShare();
+      } else {
+        setError("Magasin non enregistré — réessaie, ou choisis-le dans la liste");
+      }
+    } catch (e) {
+      console.error('[171] création magasin depuis l\'annuaire', e);
       setError("Magasin non enregistré — réessaie, ou choisis-le dans la liste");
     } finally {
       setManualGeocoding(false);
@@ -2639,6 +2712,11 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                     // 21/11) : sans rue, le magasin est placé au centre-ville et
                     // la distance est fausse. On propose la rue tout de suite.
                     const villeSeuleLue = !sansAdresseLue && !/\d/.test(String(result?.address ?? ''));
+                    // Chantier 171 — l'annuaire d'abord ; la saisie n'apparaît que si
+                    // l'annuaire ne propose rien, ou sur « Il n'est pas dans la liste ».
+                    const candidats = Array.isArray(annuaireCandidats) ? annuaireCandidats : [];
+                    const montrerSaisie = saisieAdresseOuverte || carteNouveauMagasinEdition || (annuaireCandidats !== null && candidats.length === 0 && !annuaireRecherche);
+                    const enseigneAnnu = enseigneAnnuaire(result?.store, selectedStore);
                     const champ = (valeur, onChange, placeholder) => (
                       <input value={valeur} onChange={e=>onChange(e.target.value)} placeholder={placeholder}
                         style={{ width:"100%", padding:"10px 12px", borderRadius:10, border:`2px solid ${valeur.trim()?C.orange:C.grayLight}`, fontFamily:"'Nunito',sans-serif", fontWeight:700, fontSize:14, color:C.text, outline:"none", boxSizing:"border-box", marginBottom:8, background:C.white }} />
@@ -2648,6 +2726,49 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                         <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.orange, marginBottom:8 }}>
                           🏪 Nouveau magasin détecté
                         </div>
+                        {/* Chantier 171 — propositions de l'annuaire, un appui suffit. */}
+                        {!carteNouveauMagasinEdition && (
+                          <div style={{ marginBottom: montrerSaisie ? 14 : 4 }}>
+                            {annuaireRecherche && (
+                              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.textLight, marginBottom:8 }}>⏳ Je cherche ce magasin…</div>
+                            )}
+                            {!annuaireRecherche && candidats.length > 0 && (
+                              <>
+                                <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:13, fontWeight:800, color:C.text, marginBottom:8 }}>
+                                  {annuaireOrigine === 'gps' ? "Le plus proche de toi :" : (candidats.length === 1 ? "C'est celui-ci ?" : "Lequel est-ce ?")}
+                                </div>
+                                {candidats.map((l) => (
+                                  <button key={l.osm_id} disabled={manualGeocoding} onClick={()=>validerMagasinAnnuaire(l)}
+                                    style={{ width:"100%", padding:"11px 14px", borderRadius:10, border:`2px solid ${C.orange}`, background:C.white, fontFamily:"'Nunito',sans-serif", cursor:manualGeocoding?"default":"pointer", textAlign:"left", boxSizing:"border-box", marginBottom:8 }}>
+                                    <div style={{ fontWeight:900, fontSize:14, color:C.text }}>{l.format || l.nom}{l.distance != null ? <span style={{ fontWeight:700, fontSize:12, color:C.textLight }}> · {l.distance < 1000 ? `${l.distance} m` : `${(l.distance/1000).toFixed(1).replace('.', ',')} km`}</span> : null}</div>
+                                    <div style={{ fontSize:12.5, color:C.textLight, marginTop:2 }}>{libelleAnnuaire(l)}</div>
+                                  </button>
+                                ))}
+                              </>
+                            )}
+                            {annuaireMessage && (
+                              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:12.5, color:C.textLight, marginBottom:8 }}>{annuaireMessage}</div>
+                            )}
+                            <div style={{ display:"flex", flexWrap:"wrap", gap:"6px 16px", alignItems:"center" }}>
+                              {enseigneAnnu && annuaireOrigine !== 'gps' && (
+                                <button disabled={annuaireRecherche || manualGeocoding} onClick={chercherAnnuaireAutourDeMoi}
+                                  style={{ background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontSize:13, color:C.blue, fontWeight:900, cursor:"pointer", padding:0 }}>
+                                  📍 Je suis dans ce magasin
+                                </button>
+                              )}
+                              {candidats.length > 0 && !saisieAdresseOuverte && (
+                                <button onClick={()=>setSaisieAdresseOuverte(true)}
+                                  style={{ background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.blue, fontWeight:800, cursor:"pointer", padding:0, textDecoration:"underline" }}>
+                                  Il n'est pas dans la liste
+                                </button>
+                              )}
+                            </div>
+                            {candidats.length > 0 && (
+                              <div style={{ fontFamily:"'Nunito',sans-serif", fontSize:10, color:C.gray, marginTop:6 }}>Magasins © contributeurs OpenStreetMap</div>
+                            )}
+                          </div>
+                        )}
+                        {montrerSaisie && (<>
                         {villeSeuleLue && !carteNouveauMagasinEdition ? (
                           <>
                             <div style={{ fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:15, color:C.text, marginBottom:4 }}>{storeNameEdit.trim() || result?.store}</div>
@@ -2682,13 +2803,16 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                           style={{ background:"none", border:"none", fontFamily:"'Nunito',sans-serif", fontSize:12, color:C.blue, fontWeight:800, cursor:"pointer", padding:0, marginBottom:12, textDecoration:"underline" }}>
                           {carteNouveauMagasinEdition ? "✓ Terminer la correction" : "✏️ Corriger le nom ou l'adresse"}
                         </button>
+                        </>)}
                         {/* Un éventuel message d'erreur s'affiche juste sous la carte, à
                             l'emplacement habituel du sélecteur (pas de doublon). */}
                         <div style={{ display:"flex", gap:8 }}>
+                          {montrerSaisie && (
                           <button disabled={!peutValider} onClick={validerNouveauMagasinTicket}
                             style={{ flex:1, padding:"13px 8px", border:"none", borderRadius:12, background:peutValider?C.orange:C.grayLight, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:peutValider?C.white:C.gray, cursor:peutValider?"pointer":"default" }}>
                             {manualGeocoding ? "⏳ Validation..." : "Oui, c'est là"}
                           </button>
+                          )}
                           <button disabled={manualGeocoding} onClick={()=>{ setCarteNouveauMagasinMasquee(true); setCarteNouveauMagasinEdition(false); setError(""); }}
                             style={{ flex:1, padding:"13px 8px", border:`2px solid ${C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:14, color:C.text, cursor:manualGeocoding?"default":"pointer" }}>
                             Choisir un autre magasin
