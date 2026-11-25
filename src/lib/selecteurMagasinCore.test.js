@@ -47,7 +47,7 @@ describe('formaterAdresseMagasin', () => {
   // Chantier 118 — défaut du 09/11 : « 13100 AIX EN PROVENCE, 13100 AIX EN PROVENCE ».
   it('ne répète pas CP + ville déjà présents dans l\'adresse', () => {
     expect(formaterAdresseMagasin({ adresse: 'AV DES INFIRMERIES 13100 AIX EN PROVENCE', code_postal: '13100', ville: 'Aix-en-Provence' }))
-      .toBe('AV DES INFIRMERIES 13100 AIX EN PROVENCE');
+      .toBe('Av des Infirmeries 13100 Aix en Provence'); // 171 : capitales remises en minuscules à l'affichage
     expect(formaterAdresseMagasin({ adresse: '2 rue X, 13100 Aix', code_postal: '13100', ville: 'Aix-en-Provence' }))
       .toBe('2 rue X, 13100 Aix, Aix-en-Provence');
     expect(formaterAdresseMagasin({ adresse: '2 rue X 13009', code_postal: '13009', ville: 'Marseille' }))
@@ -263,5 +263,32 @@ describe('chargerFrequencesMagasins — les prix relevés comptent (108b)', () =
     });
     await chargerFrequencesMagasins({ utilisateurId: 'moi' });
     expect(eqParTable.prix).toEqual(['utilisateur_id', 'moi']);
+  });
+});
+
+// Chantier 171 — nettoyage à l'affichage seulement
+import { adresseLisible as _adresseLisible, formaterAdresseMagasin as _formater } from './selecteurMagasinCore';
+describe('171 — adresse lisible (affichage seulement)', () => {
+  it('retire la raison sociale et remet les minuscules', () => {
+    expect(_adresseLisible('SAS GALFODIS, Quartier Saint Jérôme, Avenue des Infirm, 13100 AIX EN PROVENCE'))
+      .toBe('Quartier Saint Jérôme, Avenue des Infirm, 13100 Aix en Provence');
+    expect(_adresseLisible('CENTRE E.LECLERC SAS ROYDIS, BAOU DE SORMIOU, 13009 MARSEILLE'))
+      .toBe('Centre E.Leclerc, Baou de Sormiou, 13009 Marseille');
+  });
+  it('capitales, FR-, virgules', () => {
+    expect(_adresseLisible('137 AVENUE CLOT-BEY, FR-13008 MARSEILLE')).toBe('137 Avenue Clot-Bey, 13008 Marseille');
+    expect(_adresseLisible('27 COURS MIRABEAU, 13100 AIX EN PROVENCE')).toBe('27 Cours Mirabeau, 13100 Aix en Provence');
+    expect(_adresseLisible("68, BD DU ROY RENE, 13100 AIX-EN-PROVENCE")).toBe('68, Bd du Roy Rene, 13100 Aix-en-Provence');
+  });
+  it('ne touche pas une adresse déjà propre', () => {
+    expect(_adresseLisible('210 avenue de Brédasque, 13090 Aix-en-Provence')).toBe('210 avenue de Brédasque, 13090 Aix-en-Provence');
+    expect(_adresseLisible('')).toBe('');
+    expect(_adresseLisible(null)).toBe('');
+  });
+  it('formatage complet sans doublon de ville', () => {
+    expect(_formater({ adresse: '27 COURS MIRABEAU, 13100 AIX EN PROVENCE', code_postal: '13100', ville: 'Aix-en-Provence' }))
+      .toBe('27 Cours Mirabeau, 13100 Aix en Provence');
+    expect(_formater({ adresse: 'Avenue Marcel Delprat', code_postal: '13013', ville: 'Marseille' }))
+      .toBe('Avenue Marcel Delprat, 13013 Marseille');
   });
 });

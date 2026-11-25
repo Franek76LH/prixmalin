@@ -44,15 +44,43 @@ const pourComparerAdresse = (t) => ` ${String(t || '')
   .toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
   .replace(/[^A-Z0-9]+/g, ' ').trim()} `;
 
+// Chantier 171 (25/11) — nettoyage À L'AFFICHAGE SEULEMENT. L'adresse en base
+// reste telle que le ticket l'imprime : c'est elle que la base compare pour
+// reconnaître le magasin au ticket suivant (la « réécrire proprement »
+// créerait des doublons). Ici : raison sociale retirée (« SAS GALFODIS, »),
+// « FR-13008 » → « 13008 », texte tout en capitales remis en minuscules
+// (« 27 COURS MIRABEAU » → « 27 Cours Mirabeau »).
+const PETITS_MOTS = new Set(['de', 'du', 'des', 'la', 'le', 'les', 'en', 'sur', 'sous', 'et', 'a', 'au', 'aux', "d'", "l'"]);
+function casseLisible(t) {
+  const debut = t.search(/\S/);
+  return t.toLowerCase().replace(/[a-zà-ÿ0-9']+/g, (mot, i) => {
+    if (i > debut && PETITS_MOTS.has(mot)) return mot;
+    if (/^[dl]'/.test(mot)) return mot.slice(0, 2) + mot.charAt(2).toUpperCase() + mot.slice(3);
+    return mot.charAt(0).toUpperCase() + mot.slice(1);
+  });
+}
+export function adresseLisible(texte) {
+  try {
+    let t = String(texte ?? '').trim();
+    if (!t) return '';
+    t = t.replace(/\s*\b(?:SAS|SARL|EURL|SNC|SASU)\s+[^,]*,\s*/gi, (m, pos) => (pos > 0 ? ', ' : ''));
+    t = t.replace(/\b(?:SAS|SARL|EURL|SNC|SASU)\s+\S+\s*/gi, '');
+    t = t.replace(/\bFR-(\d{5})\b/g, '$1');
+    t = t.replace(/(,\s*){2,}/g, ', ').replace(/\s+,/g, ',').replace(/\s{2,}/g, ' ').replace(/^[,\s]+|[,\s]+$/g, '');
+    t = t.split(',').map((m) => (/[A-Z]{3}/.test(m) && !/[a-zà-ÿ]/.test(m) ? casseLisible(m) : m)).join(',');
+    return t;
+  } catch { return String(texte ?? ''); }
+}
+
 export function formaterAdresseMagasin(m) {
-  const adresse = String(m?.adresse || '').trim();
+  const adresse = adresseLisible(m?.adresse);
   const dans = pourComparerAdresse(adresse);
   const dejaLa = (morceau) => {
     const c = pourComparerAdresse(morceau);
     return c.trim() !== '' && dans.includes(c);
   };
   const cp = m?.code_postal && !dejaLa(m.code_postal) ? m.code_postal : null;
-  const ville = m?.ville && !dejaLa(m.ville) ? m.ville : null;
+  const ville = m?.ville && !dejaLa(m.ville) ? adresseLisible(m.ville) : null;
   const cpVille = [cp, ville].filter(Boolean).join(' ');
   return [adresse, cpVille].filter(Boolean).join(', ');
 }
