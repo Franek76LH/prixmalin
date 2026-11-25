@@ -9,6 +9,7 @@ import { supabase } from "./lib/supabase";
 import { storeIdFromName as storeIdFromNameEnseignes, chargerEnseignes, enseignesEnCache, trouverEnseigneDansNom } from "./lib/enseignesMagasin";
 import { doitProposerNouveauMagasin, magasinReconnuPourTicket } from "./lib/nouveauMagasinTicket";
 import { motsQuiClochent, phraseMotsQuiClochent } from "./lib/motsQuiClochent";
+import { suivreRecherche, annulerSuiviRecherche } from "./lib/recherchesSansResultat";
 import { enseigneAnnuaire, lieuDuTicket, chercherDansLaVille, chercherAutour, classerCandidats, libelleAnnuaire, adressePourCreation, positionDuTelephone } from "./lib/annuaireMagasins";
 import { mapperLigneListeCourses, chargerVariantes, getCategoryPresentation, formatFormatStructure, calculerPrixUnitaire, prixEstFiable, offresPrioritaires, MENTION_PRIX_A_VERIFIER } from "./lib/catalogueCore";
 import { calculerPrixReferenceParUnite } from "./lib/unitesCore";
@@ -4833,6 +4834,8 @@ function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab, onDicter = null,
       if (mySeq !== searchSeq.current) return; // réponse obsolète, ignorée
       if (errRpc) { setSearchError("Recherche impossible."); setSearching(false); return; }
       const ids = (matches || []).map(m => m.produit_id);
+      // Chantier 175 — recherche vide : notée (anonyme) si elle le reste 2 s.
+      suivreRecherche(q, ids.length === 0);
       if (ids.length === 0) { setSearchResults([]); setSearching(false); return; }
       const { data, error } = await supabase.from('produits').select(COLS).in('id', ids);
       if (mySeq !== searchSeq.current) return;
@@ -4859,6 +4862,7 @@ function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab, onDicter = null,
 
   // Aucun setState synchrone dans le corps de l'effet : uniquement l'armement du timer.
   useEffect(() => {
+    annulerSuiviRecherche(); // Chantier 175 — nouvelle frappe : pas de note en attente
     if (searchQuery.trim().length < 2) return;
     const timer = setTimeout(() => runSearch(searchQuery.trim()), 280);
     return () => clearTimeout(timer);
