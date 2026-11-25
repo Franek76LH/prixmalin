@@ -5481,7 +5481,7 @@ function EditItemSheet({ item, onClose, onSave }) {
 }
 
 // ── LIST TAB ──────────────────────────────────────────────────────────────────
-function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites, saveFavorites, onSetMarquePref, itemsReportes = [], onReactiverReporte, onSupprimerReporte, liaisonsProposees = {}, onRelier, onDicter = null }) {
+function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites, saveFavorites, onSetMarquePref, itemsReportes = [], onReactiverReporte, onSupprimerReporte, liaisonsProposees = {}, onRelier, onDicter = null, onOuvrirFavoris = null }) {
   const [showFavModal, setShowFavModal] = useState(false);
   const [editItem,     setEditItem]     = useState(null);
 
@@ -5555,6 +5555,15 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
               <button onClick={()=>setShowFavModal(false)} style={{ background:"rgba(255,255,255,0.2)", border:"none", borderRadius:99, width:28, height:28, color:C.white, fontSize:14, cursor:"pointer" }}>✕</button>
             </div>
             <div style={{ padding:"20px 20px 44px" }}>
+              {/* Chantier 193 — les favoris (produits au cœur) au même endroit que
+                  les courses habituelles (la liste type). */}
+              {onOuvrirFavoris && (
+                <button onClick={()=>{ setShowFavModal(false); onOuvrirFavoris(); }} style={{ width:"100%", padding:"13px 14px", marginBottom:16, border:`1.5px solid ${C.grayLight}`, borderRadius:12, background:C.white, fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:14, color:C.text, cursor:"pointer", textAlign:"left", display:"flex", alignItems:"center", gap:10 }}>
+                  <span style={{ fontSize:18 }}>❤️</span>
+                  <span style={{ flex:1 }}>Mes favoris<span style={{ display:"block", fontWeight:600, fontSize:12, color:C.textLight }}>Tes produits préférés, à remettre un par un</span></span>
+                  <span style={{ color:C.textLight }}>›</span>
+                </button>
+              )}
 
               {/* Aperçu des favoris */}
               {favorites.length>0 && (
@@ -12090,7 +12099,7 @@ export default function App() {
               progression={calculerProgression(sessionCoursesActive.articles)} magasin={sessionCoursesActive.magasin?.nom ?? null}/>
           )}
           {loaded && tab==="courses" && sessionCoursesAccessible && sessionCoursesActive && <CoursesTab session={sessionCoursesActive} onChangerEtat={changerEtatArticleSession} onAjouterNote={ajouterNoteCourses} onSupprimerNote={supprimerNoteCourses} onRemplacer={remplacerArticleCourses} onAnnulerRemplacement={annulerRemplacementCourses} onTerminer={demanderTerminerCourses} onPasserEnCaisse={()=>setCaisseCourses(true)} syncEchec={syncCoursesEchec}/>}
-          {loaded && tab==="list"      && <ListTab onDicter={accesAvance ? ()=>setTab("micro") : null} liaisonsProposees={liaisonsProposees} onRelier={relierArticle}      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} onSetMarquePref={setMarquePrefItem} itemsReportes={itemsReportes} onReactiverReporte={reactiverReporte} onSupprimerReporte={supprimerReporte}/>}
+          {loaded && tab==="list"      && <ListTab onDicter={accesAvance ? ()=>setTab("micro") : null} onOuvrirFavoris={()=>setShowFavorisSheet(true)} liaisonsProposees={liaisonsProposees} onRelier={relierArticle}      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} onSetMarquePref={setMarquePrefItem} itemsReportes={itemsReportes} onReactiverReporte={reactiverReporte} onSupprimerReporte={supprimerReporte}/>}
           {loaded && tab==="catalog"   && <CatalogTab   focusRecherche={modeCatalogue==="recherche"} items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab} onDicter={accesAvance ? ()=>setTab("micro") : null}/>}
           {/* Chantier 160 — des courses en cours : on peut y revenir d'ici. */}
           {loaded && tab==="compare" && sessionCoursesAccessible && sessionCoursesActive && (

@@ -76,13 +76,14 @@ export default function EcranMoi({
         <Ligne pastille="🧾" libelle="Mes tickets" detail="Tous tes tickets scannés" onClick={() => setTab('archive')} />
         <Ligne pastille="📈" libelle="Évolution de mes prix" detail="La courbe de tes produits, et ceux qui baissent" onClick={() => setTab('evolution')} pastilleRouge={nbBaisses} />
         <Ligne pastille="🏷️" libelle="Prix que j'ai relevés" detail="Tous tes prix, ticket par ticket" onClick={onMesPrix} />
-        <Ligne pastille="❤️" libelle="Mes favoris" detail="Tes produits préférés, à remettre dans ta liste" onClick={onFavoris} dernier />
+        <Ligne pastille="❤️" libelle="Mes favoris" detail="Tes produits préférés (aussi dans Ma liste → ⭐)" onClick={onFavoris} dernier />
       </Groupe>
 
       <Groupe titre="Mon compte">
-        {onProfil && <Ligne pastille="🏅" libelle="Mon profil et mes badges" onClick={onProfil} />}
+        {onProfil && <Ligne pastille="🏅" libelle="Mon profil et mes badges" detail="Points, badges et tes contributions" onClick={onProfil} />}
         <Ligne pastille="👥" libelle="Mon cercle" detail="Partage tes prix avec tes proches" onClick={onCercle} pastilleRouge={invitationsEnAttente} />
-        <Ligne pastille="📊" libelle="Mes statistiques" onClick={onStats} />
+        {/* Chantier 193 — « Mes contributions » de Mon profil fait déjà ce travail. */}
+        {!onProfil && <Ligne pastille="📊" libelle="Mes statistiques" onClick={onStats} />}
         <Ligne pastille="💬" libelle="Nous contacter" onClick={onAide} dernier />
       </Groupe>
 

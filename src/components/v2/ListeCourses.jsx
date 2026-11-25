@@ -192,7 +192,7 @@ export default function ListeCourses({
       )}
 
       <button onClick={onFavoris} style={{ width: '100%', border: 'none', background: 'none', color: T.texteDoux, padding: '6px', fontFamily: T.police, fontWeight: 800, fontSize: 13, cursor: 'pointer' }}>
-        ⭐ {nbFavoris > 0 ? 'Mes courses habituelles' : 'Enregistrer comme courses habituelles'}
+        ⭐ {nbFavoris > 0 ? 'Mes courses habituelles et favoris' : 'Courses habituelles et favoris'}
       </button>
 
     </div>
