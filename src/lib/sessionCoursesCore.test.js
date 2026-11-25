@@ -6,7 +6,7 @@ vi.mock('./supabase', () => ({
 
 import { supabase } from './supabase';
 import {
-  articlesAAcheter,
+  articlesAAcheter, remplacerArticleSession, annulerRemplacementSession,
   RAYON_AUTRES,
   emojiRayon,
   chargerRayonsProduits,
@@ -718,5 +718,32 @@ describe('Chantier 176 — articlesAAcheter', () => {
   });
   it('tolère une liste absente', () => {
     expect(articlesAAcheter(null)).toEqual([]);
+  });
+});
+
+describe('Chantier 182 — Remplacé par…', () => {
+  const base = { id: 's', statut: 'active', articles: [
+    { cle: 'a', type: 'caddie', nom_affiche: 'Steak haché', etat: 'introuvable', quantite: 1 },
+    { cle: 'b', type: 'caddie', nom_affiche: 'Pâtes', etat: 'a_prendre', quantite: 1 },
+  ] };
+  it('marque l\'article et ajoute le remplaçant déjà dans le caddie', () => {
+    const s = remplacerArticleSession(base, 'a', ' Poulet ', 't', 'n1');
+    expect(s.articles.find(x => x.cle === 'a')).toMatchObject({ etat: 'introuvable', remplace_par: 'Poulet' });
+    expect(s.articles.find(x => x.cle === 'note:n1')).toMatchObject({ type: 'note', etat: 'au_caddie', remplace_cle: 'a', nom_affiche: 'Poulet' });
+  });
+  it('un second remplacement change le texte, sans seconde note', () => {
+    const s = remplacerArticleSession(remplacerArticleSession(base, 'a', 'Poulet', 't', 'n1'), 'a', 'Dinde', 't2', 'n2');
+    expect(s.articles.filter(x => x.type === 'note')).toHaveLength(1);
+    expect(s.articles.find(x => x.type === 'note').nom_affiche).toBe('Dinde');
+  });
+  it('refuse un article qui n\'est pas introuvable, ou un texte vide', () => {
+    expect(remplacerArticleSession(base, 'b', 'Riz', 't', 'n')).toBe(base);
+    expect(remplacerArticleSession(base, 'a', '  ', 't', 'n')).toBe(base);
+  });
+  it('annuler retire la marque et la note', () => {
+    const s = annulerRemplacementSession(remplacerArticleSession(base, 'a', 'Poulet', 't', 'n1'), 'a', 't2');
+    expect(s.articles).toHaveLength(2);
+    expect(s.articles.find(x => x.cle === 'a').remplace_par).toBeUndefined();
+    expect(annulerRemplacementSession(base, 'a', 't')).toBe(base);
   });
 });

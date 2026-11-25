@@ -18,7 +18,7 @@ import { nomComposeVariante, formatEtiquetteVariante } from "./lib/nomProduit";
 import { transcrireAudioListe, normaliserNomElement, comptesParNom, fusionnerParNom, demanderRapprochementListe, regrouperPourCaddie } from "./lib/microVocal";
 import { fusionnerPropositions, ficheARelierSeule } from "./lib/rapprochementIA";
 // Chantier « Courses » Lot 1 — session de courses figée (shadow estFrancois).
-import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession, ajouterNoteSession, supprimerNoteSession, cloreSession, idsCaddieASupprimer, articlesNonAchetesASupprimer, construireBilanCourses, doitRattacherTicketSession, chargerMarquesVariantes, calculerTotalPanier, articlesAAcheter } from "./lib/sessionCoursesCore";
+import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession, ajouterNoteSession, supprimerNoteSession, cloreSession, idsCaddieASupprimer, articlesNonAchetesASupprimer, construireBilanCourses, doitRattacherTicketSession, chargerMarquesVariantes, calculerTotalPanier, articlesAAcheter, remplacerArticleSession, annulerRemplacementSession } from "./lib/sessionCoursesCore";
 // Chantier 91 Lot 5 — rapprochement liste / cochés / ticket.
 import { rapprocherSessionTicket, appliquerRapprochementSession, deciderAchatArticle, construireNormaliseur, textesARapprocher } from "./lib/rapprochementCoursesCore";
 // Chantier 92 Lot 6 — favoris Core (par format) & récurrents. Distinct des
@@ -9367,7 +9367,7 @@ function LigneArticleCourses({ article, variante, onCocher, onIntrouvable, onRes
   );
 }
 
-function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, onTerminer, onPasserEnCaisse, syncEchec = false }) {
+function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, onRemplacer = null, onAnnulerRemplacement = null, onTerminer, onPasserEnCaisse, syncEchec = false }) {
   const F = "'Nunito',sans-serif";
   // « Dans le caddie » repliée par défaut — hooks déclarés AVANT le early
   // return (règle des Hooks : ordre stable entre rendus).
@@ -9379,6 +9379,8 @@ function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, on
   const [rayonsReplies, setRayonsReplies] = useState({});
   // Lot 5 — saisie d'une note libre (null = champ fermé).
   const [texteNote, setTexteNote] = useState(null);
+  // Chantier 182 — saisie « Remplacé par… » ({ cle, texte } ou null).
+  const [remplacement, setRemplacement] = useState(null);
   // Lot 7 — annulation immédiate du dernier cochage ({cle, nom}, effacé après 4 s).
   const [derniereCoche, setDerniereCoche] = useState(null);
   useEffect(() => {
@@ -9504,9 +9506,36 @@ function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, on
           </div>
           <div style={{ display:"flex", flexDirection:"column" }}>
             {introuvables.map(article => (
-              <LigneArticleCourses key={article.cle} article={article} variante="introuvable"
-                onCocher={()=>{ onChangerEtat?.(article.cle, 'au_caddie'); setDerniereCoche({ cle: article.cle, nom: article.nom_affiche }); }}
-                onRestaurer={()=>onChangerEtat?.(article.cle, 'a_prendre')} />
+              <div key={article.cle}>
+                <LigneArticleCourses article={article} variante="introuvable"
+                  onCocher={()=>{ onChangerEtat?.(article.cle, 'au_caddie'); setDerniereCoche({ cle: article.cle, nom: article.nom_affiche }); }}
+                  onRestaurer={()=>onChangerEtat?.(article.cle, 'a_prendre')} />
+                {/* Chantier 182 — « Remplacé par… » : on note ce qu'on a pris à
+                    la place ; le bilan le dira et ne gardera pas l'article. */}
+                {onRemplacer && (remplacement?.cle === article.cle ? (
+                  <div style={{ display:"flex", gap:8, padding:"4px 0 10px 52px" }}>
+                    <input autoFocus value={remplacement.texte} placeholder="Ex. : Poulet"
+                      onChange={e=>setRemplacement({ cle: article.cle, texte: e.target.value })}
+                      onKeyDown={e=>{ if (e.key === 'Enter' && remplacement.texte.trim()) { onRemplacer(article.cle, remplacement.texte); setRemplacement(null); } if (e.key === 'Escape') setRemplacement(null); }}
+                      style={{ flex:1, minWidth:0, padding:"10px 12px", borderRadius:10, border:"1.5px solid #D1D1D6", fontFamily:F, fontSize:15, boxSizing:"border-box" }} />
+                    <button onClick={()=>{ if (remplacement.texte.trim()) { onRemplacer(article.cle, remplacement.texte); setRemplacement(null); } }} aria-label="Valider le remplacement"
+                      style={{ padding:"0 14px", border:"none", borderRadius:12, background:C.blue, fontFamily:F, fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer" }}>OK</button>
+                    <button onClick={()=>setRemplacement(null)} aria-label="Annuler"
+                      style={{ padding:"0 12px", border:`1.5px solid ${C.grayLight}`, borderRadius:12, background:"#fff", fontFamily:F, fontWeight:800, fontSize:14, color:C.gray, cursor:"pointer" }}>✕</button>
+                  </div>
+                ) : article.remplace_par ? (
+                  <div style={{ display:"flex", alignItems:"center", gap:8, padding:"0 0 10px 52px", fontFamily:F, fontSize:13, color:"#6D6D72" }}>
+                    <span style={{ flex:1, minWidth:0 }}>⇄ Remplacé par <strong style={{ color:"#1a1a1a" }}>{article.remplace_par}</strong></span>
+                    <button onClick={()=>setRemplacement({ cle: article.cle, texte: article.remplace_par })} style={{ border:"none", background:"none", color:C.blue, fontFamily:F, fontWeight:800, fontSize:12.5, cursor:"pointer", padding:"6px 4px" }}>Modifier</button>
+                    <button onClick={()=>onAnnulerRemplacement?.(article.cle)} style={{ border:"none", background:"none", color:"#AEAEB2", fontFamily:F, fontWeight:800, fontSize:12.5, cursor:"pointer", padding:"6px 4px" }}>Annuler</button>
+                  </div>
+                ) : (
+                  <button onClick={()=>setRemplacement({ cle: article.cle, texte: "" })}
+                    style={{ display:"block", border:"none", background:"none", padding:"0 0 10px 52px", fontFamily:F, fontWeight:800, fontSize:13, color:C.blue, cursor:"pointer", textAlign:"left" }}>
+                    ⇄ Remplacé par…
+                  </button>
+                ))}
+              </div>
             ))}
           </div>
         </div>
@@ -10873,7 +10902,12 @@ export default function App() {
   };
 
   const changerEtatArticleSession = (cle, nouvelEtat) => {
-    appliquerSessionCourses(appliquerEtatArticle(sessionCourses, cle, nouvelEtat, new Date().toISOString()));
+    // Chantier 182 — un article remplacé qu'on retrouve finalement (coché ou
+    // remis à prendre) perd son remplacement : la note remplaçante part.
+    const maintenantISO = new Date().toISOString();
+    const avecRemplacement = sessionCourses?.articles?.find(a => a.cle === cle)?.remplace_par;
+    const base = (avecRemplacement && nouvelEtat !== 'introuvable') ? annulerRemplacementSession(sessionCourses, cle, maintenantISO) : sessionCourses;
+    appliquerSessionCourses(appliquerEtatArticle(base, cle, nouvelEtat, maintenantISO));
     // Lot 7 — retour haptique léger quand un article rejoint le caddie
     // (Android ; l'API n'existe pas sur Safari iOS → no-op silencieux, le
     // retour visuel — case verte, bascule de section — fait l'équivalent).
@@ -10961,6 +10995,14 @@ export default function App() {
   // JAMAIS d'écriture dans produits/variantes_produit/prix.
   const ajouterNoteCourses = (texte) => {
     appliquerSessionCourses(ajouterNoteSession(sessionCourses, texte, new Date().toISOString(), genererIdSession()));
+  };
+
+  // Chantier 182 — « Remplacé par… » sur un article introuvable.
+  const remplacerArticleCourses = (cle, texte) => {
+    appliquerSessionCourses(remplacerArticleSession(sessionCourses, cle, texte, new Date().toISOString(), genererIdSession()));
+  };
+  const annulerRemplacementCourses = (cle) => {
+    appliquerSessionCourses(annulerRemplacementSession(sessionCourses, cle, new Date().toISOString()));
   };
 
   const supprimerNoteCourses = (cle) => {
@@ -11873,7 +11915,7 @@ export default function App() {
             <BasculeCourses ecran={tab} setTab={setTab} nbListe={items.filter(i=>!i.checked).length}
               progression={calculerProgression(sessionCoursesActive.articles)} magasin={sessionCoursesActive.magasin?.nom ?? null}/>
           )}
-          {loaded && tab==="courses" && sessionCoursesAccessible && sessionCoursesActive && <CoursesTab session={sessionCoursesActive} onChangerEtat={changerEtatArticleSession} onAjouterNote={ajouterNoteCourses} onSupprimerNote={supprimerNoteCourses} onTerminer={demanderTerminerCourses} onPasserEnCaisse={()=>setCaisseCourses(true)} syncEchec={syncCoursesEchec}/>}
+          {loaded && tab==="courses" && sessionCoursesAccessible && sessionCoursesActive && <CoursesTab session={sessionCoursesActive} onChangerEtat={changerEtatArticleSession} onAjouterNote={ajouterNoteCourses} onSupprimerNote={supprimerNoteCourses} onRemplacer={remplacerArticleCourses} onAnnulerRemplacement={annulerRemplacementCourses} onTerminer={demanderTerminerCourses} onPasserEnCaisse={()=>setCaisseCourses(true)} syncEchec={syncCoursesEchec}/>}
           {loaded && tab==="list"      && <ListTab onDicter={accesAvance ? ()=>setTab("micro") : null} liaisonsProposees={liaisonsProposees} onRelier={relierArticle}      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} onSetMarquePref={setMarquePrefItem} itemsReportes={itemsReportes} onReactiverReporte={reactiverReporte} onSupprimerReporte={supprimerReporte}/>}
           {loaded && tab==="catalog"   && <CatalogTab   focusRecherche={modeCatalogue==="recherche"} items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab} onDicter={accesAvance ? ()=>setTab("micro") : null}/>}
           {/* Chantier 160 — des courses en cours : on peut y revenir d'ici. */}

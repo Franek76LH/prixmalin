@@ -157,3 +157,15 @@ describe('chantier 163 — démo « ?demo=bilan »', () => {
     expect(b.nonReconnues).toHaveLength(1);
   });
 });
+
+describe('chantier 182 — remplacé par…', () => {
+  it('le reste dit « remplacé » et la liste des remplacements est donnée', () => {
+    const articles = [
+      { cle: '1', type: 'caddie', nom_affiche: 'Steak haché', quantite: 1, etat: 'introuvable', remplace_par: 'Poulet' },
+      { cle: 'note:x', type: 'note', nom_affiche: 'Poulet', quantite: 1, etat: 'au_caddie', remplace_cle: '1' },
+    ];
+    const b = construireBilanFin({ articles, lignesTicket: null, quantitesListe: new Map([['1', 1]]) });
+    expect(b.reste).toEqual([expect.objectContaining({ cle: '1', raison: 'remplace', remplacePar: 'Poulet' })]);
+    expect(b.remplacements).toEqual([{ cle: '1', nom: 'Steak haché', par: 'Poulet' }]);
+  });
+});

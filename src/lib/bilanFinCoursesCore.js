@@ -132,10 +132,10 @@ export function construireBilanFin({ articles, lignesTicket = null, quantitesLis
     if (restant > 0) {
       const ajouteDepuis = Math.max(0, qActuelle - prevu);
       let raison = 'pas_pris';
-      if (a.etat === 'introuvable') raison = 'introuvable';
+      if (a.etat === 'introuvable') raison = a.remplace_par ? 'remplace' : 'introuvable';
       else if (qAchetee > 0 && restant > ajouteDepuis) raison = 'partiel';
       else if (qAchetee >= prevu && ajouteDepuis > 0) raison = 'ajoute_depuis';
-      reste.push({ cle: a.cle, nom, quantite: restant, quantiteActuelle: qActuelle, ajouteDepuis, raison });
+      reste.push({ cle: a.cle, nom, quantite: restant, quantiteActuelle: qActuelle, ajouteDepuis, raison, ...(a.remplace_par ? { remplacePar: a.remplace_par } : {}) });
     }
   }
 
@@ -144,9 +144,12 @@ export function construireBilanFin({ articles, lignesTicket = null, quantitesLis
     quantite: g.restant, montant: prixParUnite(g) != null ? arrondi(prixParUnite(g) * g.restant) : null,
   }));
 
+  // Chantier 182 — remplacements décidés en rayon (« Remplacé par… »).
+  const remplacements = caddie.filter(a => a.remplace_par).map(a => ({ cle: a.cle, nom: a.nom_affiche || a.nom_reference || 'Article', par: a.remplace_par }));
+
   return {
     avecTicket,
-    retrouves, enPlus, reste, aVerifier, nonReconnues,
+    retrouves, enPlus, reste, aVerifier, nonReconnues, remplacements,
     totalEnPlus: arrondi(enPlus.reduce((s, e) => s + (e.montant ?? 0), 0)),
   };
 }

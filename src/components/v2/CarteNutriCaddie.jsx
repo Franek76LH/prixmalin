@@ -28,7 +28,7 @@ export default function CarteNutriCaddie({ articles = [], titre = 'Nutri-Score d
   const r = calculerNutriPanier(articles, infos);
   if (r.etat === 'vide') return null;
   if (r.etat === 'insuffisant') {
-    if (!discretSiInsuffisant) return null;
+    if (!discretSiInsuffisant || r.nbNotes === 0) return null;
     return (
       <div style={{ fontFamily: T.police, fontSize: 12.5, color: T.texteDoux, background: T.carte, borderRadius: 14, padding: '10px 14px', marginBottom: 12, boxShadow: T.ombre }}>
         🥗 Nutri-Score de ton caddie : {r.nbNotes * 2 >= r.nbAlimentaires

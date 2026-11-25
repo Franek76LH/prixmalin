@@ -16,6 +16,10 @@ const LIBELLE_RAISON = {
   partiel: 'pas tout pris',
   ajoute_depuis: 'ajouté depuis',
 };
+// Chantier 182 — un article remplacé en rayon n'est plus gardé par défaut
+// dans Ma liste (on l'a remplacé : on n'en a sans doute plus besoin). La case
+// reste là pour le garder quand même.
+const gardeParDefaut = (r) => !r.remplacePar;
 
 function Rubrique({ titre, detail = null, couleur = T.texte, children }) {
   return (
@@ -59,18 +63,21 @@ export default function EcranFinCourses({ session, items = [], onTerminer, onPlu
 
   const magasin = session?.magasin?.nom;
   const totalReel = session?.ticket_total_reel;
-  const nbGardes = bilan.reste.filter(r => garder[r.cle] !== false).length;
+  const estGarde = (r) => garder[r.cle] ?? gardeParDefaut(r);
+  const nbGardes = bilan.reste.filter(estGarde).length;
+  // Choix effectifs transmis à la clôture (défauts compris).
+  const garderEffectif = Object.fromEntries(bilan.reste.map(r => [r.cle, estGarde(r)]));
 
   const terminer = async () => {
     if (envoi) return;
     setEnvoi(true);
-    const plan = planClotureListe({ articles: session?.articles, bilan, quantitesListe, garder });
+    const plan = planClotureListe({ articles: session?.articles, bilan, quantitesListe, garder: garderEffectif });
     if (demo) {
       const nomDe = (id) => (session?.articles || []).find(a => String(a.cle) === String(id))?.nom_affiche || id;
       const touches = new Set([...plan.supprimer, ...plan.majQuantite.map(m => m.id)].map(String));
       setResultatDemo([
         ...plan.majQuantite.map(m => `${nomDe(m.id)} : reste dans Ma liste, quantité ${quantitesListe.get(String(m.id))} → ${m.quantite}`),
-        ...bilan.reste.filter(r => garder[r.cle] !== false && !touches.has(String(r.cle))).map(r => `${r.nom} : reste dans Ma liste (× ${r.quantite})`),
+        ...bilan.reste.filter(r => estGarde(r) && !touches.has(String(r.cle))).map(r => `${r.nom} : reste dans Ma liste (× ${r.quantite})`),
         ...plan.supprimer.map(id => `${nomDe(id)} : retiré de Ma liste`),
         ...(items || []).filter(i => !(session?.articles || []).some(a => String(a.cle) === String(i.id))).map(i => `${i.nom || 'Autre article'} : pas touché, il ne faisait pas partie de ces courses`),
         ...bilan.enPlus.map(e => `${e.nom} : acheté en plus, Ma liste n'est pas touchée`),
@@ -135,14 +142,22 @@ export default function EcranFinCourses({ session, items = [], onTerminer, onPlu
           </Rubrique>
         )}
 
+        {bilan.remplacements?.length > 0 && (
+          <Rubrique titre={`⇄ Remplacements (${bilan.remplacements.length})`} couleur={T.texte}>
+            {bilan.remplacements.map(r => (
+              <Ligne key={r.cle} gauche={r.par} sous={`à la place de : ${r.nom}`} />
+            ))}
+          </Rubrique>
+        )}
         {bilan.reste.length > 0 && (
           <Rubrique titre={`↩︎ Reste à acheter (${bilan.reste.length})`} couleur={T.texte}>
             <div style={{ fontFamily: T.police, fontSize: 12.5, color: T.texteDoux, marginBottom: 4 }}>Coché = gardé dans Ma liste. Décoche ce dont tu n'as plus besoin.</div>
             {bilan.reste.map(r => {
-              const garde = garder[r.cle] !== false;
+              const garde = estGarde(r);
+              const libelleRaison = r.raison === 'remplace' ? `remplacé par ${r.remplacePar}` : LIBELLE_RAISON[r.raison];
               const sous = r.ajouteDepuis > 0 && r.raison !== 'ajoute_depuis'
-                ? `${LIBELLE_RAISON[r.raison]} · dont ${r.ajouteDepuis} ajouté${r.ajouteDepuis > 1 ? 's' : ''} depuis`
-                : LIBELLE_RAISON[r.raison];
+                ? `${libelleRaison} · dont ${r.ajouteDepuis} ajouté${r.ajouteDepuis > 1 ? 's' : ''} depuis`
+                : libelleRaison;
               return (
                 <Ligne key={r.cle} gauche={`${r.nom}${r.quantite > 1 ? ` × ${r.quantite}` : ''}`} sous={sous}
                   avant={(

@@ -486,3 +486,47 @@ export function calculerProgression(articles) {
 export function articlesAAcheter(items) {
   return (Array.isArray(items) ? items : []).filter(i => i && !i.checked);
 }
+
+// Chantier 182 — « Remplacé par… » : un article introuvable en rayon,
+// remplacé par un autre. L'article garde son état « introuvable » et porte
+// `remplace_par` (le texte) ; le remplaçant est ajouté comme une note déjà
+// « dans le caddie », reliée par `remplace_cle`. Un second remplacement du
+// même article change le texte du remplaçant existant (jamais deux notes).
+// Pur : renvoie la session inchangée (même référence) si rien ne s'applique.
+export function remplacerArticleSession(session, cle, texte, modifieLeISO, idNote) {
+  const texteNet = (texte || '').trim();
+  if (!session || !texteNet) return session;
+  const articles = session.articles || [];
+  const cible = articles.find(a => a.cle === cle);
+  if (!cible || cible.type === 'note' || cible.etat !== 'introuvable') return session;
+  const existante = articles.find(a => a.type === 'note' && a.remplace_cle === cle);
+  let suivants = articles.map(a => (a.cle === cle ? { ...a, remplace_par: texteNet } : a));
+  if (existante) {
+    suivants = suivants.map(a => (a.cle === existante.cle ? { ...a, nom_reference: texteNet, nom_affiche: texteNet } : a));
+  } else {
+    if (!idNote) return session;
+    suivants = [...suivants, {
+      cle: `note:${idNote}`, type: 'note', produit_id: null, nom_reference: texteNet, nom_marque: null, est_mdd: false,
+      format_libelle: '', nom_affiche: texteNet, quantite: 1, prix_prevu: null, variante_produit_id: null,
+      rayon: RAYON_NOTE, etat: 'au_caddie', coche_le: modifieLeISO, remplace_cle: cle,
+    }];
+  }
+  return { ...session, articles: suivants, modifie_le: modifieLeISO };
+}
+
+// Annule le remplacement d'un article : retire `remplace_par` et la note
+// remplaçante. Sans remplacement : session inchangée (même référence).
+export function annulerRemplacementSession(session, cle, modifieLeISO) {
+  if (!session) return session;
+  const articles = session.articles || [];
+  const cible = articles.find(a => a.cle === cle);
+  if (!cible || !cible.remplace_par) return session;
+  const suivants = articles
+    .filter(a => !(a.type === 'note' && a.remplace_cle === cle))
+    .map(a => {
+      if (a.cle !== cle) return a;
+      const { remplace_par: _retire, ...reste } = a;
+      return reste;
+    });
+  return { ...session, articles: suivants, modifie_le: modifieLeISO };
+}
