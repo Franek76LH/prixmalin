@@ -137,7 +137,7 @@ export default function EcranFinCourses({ session, items = [], onTerminer, onPlu
         {bilan.enPlus.length > 0 && (
           <Rubrique titre={`➕ Achats en plus (${bilan.enPlus.length})`} detail={bilan.totalEnPlus ? euros(bilan.totalEnPlus) : null} couleur={T.bleu}>
             {bilan.enPlus.map((e, i) => (
-              <Ligne key={i} gauche={e.nom} sous={e.quantite > 1 ? `× ${e.quantite}` : null} droite={euros(e.montant)} />
+              <Ligne key={i} gauche={e.nom} sous={[e.quantite > 1 ? `× ${e.quantite}` : null, e.ajouteEnRayon ? 'ajouté en rayon' : null].filter(Boolean).join(' · ') || null} droite={euros(e.montant)} />
             ))}
           </Rubrique>
         )}
@@ -145,7 +145,7 @@ export default function EcranFinCourses({ session, items = [], onTerminer, onPlu
         {bilan.remplacements?.length > 0 && (
           <Rubrique titre={`⇄ Remplacements (${bilan.remplacements.length})`} couleur={T.texte}>
             {bilan.remplacements.map(r => (
-              <Ligne key={r.cle} gauche={r.par} sous={`à la place de : ${r.nom}`} />
+              <Ligne key={r.cle} gauche={r.par} sous={`à la place de : ${r.nom}`} droite={r.montant != null ? euros(r.montant) : null} />
             ))}
           </Rubrique>
         )}

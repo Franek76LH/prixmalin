@@ -85,6 +85,7 @@ import ResultatComparaison from "./components/v2/ResultatComparaison";
 import ChoixMagasinComparaison from "./components/v2/ChoixMagasinComparaison";
 import PastilleNutriScore from "./components/v2/PastilleNutriScore";
 import CarteNutriCaddie from "./components/v2/CarteNutriCaddie";
+import SuggestionsCatalogue from "./components/v2/SuggestionsCatalogue";
 import { resumeNutri, lettreNutri, COULEURS_NUTRI } from "./lib/nutriScoreCore";
 import { classerMagasinsComparables, ETAT_INSUFFISANT as CLASSEMENT_INSUFFISANT } from "./lib/classementHonnete";
 import EcranEconomies from "./components/v2/EcranEconomies";
@@ -9421,6 +9422,11 @@ function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, on
     if (texte) onAjouterNote?.(texte);
     setTexteNote(null);
   };
+  // Chantier 183 — fiche choisie dans les suggestions du catalogue.
+  const choisirNoteCatalogue = (produit) => {
+    onAjouterNote?.(produit.nom, produit);
+    setTexteNote(null);
+  };
   const toutPris = prog.total > 0 && prog.restants === 0;
   const ratio = prog.total > 0 ? prog.pris / prog.total : 0;
   // Lot 8 (ajustement) — montant dynamique du panier (articles cochés).
@@ -9483,7 +9489,8 @@ function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, on
       })}
 
       {/* Tout est pris — état célébratoire, version épurée (Lot 8) */}
-      {toutPris && (
+      {/* Chantier 183 — pas de « tout est dans le caddie » s'il reste des introuvables. */}
+      {toutPris && introuvables.length === 0 && (
         <div style={{ padding:"22px 0", textAlign:"center", marginBottom:10 }}>
           <div style={{ fontSize:32, marginBottom:4 }}>🎉</div>
           <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:C.green }}>
@@ -9535,6 +9542,10 @@ function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, on
                     ⇄ Remplacé par…
                   </button>
                 ))}
+                {onRemplacer && remplacement?.cle === article.cle && (
+                  <SuggestionsCatalogue texte={remplacement.texte} decalage={52}
+                    onChoisir={(p)=>{ onRemplacer(article.cle, p.nom, p); setRemplacement(null); }} />
+                )}
               </div>
             ))}
           </div>
@@ -9605,6 +9616,7 @@ function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, on
             </button>
           </div>
         )}
+        {texteNote !== null && <SuggestionsCatalogue texte={texteNote} onChoisir={choisirNoteCatalogue} />}
       </div>
 
       {prog.total === 0 && (
@@ -10993,13 +11005,13 @@ export default function App() {
   // Lot 5 — notes libres « Ajoutés en route » : données de session uniquement
   // (localStorage + sessions_courses.donnees via la synchro débouncée),
   // JAMAIS d'écriture dans produits/variantes_produit/prix.
-  const ajouterNoteCourses = (texte) => {
-    appliquerSessionCourses(ajouterNoteSession(sessionCourses, texte, new Date().toISOString(), genererIdSession()));
+  const ajouterNoteCourses = (texte, produit = null) => {
+    appliquerSessionCourses(ajouterNoteSession(sessionCourses, texte, new Date().toISOString(), genererIdSession(), produit));
   };
 
   // Chantier 182 — « Remplacé par… » sur un article introuvable.
-  const remplacerArticleCourses = (cle, texte) => {
-    appliquerSessionCourses(remplacerArticleSession(sessionCourses, cle, texte, new Date().toISOString(), genererIdSession()));
+  const remplacerArticleCourses = (cle, texte, produit = null) => {
+    appliquerSessionCourses(remplacerArticleSession(sessionCourses, cle, texte, new Date().toISOString(), genererIdSession(), produit));
   };
   const annulerRemplacementCourses = (cle) => {
     appliquerSessionCourses(annulerRemplacementSession(sessionCourses, cle, new Date().toISOString()));

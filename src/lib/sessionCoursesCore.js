@@ -317,13 +317,15 @@ export const RAYON_NOTE = Object.freeze({
 // session (localStorage + sessions_courses.donnees). Texte vide/blanc :
 // session inchangée (même référence). idNote est fourni par l'appelant
 // (genererIdSession) pour rester pur.
-export function ajouterNoteSession(session, texte, modifieLeISO, idNote) {
+// Chantier 183 — `produit` ({ id }) facultatif : l'article ajouté en rayon a été
+// choisi dans le catalogue ; le bilan pourra le reconnaître sur le ticket.
+export function ajouterNoteSession(session, texte, modifieLeISO, idNote, produit = null) {
   const texteNet = (texte || '').trim();
   if (!session || !texteNet || !idNote) return session;
   const note = {
     cle: `note:${idNote}`,
     type: 'note',
-    produit_id: null,
+    produit_id: produit?.id ?? null,
     nom_reference: texteNet,
     nom_marque: null,
     est_mdd: false,
@@ -493,7 +495,7 @@ export function articlesAAcheter(items) {
 // « dans le caddie », reliée par `remplace_cle`. Un second remplacement du
 // même article change le texte du remplaçant existant (jamais deux notes).
 // Pur : renvoie la session inchangée (même référence) si rien ne s'applique.
-export function remplacerArticleSession(session, cle, texte, modifieLeISO, idNote) {
+export function remplacerArticleSession(session, cle, texte, modifieLeISO, idNote, produit = null) {
   const texteNet = (texte || '').trim();
   if (!session || !texteNet) return session;
   const articles = session.articles || [];
@@ -502,11 +504,11 @@ export function remplacerArticleSession(session, cle, texte, modifieLeISO, idNot
   const existante = articles.find(a => a.type === 'note' && a.remplace_cle === cle);
   let suivants = articles.map(a => (a.cle === cle ? { ...a, remplace_par: texteNet } : a));
   if (existante) {
-    suivants = suivants.map(a => (a.cle === existante.cle ? { ...a, nom_reference: texteNet, nom_affiche: texteNet } : a));
+    suivants = suivants.map(a => (a.cle === existante.cle ? { ...a, nom_reference: texteNet, nom_affiche: texteNet, produit_id: produit?.id ?? null } : a));
   } else {
     if (!idNote) return session;
     suivants = [...suivants, {
-      cle: `note:${idNote}`, type: 'note', produit_id: null, nom_reference: texteNet, nom_marque: null, est_mdd: false,
+      cle: `note:${idNote}`, type: 'note', produit_id: produit?.id ?? null, nom_reference: texteNet, nom_marque: null, est_mdd: false,
       format_libelle: '', nom_affiche: texteNet, quantite: 1, prix_prevu: null, variante_produit_id: null,
       rayon: RAYON_NOTE, etat: 'au_caddie', coche_le: modifieLeISO, remplace_cle: cle,
     }];

@@ -139,13 +139,30 @@ export function construireBilanFin({ articles, lignesTicket = null, quantitesLis
     }
   }
 
-  const enPlus = restants.filter(g => g.restant > 0).map(g => ({
+  let enPlus = restants.filter(g => g.restant > 0).map(g => ({
     produit_id: g.produit_id, variante_produit_id: g.variante_produit_id, nom: g.libelle,
     quantite: g.restant, montant: prixParUnite(g) != null ? arrondi(prixParUnite(g) * g.restant) : null,
   }));
 
   // Chantier 182 — remplacements décidés en rayon (« Remplacé par… »).
-  const remplacements = caddie.filter(a => a.remplace_par).map(a => ({ cle: a.cle, nom: a.nom_affiche || a.nom_reference || 'Article', par: a.remplace_par }));
+  const remplacements = caddie.filter(a => a.remplace_par).map(a => ({ cle: a.cle, nom: a.nom_affiche || a.nom_reference || 'Article', par: a.remplace_par, montant: null }));
+
+  // Chantier 183 — ajouts en rayon choisis dans le catalogue (notes avec
+  // produit_id, cochées) : reconnus sur le ticket par le produit. Un
+  // remplaçant retrouvé passe dans « Remplacements » avec son prix (et quitte
+  // « Achats en plus ») ; un oubli retrouvé reste « en plus », marqué
+  // « ajouté en rayon ».
+  const notesReliees = (articles || []).filter(a => a && a.type === 'note' && a.produit_id != null && a.etat === 'au_caddie');
+  const dejaRelies = new Set();
+  for (const n of notesReliees) {
+    const i = enPlus.findIndex((e, idx) => !dejaRelies.has(idx) && e.produit_id === n.produit_id);
+    if (i < 0) continue;
+    dejaRelies.add(i);
+    const remplacement = n.remplace_cle != null ? remplacements.find(r => r.cle === n.remplace_cle) : null;
+    if (remplacement) { remplacement.montant = enPlus[i].montant; enPlus[i] = { ...enPlus[i], _retirer: true }; }
+    else enPlus[i] = { ...enPlus[i], ajouteEnRayon: true };
+  }
+  enPlus = enPlus.filter(e => !e._retirer);
 
   return {
     avecTicket,

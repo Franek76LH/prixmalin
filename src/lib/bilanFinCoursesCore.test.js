@@ -166,6 +166,25 @@ describe('chantier 182 — remplacé par…', () => {
     ];
     const b = construireBilanFin({ articles, lignesTicket: null, quantitesListe: new Map([['1', 1]]) });
     expect(b.reste).toEqual([expect.objectContaining({ cle: '1', raison: 'remplace', remplacePar: 'Poulet' })]);
-    expect(b.remplacements).toEqual([{ cle: '1', nom: 'Steak haché', par: 'Poulet' }]);
+    expect(b.remplacements).toEqual([{ cle: '1', nom: 'Steak haché', par: 'Poulet', montant: null }]);
+  });
+});
+
+describe('chantier 183 — ajouts en rayon reliés au catalogue', () => {
+  const lignes = [
+    { produit_id: 'p-poulet', variante_produit_id: null, libelle_ticket: 'POULET FERMIER', quantite: 1, prix_unitaire: 6.9 },
+    { produit_id: 'p-sopalin', variante_produit_id: null, libelle_ticket: 'ESSUIE TOUT', quantite: 1, prix_unitaire: 2.1 },
+    { produit_id: 'p-gum', variante_produit_id: null, libelle_ticket: 'CHEWING GUM', quantite: 1, prix_unitaire: 0.9 },
+  ];
+  const articles = [
+    { cle: '1', type: 'caddie', produit_id: 'p-steak', nom_affiche: 'Steak haché', quantite: 1, etat: 'introuvable', remplace_par: 'Poulet' },
+    { cle: 'note:r', type: 'note', produit_id: 'p-poulet', nom_affiche: 'Poulet', quantite: 1, etat: 'au_caddie', remplace_cle: '1' },
+    { cle: 'note:o', type: 'note', produit_id: 'p-sopalin', nom_affiche: 'Essuie-tout', quantite: 1, etat: 'au_caddie' },
+  ];
+  it('le remplaçant retrouvé passe dans Remplacements avec son prix, l\'oubli est marqué « ajouté en rayon »', () => {
+    const b = construireBilanFin({ articles, lignesTicket: lignes, quantitesListe: new Map([['1', 1]]) });
+    expect(b.remplacements).toEqual([{ cle: '1', nom: 'Steak haché', par: 'Poulet', montant: 6.9 }]);
+    expect(b.enPlus.map(e => [e.nom, !!e.ajouteEnRayon])).toEqual([['ESSUIE TOUT', true], ['CHEWING GUM', false]]);
+    expect(b.totalEnPlus).toBe(3);
   });
 });
