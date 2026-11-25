@@ -31,7 +31,9 @@ export default function CarteNutriCaddie({ articles = [], titre = 'Nutri-Score d
     if (!discretSiInsuffisant) return null;
     return (
       <div style={{ fontFamily: T.police, fontSize: 12.5, color: T.texteDoux, background: T.carte, borderRadius: 14, padding: '10px 14px', marginBottom: 12, boxShadow: T.ombre }}>
-        🥗 Nutri-Score de ton caddie : {r.nbNotes} produit{r.nbNotes > 1 ? 's' : ''} noté{r.nbNotes > 1 ? 's' : ''} sur {r.nbAlimentaires}, pas assez pour en dire quelque chose. Scanner les codes-barres de tes produits l'améliore.
+        🥗 Nutri-Score de ton caddie : {r.nbNotes * 2 >= r.nbAlimentaires
+          ? `seulement ${r.nbNotes} produit${r.nbNotes > 1 ? 's' : ''} noté${r.nbNotes > 1 ? 's' : ''}, trop peu pour en dire quelque chose.`
+          : `${r.nbNotes} produit${r.nbNotes > 1 ? 's' : ''} noté${r.nbNotes > 1 ? 's' : ''} sur ${r.nbAlimentaires}, pas assez pour en dire quelque chose.`} Scanner les codes-barres de tes produits l'améliore.
       </div>
     );
   }

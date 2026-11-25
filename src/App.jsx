@@ -9953,6 +9953,12 @@ export default function App() {
   // le rattachement asynchrone lise toujours la valeur du moment, jamais une
   // fermeture périmée.
   const [caisseCourses, setCaisseCourses] = useState(false);
+  // Chantier 181 — après un ticket rattaché et rapproché, le bilan de fin de
+  // courses s'ouvre tout seul (une fois la note du magasin passée). Et le
+  // bouton Scanner sait qu'on sort de ses courses : rattaché d'office, sauf si
+  // l'utilisateur choisit « Ne pas rattacher » (scanSepare).
+  const [bilanApresTicket, setBilanApresTicket] = useState(false);
+  const [scanSepare, setScanSepare] = useState(false);
   const [scanCaisse, setScanCaisse] = useState(null);
   const scanCaisseRef = useRef(null);
   const definirScanCaisse = (v) => { scanCaisseRef.current = v; setScanCaisse(v); };
@@ -10131,6 +10137,15 @@ export default function App() {
   const [, setStoreRatings] = useState({});
   const [showSuccess, setShowSuccess] = useState(null);
   const [showRating,  setShowRating]  = useState(null);
+  // Chantier 181 — ticket rattaché et rapproché : on ouvre le bilan de fin
+  // de courses dès que la note du magasin est passée (ou ignorée).
+  useEffect(() => {
+    if (!bilanApresTicket || showRating) return;
+    setBilanApresTicket(false);
+    if (!sessionCoursesActive) return;
+    setTab("courses");
+    setFinCourses(true);
+  }, [bilanApresTicket, showRating, sessionCoursesActive, setTab]);
   const [favorites, setFavorites] = useState([]);
   const [loadError, setLoadError] = useState(null);
   const [loadRetry, setLoadRetry] = useState(0);
@@ -10195,7 +10210,7 @@ export default function App() {
     ouvrirHistoriqueTickets(r?.ticket ?? null);
   };
   const [showPropositionsCodesBarres, setShowPropositionsCodesBarres] = useState(false);
-  const handleFlash = () => setShowScanChoix(true);
+  const handleFlash = () => { setScanSepare(false); setShowScanChoix(true); };
   const handleFlashConfirmed = () => { setShowScanChoix(false); setAutoOpenCamera(true); setTab("prices"); };
   // Chantier 79 (ajustement) — "Reprendre" depuis l'accueil : bascule sur
   // l'onglet Prix qui rouvrira la feuille avec le brouillon (autoResumeScan).
@@ -11109,8 +11124,10 @@ export default function App() {
         try { ecrireSessionCourses(suivante); } catch { /* best effort */ }
         return suivante;
       });
-      setVerifCourses(resultat.articles.filter(a => a?.type === 'caddie' && a.achat === 'a_verifier').map(a => a.cle));
-      setRapprochementCourses({ compteurs: resultat.compteurs, totalReel });
+      // Chantier 181 — plus de récapitulatif ni de questions une par une : le
+      // bilan de fin de courses (163) montre tout sur un seul écran
+      // (retrouvés, en plus, reste, « à vérifier ») et s'ouvre tout seul.
+      setBilanApresTicket(true);
 
       // Chantier 92 Lot 6 — proposition de favoris : parmi les achats
       // CONFIRMÉS (articles + hors liste), ceux qui sont RÉCURRENTS (>= 3
@@ -11871,8 +11888,8 @@ export default function App() {
           {loaded && tab==="compare"   && <CompareTab liaisonsProposees={liaisonsProposees} onRelier={relierArticle}   items={itemsAAcheter} nbDejaPris={items.length - itemsAAcheter.length} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix} sessionCoursesAccessible={sessionCoursesAccessible}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
           {loaded && tab==="prices"    && <PricesTab    onAnnulerScanAuto={()=>setTab(ecranRetour("prices", originesEcran) || "home")}
-            coursesActives={!scanCaisse && sessionCoursesAccessible && sessionCoursesActive?.id ? { sessionId: sessionCoursesActive.id, magasin: sessionCoursesActive.magasin } : null}
-            onRattacherCourses={(promesse)=>{ const id = sessionCoursesActive?.id; if (id) rattacherTicketScanSession(promesse, { sessionId: id }); }} priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} estFrancois={estFrancois} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} magasinSession={scanCaisse?.magasin ?? null} onImportSession={rattacherTicketScanSession} onScanSessionFerme={()=>definirScanCaisse(null)} onCompleterTicket={scanApresTicketAccessible ? completerDernierTicket : null} onVoirTicketExistant={()=>setTab("archive")} notifierPoints={profilVisible} onEchecEcritureCore={setEchecEcritureCore} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{
+            coursesActives={!scanCaisse && !scanSepare && sessionCoursesAccessible && sessionCoursesActive?.id ? { sessionId: sessionCoursesActive.id, magasin: sessionCoursesActive.magasin } : null}
+            onRattacherCourses={(promesse)=>{ const id = sessionCoursesActive?.id; if (id) rattacherTicketScanSession(promesse, { sessionId: id }); }} priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} estFrancois={estFrancois} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} magasinSession={scanCaisse?.magasin ?? null} onImportSession={rattacherTicketScanSession} onScanSessionFerme={()=>definirScanCaisse(null)} onCompleterTicket={scanApresTicketAccessible ? completerDernierTicket : null} onVoirTicketExistant={()=>setTab("archive")} notifierPoints={profilVisible} onEchecEcritureCore={setEchecEcritureCore} onTicketValidated={(id,store)=>{ setScanSepare(false); setShowRating({id,store}); }} onCreateArchive={async newArc=>{
             const {id:_id,...rest}=newArc;
             const {data,error}=await supabase.from('archives').insert({...rest,user_id:session?.user?.id}).select('id').single();
             // Chantier 112 — le résultat est RENVOYÉ : l'appelant doit pouvoir
@@ -12000,13 +12017,17 @@ export default function App() {
           </div>
         )}
         {showFaqSheet     && <FaqSheet     userId={session.user.id} pseudo={pseudo} onClose={()=>setShowFaqSheet(false)}/>}
-        {showMesPrixSheet && <MesPrixSheet priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} onTicketValidated={(id,store)=>setShowRating({id,store})} onCreateArchive={async newArc=>{ const {id:_id,...rest}=newArc; const {data,error}=await supabase.from('archives').insert({...rest,user_id:session?.user?.id}).select('id').single(); if(error){ showAppToast("⚠️ Archive non sauvegardée, vérifie ta connexion",false); } else { const {data:all}=await supabase.from('archives').select('*').order('date'); if(all) setArchives(all); setShowRating({id:data.id,store:newArc.store}); } }} userId={session?.user?.id} produitsRef={produitsRef} onClose={()=>setShowMesPrixSheet(false)}/>}
+        {showMesPrixSheet && <MesPrixSheet priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} onTicketValidated={(id,store)=>{ setScanSepare(false); setShowRating({id,store}); }} onCreateArchive={async newArc=>{ const {id:_id,...rest}=newArc; const {data,error}=await supabase.from('archives').insert({...rest,user_id:session?.user?.id}).select('id').single(); if(error){ showAppToast("⚠️ Archive non sauvegardée, vérifie ta connexion",false); } else { const {data:all}=await supabase.from('archives').select('*').order('date'); if(all) setArchives(all); setShowRating({id:data.id,store:newArc.store}); } }} userId={session?.user?.id} produitsRef={produitsRef} onClose={()=>setShowMesPrixSheet(false)}/>}
         {/* Chantier 129 — une seule feuille pour toutes les façons d'ajouter un
             ticket (l'ancienne feuille « Autres options » y est intégrée). */}
         {showScanChoix && (
           <ChoixScan
-            onClose={() => setShowScanChoix(false)}
-            onUnePhoto={handleFlashConfirmed}
+            onClose={() => { setShowScanChoix(false); setScanSepare(false); }}
+            courses={sessionCoursesAccessible && sessionCoursesActive ? { magasin: sessionCoursesActive.magasin?.nom ?? null } : null}
+            rattache={!scanSepare} onBasculerRattachement={() => setScanSepare(v => !v)}
+            onUnePhoto={sessionCoursesAccessible && sessionCoursesActive && !scanSepare
+              ? () => { setShowScanChoix(false); lancerScanCaisse(sessionCoursesActive.magasin ?? null); }
+              : handleFlashConfirmed}
             onPlusieursPhotos={() => { setShowScanChoix(false); setShowMultiPhoto(true); }}
             onImporterFichier={accesAvance ? () => { setShowScanChoix(false); setShowImportFichier(true); } : null}
             onPhotoPellicule={() => { setShowScanChoix(false); setShowGalleryImportFromScan(true); }}
@@ -12487,7 +12508,7 @@ export default function App() {
             confirmés récurrents non déjà favoris, sélection multiple, rien
             n'est ajouté sans action explicite. Affichée après le récap et la
             file « à vérifier » du chantier 91. */}
-        {!rapprochementCourses && verifCourses.length === 0 && !bilanCourses && propositionFavoris && (() => {
+        {!rapprochementCourses && verifCourses.length === 0 && !bilanCourses && !finCourses && !bilanApresTicket && propositionFavoris && (() => {
           const p = propositionFavoris;
           const nbChoisis = p.propositions.filter(x => p.selection?.[x.cle]).length;
           const F6 = "'Nunito',sans-serif";

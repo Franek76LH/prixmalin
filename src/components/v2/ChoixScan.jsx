@@ -21,7 +21,10 @@ function Option({ pastille, titre, detail, onClick, principal = false, dernier =
   );
 }
 
-export default function ChoixScan({ onClose, onUnePhoto, onPlusieursPhotos, onImporterFichier = null, onPhotoPellicule, onSaisieManuelle }) {
+// Chantier 181 — `courses` ({ magasin }) : des courses sont en cours. Le
+// ticket leur est rattaché d'office (bandeau en haut), sauf si l'utilisateur
+// touche « Ne pas rattacher » (`rattache` false).
+export default function ChoixScan({ onClose, onUnePhoto, onPlusieursPhotos, onImporterFichier = null, onPhotoPellicule, onSaisieManuelle, courses = null, rattache = true, onBasculerRattachement = null }) {
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', zIndex: 200, animation: 'fadeIn 0.2s ease' }}>
       <div onClick={e => e.stopPropagation()} role="dialog" aria-label="Ajouter un ticket" style={{ background: T.fond, borderRadius: '22px 22px 0 0', width: '100%', maxWidth: 430, margin: '0 auto', animation: 'slideUp 0.3s ease', padding: '16px 16px calc(24px + env(safe-area-inset-bottom, 0px))', boxSizing: 'border-box' }}>
@@ -31,6 +34,24 @@ export default function ChoixScan({ onClose, onUnePhoto, onPlusieursPhotos, onIm
             <IconeCroix width={16} height={16} />
           </button>
         </div>
+        {courses && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: rattache ? T.vertPale : T.fond, border: `1px solid ${rattache ? T.vert : T.trait}`, borderRadius: 14, padding: '10px 12px', margin: '6px 0 12px' }}>
+            <span aria-hidden="true" style={{ fontSize: 20 }}>🛒</span>
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ display: 'block', fontFamily: T.police, fontWeight: 900, fontSize: 14, color: T.texte }}>
+                {rattache ? `Ticket de tes courses${courses.magasin ? ` chez ${courses.magasin}` : ''}` : 'Ticket enregistré à part'}
+              </span>
+              <span style={{ display: 'block', fontFamily: T.police, fontSize: 12, color: T.texteDoux }}>
+                {rattache ? 'Il sera rattaché, puis ton bilan s\'ouvrira.' : 'Il ne sera pas rattaché à tes courses en cours.'}
+              </span>
+            </span>
+            {onBasculerRattachement && (
+              <button onClick={onBasculerRattachement} style={{ border: 'none', background: 'none', color: T.bleu, fontFamily: T.police, fontWeight: 800, fontSize: 12.5, cursor: 'pointer', padding: '8px 4px', flexShrink: 0 }}>
+                {rattache ? 'Ne pas rattacher' : 'Rattacher'}
+              </button>
+            )}
+          </div>
+        )}
         <div style={{ fontFamily: T.police, fontSize: 13, color: T.texteDoux, marginBottom: 14 }}>
           Prends le ticket bien à plat, en commençant par le haut : le nom et l'adresse du magasin doivent se voir.
         </div>
