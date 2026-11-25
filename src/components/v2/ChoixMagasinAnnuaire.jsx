@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react';
 import { T } from './theme';
 import { chercherAutour, plusProches, texteDistance, libelleAnnuaire, chargerMagasinsConnus, magasinConnuPour } from '../../lib/annuaireMagasins';
+import { useFermerParRetour } from '../../lib/retourFeuilles';
 
 const RAYONS = [3000, 8000, 20000];
 
@@ -12,6 +13,7 @@ const RAYONS = [3000, 8000, 20000];
 // prix de la liste connus chez lui (comparaison en cours). Un magasin de
 // l'annuaire déjà dans PrixMalin est signalé, et transmis à onChoisir.
 export default function ChoixMagasinAnnuaire({ position, onChoisir, onFermer, prixParMagasin = new Map(), nbArticles = 0 }) {
+  useFermerParRetour(onFermer); // Chantier 190 — le retour du téléphone ferme la fenêtre
   const [rang, setRang] = useState(0);
   const [connus, setConnus] = useState([]);
   useEffect(() => {

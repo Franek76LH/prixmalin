@@ -4,6 +4,7 @@
 // Les actions sont exactement celles d'avant, passées en props.
 import { T } from './theme';
 import { IconeChevron, IconeCroix } from './Icones';
+import { useFermerParRetour } from '../../lib/retourFeuilles';
 
 function Option({ pastille, titre, detail, onClick, principal = false, dernier = false }) {
   return (
@@ -25,6 +26,7 @@ function Option({ pastille, titre, detail, onClick, principal = false, dernier =
 // ticket leur est rattaché d'office (bandeau en haut), sauf si l'utilisateur
 // touche « Ne pas rattacher » (`rattache` false).
 export default function ChoixScan({ onClose, onUnePhoto, onPlusieursPhotos, onImporterFichier = null, onPhotoPellicule, onSaisieManuelle, courses = null, rattache = true, onBasculerRattachement = null }) {
+  useFermerParRetour(onClose); // Chantier 190 — le retour du téléphone ferme la fenêtre
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', zIndex: 200, animation: 'fadeIn 0.2s ease' }}>
       <div onClick={e => e.stopPropagation()} role="dialog" aria-label="Ajouter un ticket" style={{ background: T.fond, borderRadius: '22px 22px 0 0', width: '100%', maxWidth: 430, margin: '0 auto', animation: 'slideUp 0.3s ease', padding: '16px 16px calc(24px + env(safe-area-inset-bottom, 0px))', boxSizing: 'border-box' }}>

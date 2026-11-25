@@ -8,6 +8,7 @@ import { useMemo, useState } from 'react';
 import { T } from './theme';
 import { construireBilanFin, planClotureListe } from '../../lib/bilanFinCoursesCore';
 import CarteNutriCaddie from './CarteNutriCaddie';
+import { useFermerParRetour } from '../../lib/retourFeuilles';
 
 const euros = (n) => (n == null ? '' : `${Number(n).toFixed(2).replace('.', ',')} €`);
 const LIBELLE_RAISON = {
@@ -49,6 +50,7 @@ function Ligne({ gauche, sous = null, droite = null, avant = null }) {
 // `demo` : courses fictives (adresse « ?demo=bilan ») — « Terminer » n'écrit
 // rien et montre ce que l'app AURAIT fait dans Ma liste.
 export default function EcranFinCourses({ session, items = [], onTerminer, onPlusTard, onScannerTicket = null, demo = false }) {
+  useFermerParRetour(onPlusTard); // Chantier 190 — le retour du téléphone ferme la fenêtre
   const [resultatDemo, setResultatDemo] = useState(null);
   const [decisions, setDecisions] = useState({});
   const [garder, setGarder] = useState({});

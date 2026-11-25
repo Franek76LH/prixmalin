@@ -68,6 +68,7 @@ import EcranFinCourses from "./components/v2/EcranFinCourses";
 import { demoDemandee, SESSION_DEMO_BILAN, LISTE_DEMO_BILAN } from "./lib/demoBilanCourses";
 import { chercherProduitParCodeBarres } from "./lib/rechercheCodeBarres";
 import { lireRetourLien, verifierNouveauMotDePasse, emailPlausible, messageErreurMotDePasse, traduireErreurConnexion } from "./lib/motDePasseCore";
+import { useFermerParRetour, gererRetourFeuille } from "./lib/retourFeuilles";
 import { ecranRetour, noterOrigine, ecranCourses, ouvrirSurCourses, lireEtatHistorique, etatHistorique, ecranApresRechargement, reculerDansHistorique, CLE_ECRAN_SESSION } from "./lib/navigationCore";
 import ListeCourses from "./components/v2/ListeCourses";
 // Chantier 126 — produits de la liste en texte libre : fiches proposées.
@@ -773,6 +774,7 @@ function AuthScreen() {
 
 // ── PROFIL SHEET ─────────────────────────────────────────────────────────────
 function CircleSheet({ circles, userId, userEmail, profileMap, pseudo, archives, onClose, onInvite, onUpdateStatus }) {
+  useFermerParRetour(onClose); // Chantier 190 — le retour du téléphone ferme la feuille
   const F = "'Nunito',sans-serif";
   const [invitePseudo,  setInvitePseudo]  = useState('');
   const [inviteError,   setInviteError]   = useState('');
@@ -943,6 +945,7 @@ function CircleSheet({ circles, userId, userEmail, profileMap, pseudo, archives,
 }
 
 function StatsSheet({ userId, archives, onClose }) {
+  useFermerParRetour(onClose); // Chantier 190 — le retour du téléphone ferme la feuille
   const F = "'Nunito',sans-serif";
   const [sharedCount, setSharedCount] = useState(null);
   useEffect(() => {
@@ -990,6 +993,7 @@ function StatsSheet({ userId, archives, onClose }) {
 function nouvelIdArticle() { return Date.now() + Math.random(); }
 
 function FavorisSheet({ userId, onClose, items = [], onAdd = null, onVoirListe = null }) {
+  useFermerParRetour(onClose); // Chantier 190 — le retour du téléphone ferme la feuille
   const F = "'Nunito',sans-serif";
   const [favoris, setFavoris] = useState(null); // null = chargement
   const [chargeErreur, setChargeErreur] = useState(false);
@@ -1109,6 +1113,7 @@ function FavorisSheet({ userId, onClose, items = [], onAdd = null, onVoirListe =
 // section dégradée (« bientôt disponible » / 0), jamais d'erreur bloquante.
 // Stats privées — aucun classement public, aucun autre utilisateur exposé.
 function ProfilSheet({ userId, pseudo, onClose, onBadgesVus }) {
+  useFermerParRetour(onClose); // Chantier 190 — le retour du téléphone ferme la feuille
   const F = "'Nunito',sans-serif";
   const [donnees, setDonnees] = useState(null); // null = chargement
 
@@ -1264,6 +1269,7 @@ function ProfilSheet({ userId, pseudo, onClose, onBadgesVus }) {
 }
 
 function FaqSheet({ userId, pseudo, onClose }) {
+  useFermerParRetour(onClose); // Chantier 190 — le retour du téléphone ferme la feuille
   const F = "'Nunito',sans-serif";
   const [showFeedback,      setShowFeedback]      = useState(false);
   const [feedbackCategorie, setFeedbackCategorie] = useState('suggestion');
@@ -3389,6 +3395,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
 // storeLegacyId, adresse } : le magasin est CONNU (session de courses) — il
 // n'est jamais redemandé, le sélecteur est remplacé par un simple rappel.
 function PriceEntrySheet({ onClose, onSave, existingPrice, prefill = null, magasinVerrouille = null }) {
+  useFermerParRetour(onClose); // Chantier 190 — le retour du téléphone ferme la feuille
   const [brand,   setBrand]   = useState(existingPrice?.brand || prefill?.brand || "");
   const [product, setProduct] = useState(existingPrice?.product || prefill?.product || "");
   const [format,  setFormat]  = useState(existingPrice?.format||"");
@@ -3798,6 +3805,7 @@ function PriceEntrySheet({ onClose, onSave, existingPrice, prefill = null, magas
 
 // ── CATALOG TAB ───────────────────────────────────────────────────────────────
 function ProductPickerSheet({ produit, categoryPresentation, onClose, onAdd, items, varianteInitiale = null }) {
+  useFermerParRetour(onClose); // Chantier 190 — le retour du téléphone ferme la feuille
   const [variantes,        setVariantes]        = useState([]);
   const [varianteId,       setVarianteId]       = useState(null);
   const [variantesLoading, setVariantesLoading] = useState(true);
@@ -5146,6 +5154,7 @@ function CatalogTab({ items, onAdd, onUpdate, onRemove, setTab, onDicter = null,
 
 // ── EDIT ITEM SHEET ───────────────────────────────────────────────────────────
 function EditItemSheet({ item, onClose, onSave }) {
+  useFermerParRetour(onClose); // Chantier 190 — le retour du téléphone ferme la feuille
   const isCore = !!item.produit_id;
 
   // Branche article libre — comportement inchangé
@@ -7512,6 +7521,7 @@ function ArchiveTab({ archives, onDelete, onAddToList, priceDB, onImport, onSave
 // libelleVariante ci-dessus, qui ne sert qu'au sélecteur "plusieurs variantes"
 // de la recherche par nom).
 function CorrigerProduitSheet({ item, libelleTicket = null, suggestion = null, enseigne = null, enseigneResolue = false, estFrancois = false, accesAvance = false, onClose, onChoisir, onCreerProduit = null }) {
+  useFermerParRetour(onClose); // Chantier 190 — le retour du téléphone ferme la feuille
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -8306,6 +8316,7 @@ function MultiPhotoSheet({ onClose, refProducts, onSuccess }) {
 // Jamais de rattachement automatique : 0, 1 ou 50 résultats, c'est toujours
 // l'utilisateur qui tape sur le produit voulu.
 function MicroLienSheet({ element, onClose, onResolu, onIntrouvable }) {
+  useFermerParRetour(onClose); // Chantier 190 — le retour du téléphone ferme la feuille
   const F = "'Nunito',sans-serif";
   const [query,     setQuery]     = useState(element.nom || "");
   const [results,   setResults]   = useState([]);
@@ -10056,6 +10067,8 @@ export default function App() {
     }
     try { window.history.replaceState(etatHistorique(rouvrir || "home", indexHistorique.current), ''); } catch { /* rien */ }
     const surRetour = (ev) => {
+      // Chantier 190 — une fenêtre ouverte par-dessus se ferme d'abord.
+      if (gererRetourFeuille(ev.state)) return;
       const etat = lireEtatHistorique(ev.state);
       indexHistorique.current = etat?.n || 0;
       const ecranVise = etat?.ecran || "home";
