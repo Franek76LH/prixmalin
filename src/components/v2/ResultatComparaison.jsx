@@ -7,17 +7,22 @@ const euros = (n) => `${Number(n).toFixed(2).replace('.', ',')} €`;
 
 export default function ResultatComparaison({
   magasin, complet, trouves, nbArticles, total, aPrixAVerifier = false,
+  // Chantier 177 — badge et liseré fournis par CompareTab (classement honnête) ;
+  // sans eux, comportement d'avant.
+  etiquette = null, miseEnAvant = null, avertissement = null,
   lignes = [], alternatives = [], economie = null, dernierReleve = null, lienItineraire = '#', onValider,
 }) {
   const manquants = Math.max(0, nbArticles - trouves);
+  const vert = miseEnAvant ?? complet;
+  const badge = etiquette ?? (complet ? 'LE MOINS CHER POUR TA LISTE' : `LE MIEUX RENSEIGNÉ · ${trouves} PRODUIT${trouves > 1 ? 'S' : ''} SUR ${nbArticles}`);
   return (
     <div style={{ marginBottom: 16 }}>
-      <div style={{ background: T.carte, borderRadius: T.rayon, boxShadow: T.ombre, overflow: 'hidden', border: `2px solid ${complet ? T.vert : T.trait}` }}>
+      <div style={{ background: T.carte, borderRadius: T.rayon, boxShadow: T.ombre, overflow: 'hidden', border: `2px solid ${vert ? T.vert : T.trait}` }}>
 
         {/* Le magasin et le total */}
         <div style={{ padding: '16px 16px 14px' }}>
-          <span style={{ display: 'inline-block', background: complet ? T.vertPale : T.jaunePale, color: complet ? T.vert : '#7A5B00', borderRadius: 99, padding: '4px 11px', fontFamily: T.police, fontWeight: 900, fontSize: 11.5, letterSpacing: '0.03em' }}>
-            {complet ? 'LE MOINS CHER POUR TA LISTE' : `LE MIEUX RENSEIGNÉ · ${trouves} PRODUIT${trouves > 1 ? 'S' : ''} SUR ${nbArticles}`}
+          <span style={{ display: 'inline-block', background: vert ? T.vertPale : T.jaunePale, color: vert ? T.vert : '#7A5B00', borderRadius: 99, padding: '4px 11px', fontFamily: T.police, fontWeight: 900, fontSize: 11.5, letterSpacing: '0.03em' }}>
+            {badge}
           </span>
           <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12, marginTop: 10 }}>
             <div style={{ minWidth: 0 }}>
@@ -38,6 +43,9 @@ export default function ResultatComparaison({
           )}
           {aPrixAVerifier && (
             <div style={{ fontFamily: T.police, fontSize: 12, color: T.texteDoux, marginTop: 8 }}>Ce total contient au moins un prix à vérifier.</div>
+          )}
+          {avertissement && (
+            <div style={{ fontFamily: T.police, fontSize: 12.5, color: '#9A3412', background: '#FFF1E6', borderRadius: 10, padding: '8px 10px', marginTop: 10, fontWeight: 800 }}>{avertissement}</div>
           )}
           {economie && (
             <div style={{ fontFamily: T.police, fontSize: 13, color: T.vert, fontWeight: 800, marginTop: 10 }}>{economie}</div>

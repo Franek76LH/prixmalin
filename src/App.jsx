@@ -54,7 +54,7 @@ import { interpreterResultatCore, NIVEAU_ECHEC, NIVEAU_INFO } from "./lib/result
 import AlerteEcritureCore from "./components/AlerteEcritureCore";
 // Chantier 122 — comparaison honnête : pas de gagnant sous la moitié de la
 // liste, économie calculée sur les seuls produits communs.
-import { evaluerComparaison, ETAT_INSUFFISANT, ETAT_GAGNANT } from "./lib/comparaisonHonnete";
+import { evaluerComparaison } from "./lib/comparaisonHonnete";
 // Chantier 122 — liaison automatique des produits dictés au catalogue.
 import { proposerLiaison, LIAISON_RELIE } from "./lib/liaisonAutoListe";
 // Chantier 123 — nouvelle interface : accueil simple, barre du bas classique,
@@ -82,6 +82,8 @@ import { enregistrerOffresApresImport } from "./lib/offresTicketCore";
 import EcranEvolutionPrix from "./components/v2/EcranEvolutionPrix";
 import { alertesBaisse, avecExemple, exempleDemande } from "./lib/evolutionPrixCore";
 import ResultatComparaison from "./components/v2/ResultatComparaison";
+import ChoixMagasinComparaison from "./components/v2/ChoixMagasinComparaison";
+import { classerMagasinsComparables, ETAT_INSUFFISANT as CLASSEMENT_INSUFFISANT } from "./lib/classementHonnete";
 import EcranEconomies from "./components/v2/EcranEconomies";
 import ChoixScan from "./components/v2/ChoixScan";
 import { useLiaisonsProposees } from "./components/v2/useLiaisonsProposees";
@@ -6345,6 +6347,10 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
   const [coreResultat,   setCoreResultat]   = useState(null);
   const [coreChargement, setCoreChargement] = useState(false);
   const [coreErreur,     setCoreErreur]     = useState(null);
+  // Chantier 177 — magasin choisi par l'utilisateur (null = le moins cher
+  // proposé par défaut) et dépliage de « Voir les autres magasins ».
+  const [magasinChoisiId, setMagasinChoisiId] = useState(null);
+  const [autresMagasinsOuverts, setAutresMagasinsOuverts] = useState(false);
 
   useEffect(() => {
     if (!utiliserCore) { setCoreResultat(null); setCoreErreur(null); return; }
@@ -6722,7 +6728,14 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
   // utiliserCore===false garde donc un comportement identique à avant.
   const analysisAffichee       = utiliserCore ? (coreAdapte?.analysis ?? []) : analysis;
   const rankedAffiche          = utiliserCore ? (coreAdapte?.ranked ?? []) : ranked;
-  const bestAffiche            = rankedAffiche[0];
+  // Chantier 177 — le magasin affiché en grand n'est plus « celui qui a le
+  // plus de prix » mais le moins cher sur les produits que les magasins
+  // comparés ont en commun (lib/classementHonnete.js). Les autres magasins
+  // restent choisissables derrière « Voir les autres magasins ».
+  const classementMagasins     = classerMagasinsComparables({ ranked: rankedAffiche, analysis: analysisAffichee, nbArticles: items.length });
+  const bestAffiche            = rankedAffiche.find(m => m.id === magasinChoisiId)
+    ?? rankedAffiche.find(m => m.id === classementMagasins.idParDefaut)
+    ?? rankedAffiche[0];
   const bestStoreEntryAffiche  = bestAffiche
     ? analysisAffichee
         .map(({ byStore }) => byStore[bestAffiche.id])
@@ -6736,7 +6749,20 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
   // Chantier 122 — verdict honnête (aucun gagnant sous la moitié de la liste ;
   // économie sur produits communs seulement). Calcul pur et léger, pas un
   // hook : on est après le early return items.length===0.
-  const verdict = evaluerComparaison({ ranked: rankedAffiche, analysis: analysisAffichee, nbArticles: items.length });
+  // Chantier 177 — économie calculée pour le magasin AFFICHÉ (en tête), face
+  // au magasin qui partage le plus de produits avec lui ; 0 s'il n'est pas
+  // moins cher ou si ce n'est pas comparable.
+  const verdict = evaluerComparaison({ ranked: bestAffiche ? [bestAffiche, ...rankedAffiche.filter(m => m.id !== bestAffiche.id)] : rankedAffiche, analysis: analysisAffichee, nbArticles: items.length });
+  const ligneClassementAffiche = classementMagasins.magasins.find(m => m.id === bestAffiche?.id) ?? null;
+  const estMoinsCherAffiche = !!bestAffiche && bestAffiche.id === classementMagasins.moinsCherId;
+  const nomMoinsCher = rankedAffiche.find(m => m.id === classementMagasins.moinsCherId)?.name ?? null;
+  const etiquetteAffiche = !bestAffiche ? null
+    : estMoinsCherAffiche ? `LE MOINS CHER · COMPARÉ SUR ${classementMagasins.nbCommuns} PRODUIT${classementMagasins.nbCommuns > 1 ? 'S' : ''}`
+    : `${bestAffiche.id === classementMagasins.plusCompletId && rankedAffiche.length > 1 ? 'LE PLUS COMPLET' : (bestAffiche.found * 2 < items.length ? 'PEU DE PRIX' : 'TON CHOIX')} · ${bestAffiche.found} PRODUIT${bestAffiche.found > 1 ? 'S' : ''} SUR ${items.length}`;
+  const avertissementAffiche = (!estMoinsCherAffiche && nomMoinsCher && ligneClassementAffiche?.ecartCommuns > 0.005)
+    ? `${nomMoinsCher} est ${ligneClassementAffiche.ecartCommuns.toFixed(2).replace('.', ',')} € moins cher sur les ${classementMagasins.nbCommuns} produits que les deux vendent.`
+    : null;
+  const nbAutresMagasins = Math.max(0, classementMagasins.magasins.filter(m => m.id !== bestAffiche?.id).length);
 
   // Chantier 126 — données de la carte du magasin retenu (ResultatComparaison).
   // Mêmes règles d'affichage qu'avant : total de ligne = prix × quantité ; une
@@ -6965,37 +6991,40 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
         </div>
       )}
 
-      {/* Chantier 122 — pas assez de prix : AUCUN gagnant. On montre ce qu'on
-          sait (qui a combien de prix), sans désigner personne. */}
-      {rankedAffiche.length>0 && verdict.etat === ETAT_INSUFFISANT && (
-        <div style={{ background:C.white, borderRadius:18, padding:"20px 18px", marginBottom:16, border:`2px solid ${C.grayLight}`, boxShadow:"0 4px 16px rgba(0,0,0,0.06)" }}>
-          <div style={{ fontSize:34, textAlign:"center", marginBottom:6 }}>🤷</div>
-          <div style={{ fontFamily:F, fontWeight:900, fontSize:17, color:C.text, textAlign:"center", marginBottom:6 }}>
-            Pas encore assez de prix pour comparer
+      {/* Chantier 177 — peu de prix : on le dit, mais on n'arrête plus
+          l'utilisateur. Il voit ce qu'on sait et peut quand même faire ses
+          courses (et scanner son ticket, qui ajoutera les prix manquants). */}
+      {rankedAffiche.length>0 && classementMagasins.etat === CLASSEMENT_INSUFFISANT && (
+        <div style={{ background:"#FFF8E6", borderRadius:12, padding:"12px 14px", marginBottom:12, border:`1px solid ${C.yellow}` }}>
+          <div style={{ fontFamily:F, fontWeight:900, fontSize:14, color:"#7A6000", marginBottom:4 }}>Peu de prix pour l'instant</div>
+          <div style={{ fontFamily:F, fontSize:12.5, color:C.text }}>
+            Le magasin le mieux renseigné n'a que {rankedAffiche[0].found} prix sur {items.length} : on ne peut pas encore dire lequel est le moins cher. Tu peux quand même faire tes courses, et ton ticket ajoutera les prix manquants.
           </div>
-          <div style={{ fontFamily:F, fontSize:13, color:C.textLight, textAlign:"center", marginBottom:14 }}>
-            Le magasin le mieux renseigné n'a que <strong>{verdict.couvertureMax} prix sur {items.length}</strong> produit{items.length>1?"s":""} de ta liste. Désigner un gagnant ne serait pas honnête.
-          </div>
-          <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:14 }}>
-            {rankedAffiche.slice(0,5).map(m=>(
-              <div key={m.id} style={{ display:"flex", alignItems:"center", gap:10, background:C.grayLight, borderRadius:10, padding:"9px 12px" }}>
-                <span style={{ fontSize:18 }}>{m.logo}</span>
-                <span style={{ flex:1, minWidth:0, fontFamily:F, fontWeight:800, fontSize:13, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{m.name}</span>
-                <span style={{ fontFamily:F, fontWeight:800, fontSize:12, color:C.textLight, whiteSpace:"nowrap" }}>{m.found}/{items.length} produit{items.length>1?"s":""}</span>
-              </div>
-            ))}
-          </div>
-          <button onClick={()=>setTab("prices")} style={{ width:"100%", padding:"13px", border:"none", borderRadius:12, background:C.blue, fontFamily:F, fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer" }}>
-            📸 Scanner un ticket pour ajouter des prix
-          </button>
         </div>
       )}
 
-      {rankedAffiche.length>0 && verdict.etat === ETAT_GAGNANT && (
+      {/* Chantier 177 — les autres magasins comparés, repliés par défaut : le
+          conseil reste un seul magasin en grand. */}
+      {rankedAffiche.length>0 && nbAutresMagasins>0 && (
+        <>
+          <button onClick={()=>setAutresMagasinsOuverts(o=>!o)} aria-expanded={autresMagasinsOuverts}
+            style={{ width:"100%", display:"flex", alignItems:"center", gap:8, background:"#fff", border:`1px solid ${C.grayLight}`, borderRadius:12, padding:"11px 14px", marginBottom:12, cursor:"pointer", fontFamily:F, fontWeight:800, fontSize:13.5, color:C.text, textAlign:"left", minHeight:44 }}>
+            <span style={{ flex:1 }}>🏪 {autresMagasinsOuverts ? "Masquer les autres magasins" : `Voir les autres magasins (${nbAutresMagasins})`}</span>
+            <span style={{ color:C.textLight }}>{autresMagasinsOuverts ? "▾" : "▸"}</span>
+          </button>
+          {autresMagasinsOuverts && (
+            <ChoixMagasinComparaison classement={classementMagasins} nbArticles={items.length} choisiId={bestAffiche?.id}
+              onChoisir={(id)=>{ setMagasinChoisiId(id); setAutresMagasinsOuverts(false); }} />
+          )}
+        </>
+      )}
+
+      {rankedAffiche.length>0 && bestAffiche && (
         <ResultatComparaison
           magasin={{ nom: bestAffiche.name, adresse: adresseGagnant }}
-          complet={verdict.complet} trouves={bestAffiche.found} nbArticles={items.length}
+          complet={bestAffiche.found >= items.length} trouves={bestAffiche.found} nbArticles={items.length}
           total={bestAffiche.total} aPrixAVerifier={bestAffiche.aPrixAVerifier === true}
+          etiquette={etiquetteAffiche} miseEnAvant={estMoinsCherAffiche} avertissement={avertissementAffiche}
           lignes={lignesGagnant} alternatives={alternativesGagnant}
           economie={verdict.economie > 0.05 && verdict.reference
             ? `${verdict.economie.toFixed(2).replace('.', ',')} € de moins que chez ${verdict.reference.name}, sur les ${verdict.nbCommuns} produit${verdict.nbCommuns>1?"s":""} que les deux vendent`
