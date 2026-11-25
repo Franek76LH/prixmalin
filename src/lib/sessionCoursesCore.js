@@ -478,3 +478,11 @@ export function calculerProgression(articles) {
     restants: total - pris - introuvables,
   };
 }
+
+// Chantier 176 — les lignes de Ma liste encore à acheter (non cochées « Déjà
+// pris »). Ce sont les seules que l'on compare et que l'on emporte en
+// magasin : une ligne déjà prise n'a rien à faire dans « N produits de ta
+// liste » ni dans « À prendre ».
+export function articlesAAcheter(items) {
+  return (Array.isArray(items) ? items : []).filter(i => i && !i.checked);
+}

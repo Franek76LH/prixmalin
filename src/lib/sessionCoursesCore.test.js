@@ -6,6 +6,7 @@ vi.mock('./supabase', () => ({
 
 import { supabase } from './supabase';
 import {
+  articlesAAcheter,
   RAYON_AUTRES,
   emojiRayon,
   chargerRayonsProduits,
@@ -707,5 +708,15 @@ describe('chargerRayonsProduits', () => {
     const inMock = vi.fn().mockResolvedValue({ data: null, error: new Error('boom') });
     supabase.from.mockReturnValue({ select: vi.fn().mockReturnValue({ in: inMock }) });
     await expect(chargerRayonsProduits(['p1'])).rejects.toThrow('boom');
+  });
+});
+
+describe('Chantier 176 — articlesAAcheter', () => {
+  it('écarte les lignes cochées « Déjà pris »', () => {
+    const items = [{ id: 1, checked: false }, { id: 2, checked: true }, { id: 3 }];
+    expect(articlesAAcheter(items).map(i => i.id)).toEqual([1, 3]);
+  });
+  it('tolère une liste absente', () => {
+    expect(articlesAAcheter(null)).toEqual([]);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { titreEcran, ecranParent, entreeActive, ecranRetour, noterOrigine, ecranCourses } from './navigationCore';
+import { titreEcran, ecranParent, entreeActive, ecranRetour, noterOrigine, ecranCourses, ouvrirSurCourses } from './navigationCore';
 
 describe('navigation — cohérence en-tête / barre du bas', () => {
   const ONGLETS = ['home', 'list', 'catalog', 'micro', 'courses', 'compare', 'prices', 'moi', 'archive', 'economies', 'rejets'];
@@ -72,5 +72,23 @@ describe('chantier 160 — retour vers l\'écran d\'origine', () => {
   it('l\'entrée Courses ouvre Mes courses seulement quand une liste validée est en cours', () => {
     expect(ecranCourses(true)).toBe('courses');
     expect(ecranCourses(false)).toBe('list');
+  });
+});
+
+describe('Chantier 176 — ouvrirSurCourses', () => {
+  const maintenant = Date.parse('2026-11-25T18:00:00Z');
+  const session = (modif, statut = 'active') => ({ statut, cree_le: '2026-11-25T08:00:00Z', modifie_le: modif });
+  it('rouvre sur des courses touchées il y a moins de 12 h', () => {
+    expect(ouvrirSurCourses(session('2026-11-25T17:40:00Z'), maintenant)).toBe(true);
+    expect(ouvrirSurCourses(session('2026-11-25T06:00:00Z'), maintenant)).toBe(true);
+  });
+  it('pas au-delà de 12 h, ni sans courses actives', () => {
+    expect(ouvrirSurCourses(session('2026-11-25T05:59:00Z'), maintenant)).toBe(false);
+    expect(ouvrirSurCourses(session('2026-11-25T17:40:00Z', 'terminee'), maintenant)).toBe(false);
+    expect(ouvrirSurCourses(null, maintenant)).toBe(false);
+    expect(ouvrirSurCourses({ statut: 'active' }, maintenant)).toBe(false);
+  });
+  it('repli sur la date de création si modifie_le manque', () => {
+    expect(ouvrirSurCourses({ statut: 'active', cree_le: '2026-11-25T17:00:00Z' }, maintenant)).toBe(true);
   });
 });

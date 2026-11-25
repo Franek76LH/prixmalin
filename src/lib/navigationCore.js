@@ -69,3 +69,16 @@ export function noterOrigine(origines, depuis, vers) {
 export function ecranCourses(sessionActive) {
   return sessionActive ? 'courses' : 'list';
 }
+
+// Chantier 176 — à l'ouverture de l'app, des courses touchées il y a moins de
+// 12 heures (dernière coche, ou création) : on rouvre directement dessus, sans
+// page de garde. Au-delà, ce sont de vieilles courses oubliées : on reste sur
+// l'accueil, qui propose « Reprendre » ou « Abandonner ».
+export const DELAI_REPRISE_COURSES_MS = 12 * 60 * 60 * 1000;
+export function ouvrirSurCourses(sessionCourses, maintenantMs = Date.now()) {
+  if (!sessionCourses || sessionCourses.statut !== 'active') return false;
+  const derniere = Date.parse(sessionCourses.modifie_le || sessionCourses.cree_le || '');
+  if (!Number.isFinite(derniere)) return false;
+  const ecart = maintenantMs - derniere;
+  return ecart >= 0 && ecart <= DELAI_REPRISE_COURSES_MS;
+}

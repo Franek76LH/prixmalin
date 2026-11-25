@@ -18,7 +18,7 @@ import { nomComposeVariante, formatEtiquetteVariante } from "./lib/nomProduit";
 import { transcrireAudioListe, normaliserNomElement, comptesParNom, fusionnerParNom, demanderRapprochementListe, regrouperPourCaddie } from "./lib/microVocal";
 import { fusionnerPropositions, ficheARelierSeule } from "./lib/rapprochementIA";
 // Chantier « Courses » Lot 1 — session de courses figée (shadow estFrancois).
-import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession, ajouterNoteSession, supprimerNoteSession, cloreSession, idsCaddieASupprimer, articlesNonAchetesASupprimer, construireBilanCourses, doitRattacherTicketSession, chargerMarquesVariantes, calculerTotalPanier } from "./lib/sessionCoursesCore";
+import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession, ajouterNoteSession, supprimerNoteSession, cloreSession, idsCaddieASupprimer, articlesNonAchetesASupprimer, construireBilanCourses, doitRattacherTicketSession, chargerMarquesVariantes, calculerTotalPanier, articlesAAcheter } from "./lib/sessionCoursesCore";
 // Chantier 91 Lot 5 — rapprochement liste / cochés / ticket.
 import { rapprocherSessionTicket, appliquerRapprochementSession, deciderAchatArticle, construireNormaliseur, textesARapprocher } from "./lib/rapprochementCoursesCore";
 // Chantier 92 Lot 6 — favoris Core (par format) & récurrents. Distinct des
@@ -68,7 +68,7 @@ import EcranFinCourses from "./components/v2/EcranFinCourses";
 import { demoDemandee, SESSION_DEMO_BILAN, LISTE_DEMO_BILAN } from "./lib/demoBilanCourses";
 import { chercherProduitParCodeBarres } from "./lib/rechercheCodeBarres";
 import { lireRetourLien, verifierNouveauMotDePasse, emailPlausible, messageErreurMotDePasse, traduireErreurConnexion } from "./lib/motDePasseCore";
-import { ecranRetour, noterOrigine, ecranCourses } from "./lib/navigationCore";
+import { ecranRetour, noterOrigine, ecranCourses, ouvrirSurCourses } from "./lib/navigationCore";
 import ListeCourses from "./components/v2/ListeCourses";
 // Chantier 126 — produits de la liste en texte libre : fiches proposées.
 import ProduitsARelier from "./components/v2/ProduitsARelier";
@@ -6096,7 +6096,7 @@ function cleCoords(lat, lng) {
   return `${Number(lat).toFixed(4)},${Number(lng).toFixed(4)}`;
 }
 
-function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearchRadius, userPos, setUserPos, zoneLabel, setZoneLabel, zonePrete = true, userId, isAdmin, modeCoreActif, coreActifGlobal, categorieMagasin = 'grande_surface', setCategorieMagasin, sessionCoursesAccessible = false, liaisonsProposees = {}, onRelier }) {
+function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, searchRadius, setSearchRadius, userPos, setUserPos, zoneLabel, setZoneLabel, zonePrete = true, userId, isAdmin, modeCoreActif, coreActifGlobal, categorieMagasin = 'grande_surface', setCategorieMagasin, sessionCoursesAccessible = false, liaisonsProposees = {}, onRelier }) {
   const F = "'Nunito',sans-serif";
 
   // Chantier géoloc comparateur — sélecteur de zone (point de référence).
@@ -6831,8 +6831,11 @@ function CompareTab({ items, priceDB, onValidate, setTab, searchRadius, setSearc
   if(items.length===0) return (
     <div style={{ padding:"40px 20px 100px", textAlign:"center" }}>
       <div style={{ fontSize:60, marginBottom:14 }}>🏪</div>
-      <div style={{ fontFamily:F, fontWeight:900, fontSize:17, color:"#CC0000", marginBottom:6 }}>Ta liste est vide</div>
-      <div style={{ fontFamily:F, fontSize:13, color:C.textLight, marginBottom:18 }}>Ajoute les produits qu'il te faut dans Ma liste : on te dira dans quel magasin elle coûte le moins cher.</div>
+      {/* Chantier 176 — tout est coché « Déjà pris » : ce n'est pas une liste vide. */}
+      <div style={{ fontFamily:F, fontWeight:900, fontSize:17, color:"#CC0000", marginBottom:6 }}>{nbDejaPris>0 ? "Tout est déjà pris" : "Ta liste est vide"}</div>
+      <div style={{ fontFamily:F, fontSize:13, color:C.textLight, marginBottom:18 }}>{nbDejaPris>0
+        ? `Les ${nbDejaPris} article${nbDejaPris>1?"s":""} de Ma liste sont cochés « Déjà pris ». Ajoute ce qu'il te faut pour la prochaine fois : on te dira où ça coûte le moins cher.`
+        : "Ajoute les produits qu'il te faut dans Ma liste : on te dira dans quel magasin elle coûte le moins cher."}</div>
       {/* Chantier 160 — plus d'impasse : un bouton mène à Ma liste. */}
       <button onClick={()=>setTab("list")} style={{ width:"100%", maxWidth:320, padding:"14px", border:"none", borderRadius:14, background:"#CC0000", fontFamily:F, fontWeight:900, fontSize:15, color:"#fff", cursor:"pointer" }}>
         Remplir ma liste
@@ -9376,29 +9379,13 @@ function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, on
   // nécessaire à la clôture et à la carte d'accueil) : plus de bandeau rouge.
 
   return (
-    <div style={{ padding:"20px 20px 110px", background:"#fff", minHeight:"calc(100vh - 68px)", boxSizing:"border-box" }}>
+    <div style={{ padding:"20px 20px 190px", background:"#fff", minHeight:"calc(100vh - 68px)", boxSizing:"border-box" }}>
       {/* Lot 8 (ajustement) — plus de lien « ‹ Accueil » ici : le retour passe
           par le bouton Accueil de la barre d'onglets du bas, toujours rendue. */}
 
-      {/* Lot 8 — en-tête léger sur fond blanc : titre, compteur du caddie,
-          barre de progression, et à droite le TOTAL DYNAMIQUE DU PANIER
-          (somme des articles cochés, recalculée à chaque coche — « + ? »
-          quand un article coché n'a pas de prix connu). */}
-      <div style={{ marginBottom:18 }}>
-        {/* Chantier 160 — le titre « Mes courses » est déjà dans l'en-tête et
-            dans la bascule Ma liste / Mes courses : il n'est plus répété ici. */}
-        <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between" }}>
-          <div aria-live="polite" style={{ fontFamily:F, fontWeight:800, fontSize:13, color:"#6D6D72" }}>
-            {prog.pris} / {prog.total} au caddie
-          </div>
-          <div style={{ fontFamily:F, fontWeight:700, fontSize:12, color:"#8E8E93" }}>
-            {panier.total.toFixed(2)} €{panier.incomplet ? " + ?" : ""} au panier
-          </div>
-        </div>
-        <div style={{ marginTop:8, height:5, borderRadius:99, background:"#F0F0F0", overflow:"hidden" }}>
-          <div style={{ width:`${Math.round(ratio*100)}%`, height:"100%", borderRadius:99, background:"#E5181B", transition:"width 0.3s ease" }} />
-        </div>
-      </div>
+      {/* Chantier 176 — la progression, le total du panier et « Je passe en
+          caisse » ont quitté le haut et la fin de la liste : ils sont dans la
+          barre fixe du bas (sous le pouce, toujours visible). */}
 
       {/* Lot 4 — indicateur d'échec du filet Supabase : discret, jamais
           silencieux. Rien n'est affiché quand tout va bien (cas normal). */}
@@ -9550,16 +9537,6 @@ function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, on
         </div>
       )}
 
-      {/* Chantier 90 Lot 4 — « Je passe en caisse » : lance le parcours de
-          scan de ticket EXISTANT depuis la session (confirmation du magasin
-          gérée par la racine). N'affecte en rien la clôture ci-dessous. */}
-      {prog.total > 0 && (
-        <button onClick={()=>onPasserEnCaisse?.()}
-          style={{ width:"100%", padding:"14px", marginTop:16, border:"2px solid #E5181B", borderRadius:14, background:"#fff", fontFamily:F, fontWeight:900, fontSize:15, color:"#E5181B", cursor:"pointer" }}>
-          🧾 Je passe en caisse — scanner le ticket
-        </button>
-      )}
-
       {/* Lot 6 — clôture explicite, en fin de liste. Vert quand tout est pris,
           neutre sinon (la confirmation « il reste X articles » est gérée par
           la racine — jamais de clôture silencieuse). */}
@@ -9570,11 +9547,34 @@ function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, on
         </button>
       )}
 
+      {/* Chantier 176 — barre fixe au-dessus de la barre du bas (et du rond
+          « Scanner ») : où j'en suis et l'action de fin de courses, toujours
+          sous le pouce, sans faire défiler la liste. */}
+      {prog.total > 0 && (
+        <div style={{ position:"fixed", left:"50%", transform:"translateX(-50%)", bottom:"calc(84px + env(safe-area-inset-bottom, 0px))", width:"calc(100% - 24px)", maxWidth:406, zIndex:45, background:"#fff", borderRadius:16, boxShadow:"0 4px 20px rgba(0,0,0,0.16)", border:"1px solid #ECEEF1", padding:"10px 10px 10px 14px", boxSizing:"border-box", display:"flex", alignItems:"center", gap:12 }}>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div aria-live="polite" style={{ fontFamily:F, fontWeight:900, fontSize:14, color:"#1a1a1a", whiteSpace:"nowrap" }}>
+              {prog.pris}/{prog.total} au caddie
+            </div>
+            <div style={{ fontFamily:F, fontWeight:700, fontSize:12, color:"#8E8E93", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+              {panier.total.toFixed(2).replace('.', ',')} €{panier.incomplet ? " + ?" : ""} au panier
+            </div>
+            <div style={{ marginTop:5, height:4, borderRadius:99, background:"#F0F0F0", overflow:"hidden" }}>
+              <div style={{ width:`${Math.round(ratio*100)}%`, height:"100%", borderRadius:99, background: toutPris ? C.green : "#E5181B", transition:"width 0.3s ease" }} />
+            </div>
+          </div>
+          <button onClick={()=>onPasserEnCaisse?.()}
+            style={{ flexShrink:0, padding:"12px 14px", minHeight:48, border:"none", borderRadius:12, background:"#E5181B", fontFamily:F, fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer" }}>
+            🧾 Je passe en caisse
+          </button>
+        </div>
+      )}
+
       {/* Lot 7 — annulation immédiate du dernier cochage (4 s), au-dessus de
           la TabBar. Le cochage reste de toute façon réversible depuis « Dans
           le caddie » ; ce raccourci évite d'ouvrir la section repliée. */}
       {derniereCoche && (
-        <div role="status" style={{ position:"fixed", bottom:"calc(92px + env(safe-area-inset-bottom, 0px))", left:"50%", transform:"translateX(-50%)", width:"calc(100% - 48px)", maxWidth:380, background:"rgba(20,20,20,0.92)", borderRadius:12, padding:"10px 14px", display:"flex", alignItems:"center", gap:10, zIndex:60, boxShadow:"0 6px 20px rgba(0,0,0,0.35)" }}>
+        <div role="status" style={{ position:"fixed", bottom:"calc(158px + env(safe-area-inset-bottom, 0px))", left:"50%", transform:"translateX(-50%)", width:"calc(100% - 48px)", maxWidth:380, background:"rgba(20,20,20,0.92)", borderRadius:12, padding:"10px 14px", display:"flex", alignItems:"center", gap:10, zIndex:60, boxShadow:"0 6px 20px rgba(0,0,0,0.35)" }}>
           <span style={{ fontFamily:F, fontWeight:700, fontSize:13, color:"#fff", flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
             ✓ {derniereCoche.nom}
           </span>
@@ -9850,6 +9850,11 @@ export default function App() {
   // « Moi » déjà défilé parce que l'écran précédent l'était.
   useEffect(() => { window.scrollTo(0, 0); }, [tab]);
   const [items, setItems]       = useState([]);
+  // Chantier 176 — seuls les articles encore à acheter sont comparés et
+  // partent dans « Mes courses » : un article coché « Déjà pris » dans Ma
+  // liste est déjà dans le placard, il ne doit ni compter dans « N produits
+  // de ta liste » ni réapparaître à prendre en magasin.
+  const itemsAAcheter = useMemo(() => articlesAAcheter(items), [items]);
   // Chantier « Courses » Lot 1 (shadow estFrancois) — session de courses figée,
   // réhydratée depuis localStorage à l'init (survit au rechargement). Rendue
   // uniquement pour François via tab==="courses" (aucun onglet TabBar ajouté).
@@ -10051,6 +10056,19 @@ export default function App() {
   // modifie jamais archives.items ni aucune donnée en base.
   const [libelleVersNomProduit, setLibelleVersNomProduit] = useState({});
   const [loaded, setLoaded]       = useState(false);
+  // Chantier 176 — fermer l'app en plein magasin puis la rouvrir : on retombe
+  // directement sur « Mes courses » (coches intactes), sans page de garde ni
+  // « Reprendre ». Une seule fois par ouverture, seulement si l'on est encore
+  // sur la page de garde (jamais d'écran qui saute sous le doigt) et si les
+  // courses ont bougé il y a moins de 12 h.
+  const ouvertureSurCoursesFaite = useRef(false);
+  useEffect(() => {
+    if (ouvertureSurCoursesFaite.current || !loaded || !sessionCoursesAccessible || !sessionCoursesActive) return;
+    ouvertureSurCoursesFaite.current = true;
+    if (!gardeOuverte || tabCourantRef.current !== "home") return;
+    if (!ouvrirSurCourses(sessionCoursesActive)) return;
+    setTab("courses");
+  }, [loaded, sessionCoursesAccessible, sessionCoursesActive, gardeOuverte, setTab]);
   // Chantier 160 — « Mes courses » sans liste validée en cours (courses
   // terminées ou abandonnées ailleurs) : écran vide évité, on montre Ma liste.
   useEffect(() => {
@@ -10732,12 +10750,12 @@ export default function App() {
     // Rayons + marques des variantes du caddie (Lot 7), en parallèle et chacun
     // avec son repli : un échec réseau ne bloque jamais le démarrage.
     const [rayons, marquesVariantes] = await Promise.all([
-      chargerRayonsProduits(items.map(i => i.produit_id).filter(Boolean))
+      chargerRayonsProduits(itemsAAcheter.map(i => i.produit_id).filter(Boolean))
         .catch(e => { console.error("Rayons non résolus (repli « Autres articles ») :", e); return new Map(); }),
-      chargerMarquesVariantes(items.map(i => i.variante_produit_id).filter(Boolean))
+      chargerMarquesVariantes(itemsAAcheter.map(i => i.variante_produit_id).filter(Boolean))
         .catch(e => { console.error("Marques de variantes non résolues (nom sans marque) :", e); return new Map(); }),
     ]);
-    const articles = construireArticlesSession({ items, lignesPrix: extrasCourses.lignesPrix, rayons, marquesVariantes });
+    const articles = construireArticlesSession({ items: itemsAAcheter, lignesPrix: extrasCourses.lignesPrix, rayons, marquesVariantes });
     const nouvelleSession = construireSessionCourses({
       // Lot 4 — id client : clé primaire de la ligne Supabase (upsert
       // idempotent). genererIdSession et non crypto.randomUUID : ce dernier
@@ -11317,7 +11335,7 @@ export default function App() {
 
     let totalSaving = 0;
     const details = [];
-    items.forEach(item => {
+    itemsAAcheter.forEach(item => {
       const matches = priceDB.filter(p => itemMatchesPrice(item, p));
       const byStore = {};
       matches.forEach(p => { if (!byStore[p.storeId] || p.price < byStore[p.storeId].price) byStore[p.storeId] = p; });
@@ -11333,7 +11351,7 @@ export default function App() {
       date: new Date().toISOString(),
       store,
       total: store.total,
-      items: [...items],
+      items: [...itemsAAcheter],
       potential_saving: Math.round((potentialSaving || 0) * 100) / 100,
       realized_saving: null,
       ticket_scanned: false,
@@ -11798,7 +11816,7 @@ export default function App() {
               <button onClick={()=>setTab("courses")} style={{ border:"none", background:"#16181D", color:"#fff", borderRadius:10, padding:"8px 12px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:12.5, cursor:"pointer", flexShrink:0 }}>Reprendre</button>
             </div>
           )}
-          {loaded && tab==="compare"   && <CompareTab liaisonsProposees={liaisonsProposees} onRelier={relierArticle}   items={items} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix} sessionCoursesAccessible={sessionCoursesAccessible}/>}
+          {loaded && tab==="compare"   && <CompareTab liaisonsProposees={liaisonsProposees} onRelier={relierArticle}   items={itemsAAcheter} nbDejaPris={items.length - itemsAAcheter.length} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix} sessionCoursesAccessible={sessionCoursesAccessible}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
           {loaded && tab==="prices"    && <PricesTab    onAnnulerScanAuto={()=>setTab(ecranRetour("prices", originesEcran) || "home")}
             coursesActives={!scanCaisse && sessionCoursesAccessible && sessionCoursesActive?.id ? { sessionId: sessionCoursesActive.id, magasin: sessionCoursesActive.magasin } : null}
