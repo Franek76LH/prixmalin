@@ -4,7 +4,7 @@
 // ticket les apportera. Lecture seule ; rien n'est écrit ici.
 import { useEffect, useState } from 'react';
 import { T } from './theme';
-import { chercherAutour, plusProches, texteDistance, libelleAnnuaire, chargerMagasinsConnus, magasinConnuPour } from '../../lib/annuaireMagasins';
+import { chercherAutour, chercherParNom, motsRecherche, plusProches, texteDistance, libelleAnnuaire, chargerMagasinsConnus, magasinConnuPour } from '../../lib/annuaireMagasins';
 import { useFermerParRetour } from '../../lib/retourFeuilles';
 
 const RAYONS = [3000, 8000, 20000];
@@ -34,6 +34,27 @@ export default function ChoixMagasinAnnuaire({ position, onChoisir, onFermer, pr
     return () => { annule = true; };
   }, [cle]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Chantier 191 — recherche par nom, enseigne, ville, code postal ou rue.
+  // Résultat rangé avec le texte qui l'a produit (même principe qu'au-dessus).
+  const [texte, setTexte] = useState('');
+  const texteCherche = motsRecherche(texte).join(' ');
+  const [trouves, setTrouves] = useState({ cle: null, lignes: [] });
+  useEffect(() => {
+    if (!texteCherche) return undefined;
+    let annule = false;
+    const minuterie = setTimeout(() => {
+      chercherParNom(texteCherche, position)
+        .then(r => { if (!annule) setTrouves({ cle: texteCherche, lignes: r }); })
+        .catch(() => { if (!annule) setTrouves({ cle: texteCherche, lignes: [] }); });
+    }, 300);
+    return () => { annule = true; clearTimeout(minuterie); };
+  }, [texteCherche]); // eslint-disable-line react-hooks/exhaustive-deps
+  const enRecherche = texteCherche.length > 0;
+  // Sans position (refusée ou inconnue) : pas de liste « autour de toi », la
+  // recherche par nom suffit.
+  const sansPosition = !position || position.lat == null;
+  const lignesAffichees = enRecherche ? (trouves.cle === texteCherche ? trouves.lignes : null) : (sansPosition ? [] : lignes);
+
   return (
     <div onClick={onFermer} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', zIndex: 300 }}>
       <div onClick={e => e.stopPropagation()} role="dialog" aria-label="Choisir mon magasin" style={{
@@ -47,15 +68,17 @@ export default function ChoixMagasinAnnuaire({ position, onChoisir, onFermer, pr
         <div style={{ fontFamily: T.police, fontSize: 13, color: T.texteDoux, marginBottom: 12 }}>
           Tes courses démarrent tout de suite. Les prix encore inconnus viendront de ton ticket : scanne-le à la caisse.
         </div>
-        {lignes === null && <div style={{ fontFamily: T.police, fontSize: 13.5, color: T.texteLeger, padding: '16px 4px' }}>Recherche des magasins autour de toi…</div>}
-        {lignes?.length === 0 && (
-          <div style={{ fontFamily: T.police, fontSize: 13.5, color: T.texteDoux, padding: '12px 4px' }}>Aucun supermarché trouvé à moins de {texteDistance(RAYONS[rang])}.</div>
+        <input type="search" value={texte} onChange={e => setTexte(e.target.value)} placeholder="🔍 Nom ou ville (ex. Lidl Prado)" aria-label="Chercher un magasin par son nom ou sa ville"
+          style={{ width: '100%', boxSizing: 'border-box', padding: '12px 14px', borderRadius: 12, border: `1.5px solid ${T.trait}`, background: T.carte, fontFamily: T.police, fontSize: 15, color: T.texte, marginBottom: 12, outline: 'none' }} />
+        {lignesAffichees === null && <div style={{ fontFamily: T.police, fontSize: 13.5, color: T.texteLeger, padding: '16px 4px' }}>{enRecherche ? 'Recherche…' : 'Recherche des magasins autour de toi…'}</div>}
+        {lignesAffichees?.length === 0 && (
+          <div style={{ fontFamily: T.police, fontSize: 13.5, color: T.texteDoux, padding: '12px 4px' }}>{enRecherche ? 'Aucun magasin ne correspond. Essaie l\'enseigne et la ville (ex. « Lidl Marseille »).' : (sansPosition ? 'Tape le nom de ton magasin ou sa ville pour le trouver.' : `Aucun supermarché trouvé à moins de ${texteDistance(RAYONS[rang])}.`)}</div>
         )}
-        {lignes?.length > 0 && (
+        {lignesAffichees?.length > 0 && (
           <div style={{ background: T.carte, borderRadius: T.rayon, boxShadow: T.ombre, overflow: 'hidden' }}>
-            {lignes.map((l, i) => { const connu = magasinConnuPour(l, connus); const nbPrix = connu ? (prixParMagasin.get(connu.id) || 0) : 0; return (
+            {lignesAffichees.map((l, i) => { const connu = magasinConnuPour(l, connus); const nbPrix = connu ? (prixParMagasin.get(connu.id) || 0) : 0; return (
               <button key={l.osm_id} onClick={() => onChoisir?.(l, connu)} style={{
-                width: '100%', border: 'none', borderBottom: i === lignes.length - 1 ? 'none' : `1px solid ${T.trait}`, background: 'none', cursor: 'pointer', textAlign: 'left',
+                width: '100%', border: 'none', borderBottom: i === lignesAffichees.length - 1 ? 'none' : `1px solid ${T.trait}`, background: 'none', cursor: 'pointer', textAlign: 'left',
                 display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', minHeight: 56,
               }}>
                 <span style={{ flex: 1, minWidth: 0 }}>
@@ -72,7 +95,7 @@ export default function ChoixMagasinAnnuaire({ position, onChoisir, onFermer, pr
             ); })}
           </div>
         )}
-        {lignes !== null && rang < RAYONS.length - 1 && (
+        {!enRecherche && !sansPosition && lignes !== null && rang < RAYONS.length - 1 && (
           <button onClick={() => setRang(r => r + 1)} style={{ display: 'block', margin: '12px auto 0', border: 'none', background: 'none', color: T.bleu, fontFamily: T.police, fontWeight: 800, fontSize: 13.5, cursor: 'pointer', padding: '8px' }}>
             Élargir à {texteDistance(RAYONS[rang + 1])}
           </button>

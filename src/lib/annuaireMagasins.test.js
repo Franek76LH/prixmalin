@@ -88,3 +88,27 @@ describe('Chantier 188 — magasin de l\'annuaire déjà connu', () => {
     expect(magasinConnuPour({ enseigne_slug: 'auchan', latitude: 43.2700, longitude: 5.3900 }, magasins)).toBeNull();
   });
 });
+
+describe('chantier 191 — chercher un magasin par son nom ou sa ville', () => {
+  it('découpe la recherche en mots, sans accents ni majuscules', async () => {
+    const { motsRecherche } = await import('./annuaireMagasins');
+    expect(motsRecherche('Géant  Casino, AUBAGNE')).toEqual(['geant', 'casino', 'aubagne']);
+    expect(motsRecherche('a')).toEqual([]);
+  });
+  it('chaque mot doit être le début d\'un mot du magasin', async () => {
+    const { correspondRecherche, motsRecherche } = await import('./annuaireMagasins');
+    const l = { nom: 'E.Leclerc', enseigne_nom: 'Leclerc', ville: 'Aubagne', code_postal: '13400', adresse: 'Avenue de la Fleuride' };
+    expect(correspondRecherche(l, motsRecherche('leclerc aubagne'))).toBe(true);
+    expect(correspondRecherche(l, motsRecherche('lecl auba'))).toBe(true);
+    expect(correspondRecherche(l, motsRecherche('134'))).toBe(true);
+    expect(correspondRecherche(l, motsRecherche('leclerc marseille'))).toBe(false);
+    expect(correspondRecherche(l, motsRecherche('clerc'))).toBe(false);
+  });
+  it('trie par distance quand la position est connue, sinon par ville', async () => {
+    const { trierResultatsRecherche } = await import('./annuaireMagasins');
+    const a = { nom: 'A', ville: 'Zut', latitude: 43.30, longitude: 5.40 };
+    const b = { nom: 'B', ville: 'Aix', latitude: 43.50, longitude: 5.45 };
+    expect(trierResultatsRecherche([b, a], { lat: 43.29, lon: 5.39 }).map(l => l.nom)).toEqual(['A', 'B']);
+    expect(trierResultatsRecherche([a, b]).map(l => l.nom)).toEqual(['B', 'A']);
+  });
+});

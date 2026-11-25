@@ -6884,7 +6884,7 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
   // Chantier 187 — en haut de l'écran quand on n'a rien de solide à
   // conseiller (pas de prix, ou trop peu), sinon discret sous le conseil.
   const boutonAutreMagasinEnHaut = rankedAffiche.length === 0 || classementMagasins.etat === CLASSEMENT_INSUFFISANT;
-  const boutonAutreMagasin = (sessionCoursesAccessible && userPos) ? (
+  const boutonAutreMagasin = sessionCoursesAccessible ? (
     <button onClick={()=>setChoixAnnuaire(true)} style={{
       width:"100%", marginBottom:14, padding: boutonAutreMagasinEnHaut ? "15px" : "12px", minHeight:48, borderRadius:14, cursor:"pointer",
       border: boutonAutreMagasinEnHaut ? "none" : `1.5px solid ${C.grayLight}`, background: boutonAutreMagasinEnHaut ? "#CC0000" : "#fff",
@@ -7116,8 +7116,8 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
           dans un magasin sans aucun prix. Bouton principal quand on n'a rien
           de solide à conseiller, discret sinon. */}
       {!boutonAutreMagasinEnHaut && boutonAutreMagasin}
-      {choixAnnuaire && userPos && (
-        <ChoixMagasinAnnuaire position={{ lat: userPos.lat, lon: userPos.lng }} onChoisir={validerMagasinAnnuaire} onFermer={()=>setChoixAnnuaire(false)}
+      {choixAnnuaire && (
+        <ChoixMagasinAnnuaire position={userPos ? { lat: userPos.lat, lon: userPos.lng } : null} onChoisir={validerMagasinAnnuaire} onFermer={()=>setChoixAnnuaire(false)}
           prixParMagasin={new Map(rankedAffiche.map(m => [m.id, m.found]))} nbArticles={items.length} />
       )}
         </>

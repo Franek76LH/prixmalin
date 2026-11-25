@@ -207,3 +207,44 @@ export async function chargerMagasinsConnus() {
     return data.map(m => ({ id: m.id, nom: m.nom, latitude: m.latitude, longitude: m.longitude, slug: m.enseignes?.slug ?? null }));
   } catch (e) { console.error('[188] magasins connus', e); return []; }
 }
+
+// Chantier 191 — chercher un magasin de l'annuaire par son nom, son enseigne,
+// sa ville, son code postal ou sa rue (« leclerc aubagne », « carrefour 13008 »).
+// Tolérant aux accents et aux majuscules.
+export function motsRecherche(texte) {
+  return sansAccents(texte).split(/[^a-z0-9]+/).filter(m => m.length >= 2).slice(0, 4);
+}
+export function correspondRecherche(ligne, mots) {
+  if (!ligne || !mots?.length) return false;
+  const tout = sansAccents([ligne.nom, ligne.enseigne_nom, ligne.ville, ligne.code_postal, ligne.adresse].filter(Boolean).join(' '));
+  const morceaux = tout.split(/[^a-z0-9]+/);
+  // Chaque mot tapé doit être le début d'un mot du magasin (« auba » → Aubagne).
+  return mots.every(m => morceaux.some(x => x.startsWith(m)));
+}
+export function trierResultatsRecherche(lignes, position = null, max = 20) {
+  const avecDistance = (Array.isArray(lignes) ? lignes : []).map(l => ({
+    ...l,
+    distance: position && l.latitude != null ? distanceMetres(position, { lat: Number(l.latitude), lon: Number(l.longitude) }) : null,
+  }));
+  avecDistance.sort((a, b) => {
+    if (a.distance != null && b.distance != null) return a.distance - b.distance;
+    if (a.distance != null) return -1;
+    if (b.distance != null) return 1;
+    return String(a.ville ?? '').localeCompare(String(b.ville ?? ''), 'fr') || String(a.nom ?? '').localeCompare(String(b.nom ?? ''), 'fr');
+  });
+  return avecDistance.slice(0, max);
+}
+export async function chercherParNom(texte, position = null) {
+  const mots = motsRecherche(texte);
+  if (!mots.length) return [];
+  try {
+    let q = supabase.from('annuaire_magasins').select(COLONNES);
+    for (const m of mots) {
+      const p = m.replace(/[aeiouyc]/g, '_'); // lettres accentuables : joker d'un caractère
+      q = q.or(`nom.ilike.%${p}%,enseigne_nom.ilike.%${p}%,ville.ilike.%${p}%,code_postal.ilike.${p}%,adresse.ilike.%${p}%`);
+    }
+    const { data, error } = await q.limit(300);
+    if (error || !Array.isArray(data)) return [];
+    return trierResultatsRecherche(data.filter(l => correspondRecherche(l, mots)), position);
+  } catch (e) { console.error('[191] annuaire (nom)', e); return []; }
+}
