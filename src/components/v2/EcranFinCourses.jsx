@@ -7,6 +7,7 @@
 import { useMemo, useState } from 'react';
 import { T } from './theme';
 import { construireBilanFin, planClotureListe } from '../../lib/bilanFinCoursesCore';
+import CarteNutriCaddie from './CarteNutriCaddie';
 
 const euros = (n) => (n == null ? '' : `${Number(n).toFixed(2).replace('.', ',')} €`);
 const LIBELLE_RAISON = {
@@ -155,6 +156,9 @@ export default function EcranFinCourses({ session, items = [], onTerminer, onPlu
             })}
           </Rubrique>
         )}
+
+        {/* Chantier 180 — Nutri-Score de ce qui est dans le caddie. */}
+        {!demo && <CarteNutriCaddie articles={(session?.articles || []).filter(a => a.etat === 'au_caddie' && a.type !== 'note')} discretSiInsuffisant />}
 
         {(bilan.aVerifier.length > 0 || bilan.nonReconnues.length > 0) && (
           <div style={{ background: T.carte, borderRadius: 16, marginBottom: 12, boxShadow: T.ombre, overflow: 'hidden' }}>

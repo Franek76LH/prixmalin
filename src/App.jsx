@@ -84,6 +84,7 @@ import { alertesBaisse, avecExemple, exempleDemande } from "./lib/evolutionPrixC
 import ResultatComparaison from "./components/v2/ResultatComparaison";
 import ChoixMagasinComparaison from "./components/v2/ChoixMagasinComparaison";
 import PastilleNutriScore from "./components/v2/PastilleNutriScore";
+import CarteNutriCaddie from "./components/v2/CarteNutriCaddie";
 import { resumeNutri, lettreNutri, COULEURS_NUTRI } from "./lib/nutriScoreCore";
 import { classerMagasinsComparables, ETAT_INSUFFISANT as CLASSEMENT_INSUFFISANT } from "./lib/classementHonnete";
 import EcranEconomies from "./components/v2/EcranEconomies";
@@ -9583,6 +9584,10 @@ function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, on
           <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:C.orange }}>Aucun article dans cette session</div>
         </div>
       )}
+
+      {/* Chantier 180 — Nutri-Score des courses prévues (seulement s'il y a
+          assez de produits notés : rien en magasin sinon). */}
+      {prog.total > 0 && <div style={{ marginTop:16 }}><CarteNutriCaddie articles={articles.filter(a => a.type !== 'note')} titre="Nutri-Score de tes courses" /></div>}
 
       {/* Lot 6 — clôture explicite, en fin de liste. Vert quand tout est pris,
           neutre sinon (la confirmation « il reste X articles » est gérée par
