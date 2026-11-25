@@ -7124,7 +7124,7 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
 }
 
 // ── ARCHIVE TAB ───────────────────────────────────────────────────────────────
-function ArchiveTab({ archives, onDelete, onAddToList, priceDB, onImport, onSavePrice, produitsRef = [], libelleVersNomProduit = {}, onLibelleResolu, estFrancois = false, onOuvrirHistoriqueTickets = null }) {
+function ArchiveTab({ archives, onDelete, onAddToList, priceDB, onImport, onSavePrice, produitsRef = [], libelleVersNomProduit = {}, onLibelleResolu, estFrancois = false, accesAvance = false, onOuvrirHistoriqueTickets = null }) {
   // Chantier 1 — affichage seulement : si la ligne de ticket correspondante
   // est rattachée à un produit Core (résolu au chargement dans App, via
   // lignes_ticket.produit_id), on montre nom_reference à la place du libellé
@@ -7492,6 +7492,7 @@ function ArchiveTab({ archives, onDelete, onAddToList, priceDB, onImport, onSave
           enseigne={enseigneCourante}
           enseigneResolue={enseigneResolue}
           estFrancois={estFrancois}
+          accesAvance={accesAvance}
           onCreerProduit={onOuvrirHistoriqueTickets ? ()=>{ setCorrectionCible(null); onOuvrirHistoriqueTickets(); } : null}
           onClose={()=>setCorrectionCible(null)}
           onChoisir={(produit,varianteId,methode)=>rattacherProduit(correctionCible.arc, correctionCible.item, produit, varianteId, methode)}
@@ -7510,7 +7511,7 @@ function ArchiveTab({ archives, onDelete, onAddToList, priceDB, onImport, onSave
 // par code-barres : marque + libellé + quantité, tel que demandé (distinct de
 // libelleVariante ci-dessus, qui ne sert qu'au sélecteur "plusieurs variantes"
 // de la recherche par nom).
-function CorrigerProduitSheet({ item, libelleTicket = null, suggestion = null, enseigne = null, enseigneResolue = false, estFrancois = false, onClose, onChoisir, onCreerProduit = null }) {
+function CorrigerProduitSheet({ item, libelleTicket = null, suggestion = null, enseigne = null, enseigneResolue = false, estFrancois = false, accesAvance = false, onClose, onChoisir, onCreerProduit = null }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -7548,6 +7549,10 @@ function CorrigerProduitSheet({ item, libelleTicket = null, suggestion = null, e
   // réellement décodé + le déroulé de la recherche, pour ne jamais avoir d'écran
   // muet : { brut, format, normalise, rechercheLancee, resultat }.
   const [scanDiag, setScanDiag] = useState(null);
+  // Chantier 189 — testeurs de confiance : bouton « Scanner le code-barres » et
+  // diagnostic visibles. Seul un administrateur peut ENREGISTRER un nouveau
+  // code (règle de la base) : pour un testeur, un code inconnu n'est pas gardé.
+  const outilsScanVisibles = estFrancois || accesAvance;
   // Chantier 110 — relecture avant d'appeler la RPC. Tant que ce n'est pas
   // null, l'écran montre le récapitulatif et RIEN n'a encore été écrit.
   const [recapitulatif, setRecapitulatif] = useState(null);
@@ -7819,7 +7824,7 @@ function CorrigerProduitSheet({ item, libelleTicket = null, suggestion = null, e
     // Code décodé mais absent (ou variante inactive) : gardé pour apprentissage.
     const inconnu = () => {
       setScanDiag(d => ({ ...(d || {}), resultat: 'non trouvé' }));
-      setCodeBarresEnAttente(code);
+      if (estFrancois) setCodeBarresEnAttente(code);
       // Chantier 159 — cette feuille ne sait pas créer une fiche (essai de
       // François, 19/11 : trois scans d'un produit inconnu, trois impasses).
       // Quand l'écran qui sait le faire est accessible, on y envoie.
@@ -7966,7 +7971,7 @@ function CorrigerProduitSheet({ item, libelleTicket = null, suggestion = null, e
 
         {/* Diagnostic scan (shadow estFrancois) — visible dans toutes les branches
             dès qu'un code a été décodé. Ne s'affiche jamais pour les autres. */}
-        {estFrancois && scanDiag && (
+        {outilsScanVisibles && scanDiag && (
           <div style={{ fontFamily:"ui-monospace, Menlo, monospace", fontSize:11, lineHeight:1.5, background:"#F4F6F8", border:`1px solid ${C.grayLight}`, borderRadius:8, padding:"8px 10px", marginBottom:12, color:"#333", whiteSpace:"pre-line" }}>
             {`🔎 Diagnostic scan
 Code brut détecté : ${scanDiag.brut}
@@ -8081,7 +8086,7 @@ Résultat : ${scanDiag.resultat}`}
                   le chemin normal, sans court-circuit. */}
               <BoutonEffacerRecherche visible={query.length > 0} champRef={champRechercheRef} onEffacer={()=>setQuery("")} />
             </div>
-            {estFrancois && (
+            {outilsScanVisibles && (
               <button onClick={()=>{ setBarcodeMessage(null); setScanDiag(null); setScanOuvert(true); }} disabled={rechercheBarcode} style={{ width:"100%", padding:"10px", marginBottom:12, border:`1.5px dashed ${C.blue}`, borderRadius:10, background:"transparent", color:C.blue, fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:13, cursor:"pointer" }}>
                 📷 Scanner le code-barres
               </button>
@@ -12084,7 +12089,7 @@ export default function App() {
             setShowRating({id:data.id,store:newArc.store});
             return { ok:true };
           }} userId={session?.user?.id} produitsRef={produitsRef}/>}
-          {loaded && tab==="archive"   && <ArchiveTab   archives={archives} onDelete={deleteArchive} priceDB={priceDB} onImport={handleImportPrices} onSavePrice={handleSavePrice} produitsRef={produitsRef} libelleVersNomProduit={libelleVersNomProduit} onLibelleResolu={(cle,nom)=>setLibelleVersNomProduit(prev=>({...prev,[cle]:nom}))} estFrancois={estFrancois} onOuvrirHistoriqueTickets={scanApresTicketAccessible ? ()=>ouvrirHistoriqueTickets(null) : null} onAddToList={arcItem=>{
+          {loaded && tab==="archive"   && <ArchiveTab   archives={archives} onDelete={deleteArchive} priceDB={priceDB} onImport={handleImportPrices} onSavePrice={handleSavePrice} produitsRef={produitsRef} libelleVersNomProduit={libelleVersNomProduit} onLibelleResolu={(cle,nom)=>setLibelleVersNomProduit(prev=>({...prev,[cle]:nom}))} estFrancois={estFrancois} accesAvance={accesAvance} onOuvrirHistoriqueTickets={scanApresTicketAccessible ? ()=>ouvrirHistoriqueTickets(null) : null} onAddToList={arcItem=>{
             const newItem={id:Date.now()+Math.random(),product:arcItem.product,format:arcItem.format||"",brand:arcItem.brand||"",qty:arcItem.qty||1,checked:false};
             addItem(newItem);
             showAppToast(`✓ ${arcItem.product} ajouté à ta liste`);
