@@ -4,12 +4,21 @@
 // ticket les apportera. Lecture seule ; rien n'est écrit ici.
 import { useEffect, useState } from 'react';
 import { T } from './theme';
-import { chercherAutour, plusProches, texteDistance, libelleAnnuaire } from '../../lib/annuaireMagasins';
+import { chercherAutour, plusProches, texteDistance, libelleAnnuaire, chargerMagasinsConnus, magasinConnuPour } from '../../lib/annuaireMagasins';
 
 const RAYONS = [3000, 8000, 20000];
 
-export default function ChoixMagasinAnnuaire({ position, onChoisir, onFermer }) {
+// Chantier 188 — `prixParMagasin` : Map id du magasin PrixMalin -> nombre de
+// prix de la liste connus chez lui (comparaison en cours). Un magasin de
+// l'annuaire déjà dans PrixMalin est signalé, et transmis à onChoisir.
+export default function ChoixMagasinAnnuaire({ position, onChoisir, onFermer, prixParMagasin = new Map(), nbArticles = 0 }) {
   const [rang, setRang] = useState(0);
+  const [connus, setConnus] = useState([]);
+  useEffect(() => {
+    let annule = false;
+    chargerMagasinsConnus().then(r => { if (!annule) setConnus(r); });
+    return () => { annule = true; };
+  }, []);
   // Résultat rangé avec la recherche qui l'a produit : une autre recherche en
   // cours = « chargement » (null), sans remise à zéro dans l'effet.
   const cle = `${position?.lat}|${position?.lon}|${rang}`;
@@ -42,18 +51,23 @@ export default function ChoixMagasinAnnuaire({ position, onChoisir, onFermer }) 
         )}
         {lignes?.length > 0 && (
           <div style={{ background: T.carte, borderRadius: T.rayon, boxShadow: T.ombre, overflow: 'hidden' }}>
-            {lignes.map((l, i) => (
-              <button key={l.osm_id} onClick={() => onChoisir?.(l)} style={{
+            {lignes.map((l, i) => { const connu = magasinConnuPour(l, connus); const nbPrix = connu ? (prixParMagasin.get(connu.id) || 0) : 0; return (
+              <button key={l.osm_id} onClick={() => onChoisir?.(l, connu)} style={{
                 width: '100%', border: 'none', borderBottom: i === lignes.length - 1 ? 'none' : `1px solid ${T.trait}`, background: 'none', cursor: 'pointer', textAlign: 'left',
                 display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', minHeight: 56,
               }}>
                 <span style={{ flex: 1, minWidth: 0 }}>
                   <span style={{ display: 'block', fontFamily: T.police, fontWeight: 900, fontSize: 15, color: T.texte }}>{l.nom || l.enseigne_nom || 'Magasin'}</span>
                   <span style={{ display: 'block', fontFamily: T.police, fontSize: 12, color: T.texteLeger, marginTop: 1 }}>{libelleAnnuaire(l)}</span>
+                  {connu && (
+                    <span style={{ display: 'inline-block', marginTop: 4, background: T.vertPale, color: T.vert, borderRadius: 99, padding: '2px 8px', fontFamily: T.police, fontWeight: 900, fontSize: 10.5 }}>
+                      {nbPrix > 0 ? `Déjà dans PrixMalin · ${nbPrix} prix sur ${nbArticles}` : 'Déjà dans PrixMalin'}
+                    </span>
+                  )}
                 </span>
                 <span style={{ fontFamily: T.police, fontWeight: 800, fontSize: 12.5, color: T.texteDoux, flexShrink: 0 }}>{texteDistance(l.distance)}</span>
               </button>
-            ))}
+            ); })}
           </div>
         )}
         {lignes !== null && rang < RAYONS.length - 1 && (

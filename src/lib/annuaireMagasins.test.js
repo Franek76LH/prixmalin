@@ -74,3 +74,17 @@ describe('Chantier 187 — magasins les plus proches', () => {
     expect(texteDistance(1560)).toBe('1,6 km');
   });
 });
+
+describe('Chantier 188 — magasin de l\'annuaire déjà connu', () => {
+  it('même enseigne à moins de 200 m en priorité, sinon même emplacement à moins de 60 m', async () => {
+    const { magasinConnuPour } = await import('./annuaireMagasins');
+    const magasins = [
+      { id: 'lidl', slug: 'lidl', latitude: 43.2610, longitude: 5.3900 },   // ~110 m
+      { id: 'autre', slug: 'carrefour', latitude: 43.2602, longitude: 5.3900 }, // ~22 m
+    ];
+    expect(magasinConnuPour({ enseigne_slug: 'lidl', latitude: 43.2600, longitude: 5.3900 }, magasins).id).toBe('lidl');
+    expect(magasinConnuPour({ enseigne_slug: 'netto', latitude: 43.2600, longitude: 5.3900 }, magasins).id).toBe('autre');
+    expect(magasinConnuPour({ enseigne_slug: 'lidl', latitude: 43.2615, longitude: 5.3900 }, magasins).id).toBe('lidl');
+    expect(magasinConnuPour({ enseigne_slug: 'auchan', latitude: 43.2700, longitude: 5.3900 }, magasins)).toBeNull();
+  });
+});

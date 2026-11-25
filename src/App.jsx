@@ -6845,11 +6845,28 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
   // Chantier 187 — courses dans un magasin de l'annuaire, sans prix connu :
   // la session démarre avec tous les articles « prix inconnu » ; le magasin
   // sera reconnu (ou créé en un appui) au scan du ticket.
-  const validerMagasinAnnuaire = (l) => {
+  // Chantier 188 — `connu` : magasin PrixMalin au même endroit. S'il fait
+  // partie de la comparaison, ses prix connus partent dans les courses ;
+  // sinon les courses portent au moins son identifiant (le scan du ticket
+  // saute alors l'étape « quel magasin ? »).
+  const validerMagasinAnnuaire = (l, connu = null) => {
     setChoixAnnuaire(false);
-    const nom = l.nom || l.enseigne_nom || 'Magasin';
-    onValidate({ id: `annuaire:${l.osm_id}`, name: nom, total: null }, 0, {
-      magasinId: null,
+    const classe = connu ? rankedAffiche.find(m => m.id === connu.id) : null;
+    if (classe && utiliserCore && coreResultat) {
+      const entree = analysisAffichee.map(({ byStore }) => byStore[classe.id]).find(p => p?.store_address?.trim()) ?? null;
+      onValidate(classe, 0, {
+        magasinId: classe.id,
+        nomEnseigne: coreResultat.regroupement[classe.id]?.[0]?.prix?.nom_enseigne ?? l.enseigne_nom ?? null,
+        adresse: entree
+          ? { adresse: entree.store_address ?? null, code_postal: entree.code_postal ?? null, ville: entree.ville ?? null }
+          : { adresse: l.adresse ?? null, code_postal: l.code_postal ?? null, ville: l.ville ?? null },
+        lignesPrix: coreResultat.regroupement[classe.id] ?? [],
+      });
+      return;
+    }
+    const nom = connu?.nom || l.nom || l.enseigne_nom || 'Magasin';
+    onValidate({ id: connu ? connu.id : `annuaire:${l.osm_id}`, name: nom, total: null }, 0, {
+      magasinId: connu ? connu.id : null,
       nomEnseigne: l.enseigne_nom ?? null,
       adresse: { adresse: l.adresse ?? null, code_postal: l.code_postal ?? null, ville: l.ville ?? null },
       lignesPrix: [],
@@ -7091,7 +7108,8 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
           de solide à conseiller, discret sinon. */}
       {!boutonAutreMagasinEnHaut && boutonAutreMagasin}
       {choixAnnuaire && userPos && (
-        <ChoixMagasinAnnuaire position={{ lat: userPos.lat, lon: userPos.lng }} onChoisir={validerMagasinAnnuaire} onFermer={()=>setChoixAnnuaire(false)} />
+        <ChoixMagasinAnnuaire position={{ lat: userPos.lat, lon: userPos.lng }} onChoisir={validerMagasinAnnuaire} onFermer={()=>setChoixAnnuaire(false)}
+          prixParMagasin={new Map(rankedAffiche.map(m => [m.id, m.found]))} nbArticles={items.length} />
       )}
         </>
       )}

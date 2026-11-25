@@ -178,3 +178,32 @@ export function texteDistance(m) {
   if (m == null) return '';
   return m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1).replace('.', ',')} km`;
 }
+
+// Chantier 188 — un magasin de l'annuaire est-il déjà dans PrixMalin ?
+// Même enseigne à moins de 200 m, sinon n'importe quel magasin à moins de
+// 60 m (même emplacement). Le plus proche gagne. `magasins` : lignes de la
+// table magasins avec { id, latitude, longitude, slug }.
+export function magasinConnuPour(ligne, magasins) {
+  if (!ligne || ligne.latitude == null || ligne.longitude == null) return null;
+  const pos = { lat: Number(ligne.latitude), lon: Number(ligne.longitude) };
+  // La même enseigne passe avant un voisin d'une autre enseigne.
+  let meilleur = null;
+  for (const m of Array.isArray(magasins) ? magasins : []) {
+    if (!m || m.latitude == null || m.longitude == null) continue;
+    const d = distanceMetres(pos, { lat: Number(m.latitude), lon: Number(m.longitude) });
+    if (d == null) continue;
+    const memeEnseigne = !!ligne.enseigne_slug && m.slug === ligne.enseigne_slug;
+    if (!(memeEnseigne ? d <= 200 : d <= 60)) continue;
+    const rang = memeEnseigne ? 0 : 1;
+    if (!meilleur || rang < meilleur.rang || (rang === meilleur.rang && d < meilleur.d)) meilleur = { m, d, rang };
+  }
+  return meilleur ? meilleur.m : null;
+}
+
+export async function chargerMagasinsConnus() {
+  try {
+    const { data, error } = await supabase.from('magasins').select('id, nom, latitude, longitude, enseignes(slug)').eq('statut', 'actif');
+    if (error || !Array.isArray(data)) return [];
+    return data.map(m => ({ id: m.id, nom: m.nom, latitude: m.latitude, longitude: m.longitude, slug: m.enseignes?.slug ?? null }));
+  } catch (e) { console.error('[188] magasins connus', e); return []; }
+}
