@@ -122,6 +122,7 @@ import AValiderSheet from "./components/dev/AValiderSheet";
 // Chantier "Scan code-barres", bout 3B — console de validation admin
 import ValidationScanSheet from "./components/admin/ValidationScanSheet";
 import AVerifierScansSheet from "./components/AVerifierScansSheet";
+import { autreCategorie as categorieOpposee, doitBasculer, phraseBascule } from "./lib/basculeCategorie";
 import { nbAvisAttendus } from "./lib/verificationCommunaute";
 // Chantier 106 Lot A — module de contribution aux codes-barres : parcours
 // utilisateur depuis l'accueil, et file de validation côté François.
@@ -6181,7 +6182,7 @@ function cleCoords(lat, lng) {
   return `${Number(lat).toFixed(4)},${Number(lng).toFixed(4)}`;
 }
 
-function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, searchRadius, setSearchRadius, userPos, setUserPos, zoneLabel, setZoneLabel, zonePrete = true, userId, isAdmin, modeCoreActif, coreActifGlobal, categorieMagasin = 'grande_surface', setCategorieMagasin, sessionCoursesAccessible = false, liaisonsProposees = {}, onRelier }) {
+function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, searchRadius, setSearchRadius, userPos, setUserPos, zoneLabel, setZoneLabel, zonePrete = true, userId, isAdmin, modeCoreActif, coreActifGlobal, categorieMagasin = 'grande_surface', setCategorieMagasin, categorieAuto = false, sessionCoursesAccessible = false, liaisonsProposees = {}, onRelier }) {
   const F = "'Nunito',sans-serif";
 
   // Chantier géoloc comparateur — sélecteur de zone (point de référence).
@@ -6428,6 +6429,10 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
   // de ShadowCompareDiagnostic.jsx (mêmes fonctions, même ordre, même garde
   // d'annulation) : on ne réinvente aucune logique de matching/agrégation.
   const [coreResultat,   setCoreResultat]   = useState(null);
+  // Chantier 215 — bascule automatique de catégorie : la catégorie choisie
+  // d'office (règle des 6 articles) n'a aucun prix pour la liste, mais l'autre
+  // en a → on montre l'autre et on le dit. { de, vers } ou null.
+  const [basculeAuto, setBasculeAuto] = useState(null);
   const [coreChargement, setCoreChargement] = useState(false);
   const [coreErreur,     setCoreErreur]     = useState(null);
   // Chantier 177 — magasin choisi par l'utilisateur (null = le moins cher
@@ -6501,9 +6506,12 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
         // sélectionnée (grandes surfaces / proximité), EN PLUS de la zone.
         // categorie null -> grande surface (règle par défaut). Si la map n'est
         // pas encore chargée, on ne filtre pas (l'effet re-tourne au chargement).
+        // Chantier 215 — tout le calcul ci-dessous est fait pour UNE catégorie
+        // (celle demandée), pour pouvoir essayer l'autre si celle-ci est vide.
+        const calculerPour = (categorieVisee) => {
         const bonneCategorie = (magId) => {
           if (categorieParMagasin.size === 0) return true;
-          return (categorieParMagasin.get(magId) || 'grande_surface') === categorieMagasin;
+          return (categorieParMagasin.get(magId) || 'grande_surface') === categorieVisee;
         };
 
         const correspondancesFraiches = faireCorrespondrePrix(cibles, prixBruts, { userPos, searchRadius, staleCutoffISO: cutoffISO });
@@ -6573,7 +6581,23 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
         const ciblesEtendues = [...cibles, ...ciblesSansFormat];
         const totauxParMagasin = calculerTotauxMagasins(regroupementEtendu, ciblesEtendues);
         const classement = classerMagasins(totauxParMagasin);
-        if (!annule) setCoreResultat({ classement, regroupement: regroupementEtendu, exclusions, cibles: ciblesEtendues });
+        return { classement, regroupement: regroupementEtendu, exclusions, cibles: ciblesEtendues };
+        };
+
+        let resultat = calculerPour(categorieMagasin);
+        // Chantier 215 — la catégorie a été choisie d'office (personne n'a
+        // touché au bouton) et elle ne donne aucun prix : si l'autre catégorie
+        // en donne, on bascule dessus et on le dit, au lieu d'un « Aucun prix »
+        // trompeur. Jamais quand l'utilisateur a choisi lui-même.
+        if (resultat.classement.length === 0 && categorieAuto && typeof setCategorieMagasin === 'function' && categorieParMagasin.size > 0) {
+          const autreCat = categorieOpposee(categorieMagasin);
+          const resultatAutre = calculerPour(autreCat);
+          if (doitBasculer({ categorieAuto, nbMagasinsCategorie: resultat.classement.length, nbMagasinsAutre: resultatAutre.classement.length })) {
+            resultat = resultatAutre;
+            if (!annule) { setBasculeAuto({ de: categorieMagasin, vers: autreCat }); setCategorieMagasin(autreCat); }
+          }
+        }
+        if (!annule) setCoreResultat(resultat);
       } catch (err) {
         if (!annule) { setCoreErreur(err?.message || 'Erreur inconnue'); setCoreResultat(null); }
       } finally {
@@ -6581,7 +6605,7 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
       }
     })();
     return () => { annule = true; };
-  }, [utiliserCore, items, userPos, searchRadius, categorieMagasin, categorieParMagasin]);
+  }, [utiliserCore, items, userPos, searchRadius, categorieMagasin, categorieParMagasin, categorieAuto, setCategorieMagasin]);
 
   // Adaptateur — résultat comparateurCore.js → même forme que analysis/ranked
   // legacy (ci-dessous), pour alimenter les cartes existantes sans les
@@ -7032,6 +7056,12 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
             Proximité
           </button>
         </div>
+        {/* Chantier 215 — dit pourquoi on n'est plus sur la catégorie par défaut. */}
+        {basculeAuto && basculeAuto.vers === categorieMagasin && (
+          <div style={{ fontFamily:F, fontSize:12.5, color:C.textLight, marginTop:8, lineHeight:1.4 }}>
+            {phraseBascule(basculeAuto)}
+          </div>
+        )}
       </div>
 
       {/* Chantier 126 — produits en texte libre : fiches proposées, un appui relie. */}
@@ -12201,7 +12231,7 @@ export default function App() {
               <button onClick={()=>setTab("courses")} style={{ border:"none", background:"#16181D", color:"#fff", borderRadius:10, padding:"8px 12px", fontFamily:"'Nunito',sans-serif", fontWeight:900, fontSize:12.5, cursor:"pointer", flexShrink:0 }}>Reprendre</button>
             </div>
           )}
-          {loaded && tab==="compare"   && <CompareTab liaisonsProposees={liaisonsProposees} onRelier={relierArticle}   items={itemsAAcheter} nbDejaPris={items.length - itemsAAcheter.length} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix} sessionCoursesAccessible={sessionCoursesAccessible}/>}
+          {loaded && tab==="compare"   && <CompareTab liaisonsProposees={liaisonsProposees} onRelier={relierArticle}   items={itemsAAcheter} nbDejaPris={items.length - itemsAAcheter.length} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix} categorieAuto={categorieChoix === null} sessionCoursesAccessible={sessionCoursesAccessible}/>}
           {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
           {loaded && tab==="prices"    && <PricesTab    onAnnulerScanAuto={()=>revenirA(ecranRetour("prices", originesEcran) || "home")}
             coursesActives={!scanCaisse && !scanSepare && sessionCoursesAccessible && sessionCoursesActive?.id ? { sessionId: sessionCoursesActive.id, magasin: sessionCoursesActive.magasin } : null}
