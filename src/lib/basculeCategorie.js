@@ -17,10 +17,11 @@ export function doitBasculer({ categorieAuto, nbMagasinsCategorie, nbMagasinsAut
   return categorieAuto === true && !(nbMagasinsCategorie > 0) && nbMagasinsAutre > 0;
 }
 
-const libelle = (c) => (c === PROXIMITE ? 'proximité' : 'grandes surfaces');
+// Chantier 216 — « Proximité » devient « Petites surfaces » à l'écran (François, 26/11).
+const libelle = (c) => (c === PROXIMITE ? 'petites surfaces' : 'grandes surfaces');
 
 export function phraseBascule(bascule) {
   if (!bascule?.de || !bascule?.vers) return null;
-  const vers = bascule.vers === PROXIMITE ? 'magasins de proximité' : 'grandes surfaces';
+  const vers = libelle(bascule.vers);
   return `Pas de prix en ${libelle(bascule.de)} pour ta liste : voici les ${vers}.`;
 }

@@ -19,8 +19,8 @@ describe('bascule de catégorie (chantier 215)', () => {
     expect(autreCategorie('grande_surface')).toBe('proximite');
   });
   it('phrase', () => {
-    expect(phraseBascule({ de: 'proximite', vers: 'grande_surface' })).toBe('Pas de prix en proximité pour ta liste : voici les grandes surfaces.');
-    expect(phraseBascule({ de: 'grande_surface', vers: 'proximite' })).toBe('Pas de prix en grandes surfaces pour ta liste : voici les magasins de proximité.');
+    expect(phraseBascule({ de: 'proximite', vers: 'grande_surface' })).toBe('Pas de prix en petites surfaces pour ta liste : voici les grandes surfaces.');
+    expect(phraseBascule({ de: 'grande_surface', vers: 'proximite' })).toBe('Pas de prix en grandes surfaces pour ta liste : voici les petites surfaces.');
     expect(phraseBascule(null)).toBeNull();
   });
 });

@@ -6991,7 +6991,7 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
   })();
   const categorieVideEnZone = magasinsCat.length > 0 && comptesCategorieEnZone.choisie === 0;
   const autreCategorie = categorieMagasin === 'grande_surface' ? 'proximite' : 'grande_surface';
-  const libelleCategorie = (c) => c === 'proximite' ? 'proximité' : 'grandes surfaces';
+  const libelleCategorie = (c) => c === 'proximite' ? 'petites surfaces' : 'grandes surfaces';
 
   const [lastVerified, setLastVerified] = useState(null);
   useEffect(() => {
@@ -7053,7 +7053,7 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
             Grandes surfaces
           </button>
           <button onClick={()=>setCategorieMagasin?.('proximite')} style={{ padding:"6px 14px", border:"none", cursor:"pointer", fontFamily:F, fontWeight:800, fontSize:12, background:categorieMagasin==='proximite'?C.blue:C.white, color:categorieMagasin==='proximite'?C.white:C.gray }}>
-            Proximité
+            Petites surfaces
           </button>
         </div>
         {/* Chantier 215 — dit pourquoi on n'est plus sur la catégorie par défaut. */}
@@ -7110,10 +7110,10 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
         <div style={{ background:C.orangeLight, borderRadius:14, padding:"22px 20px", textAlign:"center", border:`2px dashed ${C.orange}`, marginBottom:14 }}>
           <div style={{ fontSize:36, marginBottom:8 }}>🏪</div>
           <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:C.orange, marginBottom:6 }}>
-            Aucun magasin de {libelleCategorie(categorieMagasin)} dans ta zone
+            {categorieMagasin === 'proximite' ? 'Aucune petite surface' : 'Aucune grande surface'} dans ta zone
           </div>
           <div style={{ fontFamily:F, fontSize:13, color:C.textLight, marginBottom:14 }}>
-            Rayon actuel : {searchRadius} km.{comptesCategorieEnZone.autre>0 ? ` Il y a des magasins de ${libelleCategorie(autreCategorie)} à proximité.` : ''}
+            Rayon actuel : {searchRadius} km.{comptesCategorieEnZone.autre>0 ? ` Il y a des ${libelleCategorie(autreCategorie)} près de toi.` : ''}
           </div>
           <div style={{ display:"flex", gap:8, justifyContent:"center", flexWrap:"wrap" }}>
             {comptesCategorieEnZone.autre>0 && (
