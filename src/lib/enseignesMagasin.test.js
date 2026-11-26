@@ -55,11 +55,12 @@ describe('défaut 1 — l\'adresse du ticket n\'est plus effacée pour François
 
   // Correctif « scan anti-invention » — les quatre arrivées d'une lecture
   // OCR (caméra ×2, galerie, résultat déjà scanné) passent désormais par
-  // poursuivreLecture, qui pose l'adresse du ticket ; le collage JSON garde
-  // la sienne. Même garantie qu'avant : 5 points d'arrivée, tous avec l'adresse.
-  it('les cinq points d\'arrivée d\'un scan posent l\'adresse lue sur le ticket', () => {
+  // poursuivreLecture, qui pose l'adresse du ticket. Chantier 219 : le collage
+  // JSON (parseAndPreview, jamais branché à l'écran) a été supprimé comme code
+  // mort, il reste donc 4 points d'arrivée, tous avec l'adresse.
+  it('les quatre points d\'arrivée d\'un scan posent l\'adresse lue sur le ticket', () => {
     const occurrences = app.match(/setStoreLocation\((parsed|initialResult)\.address \|\| ""\)/g) || [];
-    expect(occurrences.length).toBe(2);
+    expect(occurrences.length).toBe(1);
     const corps = app.slice(app.indexOf('const poursuivreLecture = async'), app.indexOf('const continuerLectureDouteuse'));
     expect(corps).toMatch(/setStoreLocation\(parsed\.address \|\| ""\)/);
     const arrivees = app.match(/poursuivreLecture\((parsed|initialResult)[,)]/g) || [];

@@ -398,8 +398,6 @@ function calcPrixUnitaire(price, quantite, unite, conditionnement) {
   else if (unite === 'pièce')  pu = price / conditionnement;
   return pu !== null ? Math.round(pu * 100) / 100 : null;
 }
-const MOIS=['jan.','fév.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'];
-function formatMonth(yyyymm){ if(!yyyymm) return ''; const [y,m]=yyyymm.split('-'); return `${MOIS[parseInt(m)-1]} ${y}`; }
 
 async function geocodeAddress(address) {
   try {
@@ -815,7 +813,7 @@ function AuthScreen() {
 }
 
 // ── PROFIL SHEET ─────────────────────────────────────────────────────────────
-function CircleSheet({ circles, userId, userEmail, profileMap, pseudo, archives, onClose, onInvite, onUpdateStatus }) {
+function CircleSheet({ circles, userId, userEmail, profileMap, archives, onClose, onInvite, onUpdateStatus }) {
   useFermerParRetour(onClose); // Chantier 190 — le retour du téléphone ferme la feuille
   const F = "'Nunito',sans-serif";
   const [invitePseudo,  setInvitePseudo]  = useState('');
@@ -1580,7 +1578,6 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   // Chantier 115 — la prop estFrancois n'est plus lue ici (l'adresse du ticket
   // n'est plus effacée pour François). Les appelants peuvent continuer à la
   // passer : elle est simplement ignorée.
-  const [jsonText, setJsonText] = useState("");
   const [status,   setStatus]   = useState(directCamera ? "camera" : "idle");
   const [error,    setError]    = useState("");
   const [result,   setResult]   = useState(null);
@@ -1606,11 +1603,8 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   const [storeNameEdit, setStoreNameEdit] = useState("");
   const [storeLocation, setStoreLocation] = useState("");
   const [knownStores, setKnownStores] = useState([]);
-  const [knownStoresLoading, setKnownStoresLoading] = useState(false);
   const [resolvedStoreId, setResolvedStoreId] = useState(null);
-  const [newStoreSubMode, setNewStoreSubMode] = useState(null);
   const [gpsLoading, setGpsLoading] = useState(false);
-  const [manualAddress, setManualAddress] = useState('');
   const [manualRue, setManualRue] = useState('');
   const [manualCP, setManualCP] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -1865,10 +1859,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   // l'adresse (texte libre) de chaque magasin déjà chargé.
   const fetchKnownStores = async (enseigne, adresseTicket = null) => {
     if (!enseigne || enseigne === 'autre') { setKnownStores([]); return; }
-    setKnownStoresLoading(true);
     setResolvedStoreId(null);
-    setNewStoreSubMode(null);
-    setManualAddress('');
     const { data } = await supabase.from('stores').select('*').eq('enseigne', enseigne);
     const stores = data || [];
     setKnownStores(stores);
@@ -1901,7 +1892,6 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     }
 
     if (choisi) setResolvedStoreId(choisi);
-    setKnownStoresLoading(false);
   };
 
   // ── Chantier 97 — sélecteur de magasin CORE ─────────────────────────────
@@ -2147,33 +2137,6 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     return { legacyId, magasinCoreId: res?.magasin_id ?? null, magasinCoreNom };
   };
 
-  const EXAMPLE = `{
-  "store": "Intermarché",
-  "date": "2026-04-11",
-  "products": [
-    { "brand": "Florette", "name": "Mâche", "format": "125g", "price": 1.82 },
-    { "brand": "Maille",   "name": "Vinaigre Cidre", "format": "50cl", "price": 2.42 },
-    { "brand": "Alter Eco","name": "Café Mexique", "format": "260g", "price": 5.78 },
-    { "brand": "Look",     "name": "Cola Zéro", "format": "1L", "price": 0.49 }
-  ]
-}`;
-
-  const parseAndPreview = async (text) => {
-    try {
-      const clean=(text||"").replace(/```json|```/g,"").trim();
-      const parsed=JSON.parse(clean);
-      if(!parsed.products||!Array.isArray(parsed.products)) throw new Error("Champ 'products' manquant");
-      const enseigne = storeIdFromName(parsed.store);
-      setResult(parsed);
-      setSelectedStore(enseigne);
-      setEditableProducts(parsed.products.map((p,i)=>({...p,id:i,keep:true,share:true})));
-      setStoreNameEdit(parsed.store||"");
-      setStoreLocation(parsed.address || "");
-      setError("");
-      await arriverEtapeMagasin(enseigne, parsed.address || null, parsed.store || null);
-    } catch(e) { setError("JSON invalide : "+e.message); }
-  };
-
   const [shareChecked, setShareChecked] = useState(new Set());
   const [editingId,    setEditingId]    = useState(null);
   const [editDraft,    setEditDraft]    = useState({});
@@ -2238,7 +2201,6 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     };
   }, []);
 
-  const loadExample = () => { setJsonText(EXAMPLE); parseAndPreview(EXAMPLE); };
   const toggleProduct = id => setEditableProducts(prev=>prev.map(p=>p.id===id?{...p,keep:!p.keep}:p));
   // Chantier 99 — libellé affichable d'un produit lu : "name" OU, à défaut,
   // "libelle_ticket" brut. Le prompt anti-faux-rattachement laisse
@@ -2298,7 +2260,6 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
     if (signatureReconnaissanceRef.current === signature) return;
     signatureReconnaissanceRef.current = signature;
     chargerReconnaissance(magasinId, editableProducts);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [magasinCore, editableProducts]);
   const updatePrice = (id,val) => setEditableProducts(prev=>prev.map(p=>p.id===id?{...p,price:parseFloat(val)||0}:p));
 
@@ -3440,7 +3401,6 @@ function PriceEntrySheet({ onClose, onSave, existingPrice, prefill = null, magas
   useFermerParRetour(onClose); // Chantier 190 — le retour du téléphone ferme la feuille
   const [brand,   setBrand]   = useState(existingPrice?.brand || prefill?.brand || "");
   const [product, setProduct] = useState(existingPrice?.product || prefill?.product || "");
-  const [format,  setFormat]  = useState(existingPrice?.format||"");
   const [quantite,       setQuantite]       = useState(existingPrice?.quantite || "");
   const [unite,          setUnite]          = useState(existingPrice?.unite || "");
   const [conditionnement,setConditionnement]= useState(existingPrice?.conditionnement || 1);
@@ -3452,9 +3412,6 @@ function PriceEntrySheet({ onClose, onSave, existingPrice, prefill = null, magas
   const [knownStores,        setKnownStores]        = useState([]);
   const [knownStoresLoading, setKnownStoresLoading] = useState(false);
   const [resolvedStoreId,    setResolvedStoreId]    = useState(existingPrice?.store_id || magasinVerrouille?.storeLegacyId || null);
-  const [enseigneQuery,      setEnseigneQuery]      = useState('');
-  const [showEnseigneDrop,   setShowEnseigneDrop]   = useState(false);
-  const [showEnseigneSearch, setShowEnseigneSearch] = useState(false);
   const [showSuggestions,    setShowSuggestions]    = useState(false);
   const [showAddressSection, setShowAddressSection] = useState(false);
   const [gpsLoading,         setGpsLoading]         = useState(false);
@@ -3560,7 +3517,6 @@ function PriceEntrySheet({ onClose, onSave, existingPrice, prefill = null, magas
     onClose();
   };
 
-  const norm = s => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"");
 
   const updateProductSuggestions = (query) => {
     if (query.trim().length < 2) { setProductSuggestions([]); return; }
@@ -3702,13 +3658,9 @@ function PriceEntrySheet({ onClose, onSave, existingPrice, prefill = null, magas
                               if (s.type === 'store') {
                                 setResolvedStoreId(s.id);
                                 setSelectedStore(s.enseigne);
-                                setEnseigneQuery(ENSEIGNES_LIST.find(e=>e.id===s.enseigne)?.name || s.enseigne);
-                                setShowEnseigneSearch(false);
                                 setKnownStores(prev => prev.some(k=>k.id===s.id) ? prev : [...prev, s]);
                               } else {
                                 setSelectedStore(s.id);
-                                setEnseigneQuery(s.name);
-                                setShowEnseigneSearch(false);
                                 fetchKnownStores(s.id);
                               }
                             }}
@@ -6829,25 +6781,11 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
   },[analysis, userPos, searchRadius, storesGeo, categorieParCoords, categorieMagasin]);
 
   const ranked          = STORES.map(s=>({...s,...storeTotals[s.id]})).filter(s=>s.found>0).sort((a,b)=>b.found!==a.found?b.found-a.found:a.total-b.total);
-  const best            = ranked[0];
-  const secondBest      = ranked[1] ?? null;
-  const worstTotal      = ranked.length>1 ? ranked[ranked.length-1].total : 0;
-  const savingsVsSecond = (best && secondBest) ? secondBest.total - best.total : 0;
-
-  const bestStoreEntry = best
-    ? analysis
-        .map(({ byStore }) => byStore[best.id])
-        .filter(p => p?.store_address?.trim())
-        .sort((a, b) => new Date(b.date) - new Date(a.date))[0] ?? null
-    : null;
-  const mapsQuery      = best ? `${best.name}${bestStoreEntry ? ' ' + bestStoreEntry.store_address : ''}` : '';
-  const mapsUrl        = best ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapsQuery)}` : '#';
-  const maxSavings   = best ? worstTotal - best.total : 0;
   const missingGlobal= items.filter(item=>!priceDB.some(p=>itemMatchesPrice(item,p)));
 
   // #56.4 — variables "Affichée" : legacy par défaut, Core uniquement si
-  // utiliserCore. Tout ce qui précède (analysis, ranked, best,
-  // secondBest, missingGlobal...) reste inchangé et continue d'exister —
+  // utiliserCore. Tout ce qui précède (analysis, ranked,
+  // missingGlobal...) reste inchangé et continue d'exister —
   // utiliserCore===false garde donc un comportement identique à avant.
   const analysisAffichee       = utiliserCore ? (coreAdapte?.analysis ?? []) : analysis;
   const rankedAffiche          = utiliserCore ? (coreAdapte?.ranked ?? []) : ranked;
