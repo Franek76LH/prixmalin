@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 vi.mock('./supabase', () => ({ supabase: {} }));
-import { emojiArticleListe, emojiCategorieDevinee, cleProduitsListe, EMOJI_PAR_DEFAUT } from './iconeListe';
+import { emojiArticleListe, emojiCategorieDevinee, cleProduitsListe, auSingulier, EMOJI_PAR_DEFAUT } from './iconeListe';
 
 describe('Chantier 224 — icône de repli de « Ma liste »', () => {
   const rayons = new Map([[12, { categorie_slug: 'produits-laitiers-oeufs' }], [7, { categorie_slug: 'boissons-non-alcoolisees' }]]);
@@ -38,5 +38,15 @@ describe('Chantier 224 — icône de repli de « Ma liste »', () => {
   it('clé stable : ordre et doublons sans effet, coches sans effet', () => {
     expect(cleProduitsListe([{ produit_id: 5 }, { produit_id: 2 }, { produit_id: 5, checked: true }, { product: 'x' }])).toBe('2,5');
     expect(cleProduitsListe([])).toBe('');
+  });
+
+  it('chantier 225 — pluriels : on retente au singulier', () => {
+    expect(auSingulier('Pommes')).toBe('Pomme');
+    expect(auSingulier('Poireaux bio')).toBe('Poireau bio');
+    expect(auSingulier('jus')).toBe('jus');
+    const deviner = (n) => (/\b(pomme|tomate|poireau)\b/i.test(n) ? 'Fruits et légumes' : 'Autres');
+    expect(emojiArticleListe({ product: 'Pommes' }, new Map(), deviner)).toBe('🥦');
+    expect(emojiArticleListe({ product: 'Poireaux' }, new Map(), deviner)).toBe('🥦');
+    expect(emojiArticleListe({ product: 'Trucs' }, new Map(), deviner)).toBe(EMOJI_PAR_DEFAUT);
   });
 });

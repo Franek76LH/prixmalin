@@ -53,13 +53,24 @@ export function emojiCategorieDevinee(nomCategorie) {
   return EMOJI_CATEGORIE_DEVINEE[nomCategorie] || null;
 }
 
+// Chantier 225 — « Pommes », « Tomates », « Poireaux » : la fonction qui
+// devine le rayon ne connaît que le singulier. On retente donc avec chaque mot
+// sans son « s » / « x » final (mots de plus de 3 lettres). Sert UNIQUEMENT
+// au dessin de « Ma liste ».
+export function auSingulier(texte) {
+  return String(texte || '')
+    .split(/(\s+)/)
+    .map(m => (m.length > 3 && /[sx]$/i.test(m) ? m.slice(0, -1) : m))
+    .join('');
+}
+
 // item : ligne de la liste ; rayons : Map produit_id → rayon (chargerRayonsProduits) ;
 // deviner : (nom) → libellé de catégorie (facultatif).
 export function emojiArticleListe(item, rayons, deviner = null) {
   const rayon = item?.produit_id != null && rayons?.get ? rayons.get(item.produit_id) : null;
   if (rayon) return emojiSousCategorie(rayon.sous_categorie_nom) || emojiRayon(rayon);
   if (deviner && item?.product) {
-    const e = emojiCategorieDevinee(deviner(item.product));
+    const e = emojiCategorieDevinee(deviner(item.product)) || emojiCategorieDevinee(deviner(auSingulier(item.product)));
     if (e) return e;
   }
   return EMOJI_PAR_DEFAUT;
