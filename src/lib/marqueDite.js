@@ -31,7 +31,10 @@ export function varianteDite(texte, variantes, options = {}) {
   const marques = [...new Set(dites.map(v => aplati(v.marque)))];
   if (marques.length > 1) return null; // deux marques dites : on ne tranche pas
   const marque = dites[0].marque;
-  if (dites.length === 1) return { variante: dites[0], marque };
+  // Chantier 204 — l'identifiant de la marque (si fourni) : sert à retenir
+  // « cette marque, tous formats » quand aucun format ne s'impose.
+  const marque_id = dites.find(v => v.marque_id)?.marque_id ?? null;
+  if (dites.length === 1) return { variante: dites[0], marque, marque_id };
 
   // Plusieurs formats de la marque : les mots du libellé dits en plus
   // (« Original », « Zéro ») départagent, sinon l'habitude d'achat.
@@ -44,10 +47,10 @@ export function varianteDite(texte, variantes, options = {}) {
   };
   const parLibelle = seulEnTete(dites.map(v => ({ v,
     note: [...new Set(aplati(v.libelle).split(' '))].filter(m => m.length >= 3 && !motsMarque.has(m) && mots.has(m)).length })));
-  if (parLibelle) return { variante: parLibelle, marque };
+  if (parLibelle) return { variante: parLibelle, marque, marque_id };
   const achats = options?.achatsVariantes || {};
   const parHabitude = seulEnTete(dites.map(v => ({ v, note: Number(achats[v.id]) > 0 ? Number(achats[v.id]) : 0 })));
-  return { variante: parHabitude, marque };
+  return { variante: parHabitude, marque, marque_id };
 }
 
 // Lignes de ticket -> { [variante_id]: nombre de lignes }.
@@ -74,13 +77,24 @@ export function choisirVarianteDite(texte, fiche, variantes, options = {}) {
   const toutes = (Array.isArray(variantes) ? variantes : []).filter(v => v?.produit_id);
   const ici = varianteDite(texte, toutes.filter(v => v.produit_id === fiche?.produit_id), options);
   if (ici) {
-    return ici.variante
-      ? { variante: ici.variante, marque: ici.marque, produit_id: fiche.produit_id, produit_nom: fiche.produit_nom, autreFiche: false }
-      : null; // marque de cette fiche, format indécis : on ne bouge pas
+    if (ici.variante) return { variante: ici.variante, marque: ici.marque, marque_id: ici.marque_id ?? null, produit_id: fiche.produit_id, produit_nom: fiche.produit_nom, autreFiche: false };
+    // Chantier 204 (décision de François, 26/11) : marque de cette fiche,
+    // format indécis -> « cette marque, tous formats » (si on connaît la marque).
+    return ici.marque_id
+      ? { variante: null, marque: ici.marque, marque_id: ici.marque_id, produit_id: fiche.produit_id, produit_nom: fiche.produit_nom, autreFiche: false, tousFormats: true }
+      : null;
   }
   const reperes = new Set([...motsUtiles(fiche?.produit_nom), ...motsUtiles(texte)]);
   const voisines = toutes.filter(v => v.produit_id !== fiche?.produit_id && v.produit_nom && motsUtiles(v.produit_nom).some(m => reperes.has(m)));
   const ailleurs = varianteDite(texte, voisines, options);
   if (!ailleurs?.variante) return null;
   return { variante: ailleurs.variante, marque: ailleurs.marque, produit_id: ailleurs.variante.produit_id, produit_nom: ailleurs.variante.produit_nom, autreFiche: true };
+}
+
+// Chantier 204 — même marque, accents, casse et ponctuation ignorés
+// (« Coca-Cola » = « coca cola »). Sert au comparateur pour une ligne
+// « cette marque, tous formats ».
+export function memeMarque(a, b) {
+  const x = aplati(a);
+  return x.length > 0 && x === aplati(b);
 }

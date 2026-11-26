@@ -148,6 +148,12 @@ describe('regroupement avant l\'ajout au caddie', () => {
     const g = regrouperPourCaddie([R('a', 'biere'), R('b', 'biere', { variante_produit_id: 'v86' }), R('c', 'biere', { variante_produit_id: 'v86' })]);
     expect(g.map(x => [x.item.variante_produit_id, x.item.qty])).toEqual([[null, 1], ['v86', 2]]);
   });
+  it('chantier 204 — la marque dite tous formats fait une ligne à part et suit dans l\'article', () => {
+    const g = regrouperPourCaddie([R('a', 'biere'), R('b', 'biere', { marque_id: 'm86', marque_dite: '8.6' }), R('c', 'biere', { marque_id: 'm86', marque_dite: '8.6' })]);
+    expect(g.map(x => [x.item.marque_id, x.item.qty])).toEqual([[null, 1], ['m86', 2]]);
+    expect(g[1].item.marque_nom).toBe('8.6');
+    expect(regrouperPourCaddie([R('d', 'biere', { variante_produit_id: 'v86', marque_id: 'm86' })])[0].item.marque_id).toBeNull();
+  });
   it('textes libres regroupés par nom, jamais avec un produit relié', () => {
     const g = regrouperPourCaddie([
       { id: 'a', nom: 'Croquettes', statut_resolution: 'a_relier' }, { id: 'b', nom: 'croquettes', statut_resolution: 'introuvable', quantite: 2 }, R('c', 'biere'),

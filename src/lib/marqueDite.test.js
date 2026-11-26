@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { marqueEstDite, varianteDite, choisirVarianteDite, compterAchatsVariantes } from './marqueDite';
+import { marqueEstDite, varianteDite, choisirVarianteDite, compterAchatsVariantes, memeMarque } from './marqueDite';
 
 const V = (id, marque, libelle, extra = {}) => ({ id, marque, est_mdd: false, libelle, quantite_nette: 500, unite_quantite: 'ml', ...extra });
 const BIERES = [
@@ -30,7 +30,7 @@ describe('marque dite au micro', () => {
     expect(varianteDite('bière', null)).toBeNull();
   });
   it('marque dite mais plusieurs formats possibles : pas de pari', () => {
-    expect(varianteDite('bière 8.6', BIERES)).toEqual({ marque: '8.6', variante: null });
+    expect(varianteDite('bière 8.6', BIERES)).toEqual({ marque: '8.6', variante: null, marque_id: null });
   });
   it('…sauf si l\'habitude d\'achat désigne un seul format', () => {
     expect(varianteDite('bière 8.6', BIERES, { achatsVariantes: { '86-extreme': 3 } })).toMatchObject({ variante: { id: '86-extreme' } });
@@ -67,7 +67,12 @@ describe('marque dite rangée dans une fiche voisine', () => {
     expect(choisirVarianteDite('bière 1664', BIERE, RAYON)).toMatchObject({ produit_id: 'blonde', marque: '1664' });
   });
   it('marque de la fiche reliée mais format indécis : on ne va pas voir ailleurs', () => {
-    expect(choisirVarianteDite('bière 8.6', BIERE, RAYON)).toBeNull();
+    expect(choisirVarianteDite('bière 8.6', BIERE, RAYON)).toBeNull(); // marque sans identifiant connu
+  });
+  it('chantier 204 — format indécis, marque connue : « cette marque, tous formats »', () => {
+    const avecId = RAYON.map(v => ({ ...v, marque_id: v.marque ? `m-${v.marque}` : null }));
+    expect(choisirVarianteDite('bière 8.6', BIERE, avecId)).toMatchObject({ variante: null, marque: '8.6', marque_id: 'm-8.6', produit_id: 'biere', tousFormats: true });
+    expect(choisirVarianteDite('bière 8.6 Original', BIERE, avecId)).toMatchObject({ variante: { id: '86-original' }, marque_id: 'm-8.6' });
   });
   it('aucune marque dite, ou marque inconnue de la base : rien', () => {
     expect(choisirVarianteDite('de la bière', BIERE, RAYON)).toBeNull();
@@ -79,5 +84,15 @@ describe('marque dite rangée dans une fiche voisine', () => {
   it('entrées abîmées : rien, sans plantage', () => {
     expect(choisirVarianteDite('bière Leffe', null, RAYON)).toMatchObject({ produit_id: 'blonde' });
     expect(choisirVarianteDite('bière Leffe', BIERE, null)).toBeNull();
+  });
+});
+
+describe('chantier 204 — même marque', () => {
+  it('ignore accents, casse et ponctuation ; jamais vrai sur du vide', () => {
+    expect(memeMarque('Coca-Cola', 'coca cola')).toBe(true);
+    expect(memeMarque('8.6', '8.6')).toBe(true);
+    expect(memeMarque('Leffe', '8.6')).toBe(false);
+    expect(memeMarque(null, '8.6')).toBe(false);
+    expect(memeMarque('', '')).toBe(false);
   });
 });

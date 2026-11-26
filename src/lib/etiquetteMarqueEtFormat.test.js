@@ -26,3 +26,17 @@ describe('étiquette d\'une ligne de liste avec marque', () => {
     expect(ligne.formatDisplay).toBe('Leffe · Rituel 9°');
   });
 });
+
+describe('chantier 204 — ligne « cette marque, tous formats »', () => {
+  it('affiche la marque et la garde ; ignorée si un format précis est choisi', () => {
+    const l = mapperLigneListeCourses({ id: 'l', quantite: 1, statut: 'a_acheter', produit_id: 'biere', variante_produit_id: null, marque_id: 'm86', marque_ligne: { id: 'm86', nom: '8.6' }, produit: { nom_reference: 'Bière' } });
+    expect(l.formatDisplay).toBe('8.6 · tous formats');
+    expect(l.marque_id).toBe('m86');
+    expect(l.marque_nom).toBe('8.6');
+    const sans = mapperLigneListeCourses({ id: 'l', quantite: 1, statut: 'a_acheter', produit_id: 'biere', variante_produit_id: null, produit: { nom_reference: 'Bière' } });
+    expect(sans.formatDisplay).toBe('Format indifférent');
+    expect(sans.marque_id).toBeNull();
+    const fixe = mapperLigneListeCourses({ id: 'l', quantite: 1, statut: 'a_acheter', produit_id: 'biere', variante_produit_id: 'v', marque_id: 'm86', marque_ligne: { nom: '8.6' }, variante: { quantite_nette: 500, unite_quantite: 'ml', marques: { nom: '8.6' } } });
+    expect(fixe.marque_nom).toBeNull();
+  });
+});

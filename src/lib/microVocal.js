@@ -152,7 +152,9 @@ export function regrouperPourCaddie(elements) {
   for (const e of Array.isArray(elements) ? elements : []) {
     if (!e?.id) continue;
     const relie = e.statut_resolution === "resolu" && !!e.produit_id;
-    const cle = relie ? `p:${e.produit_id}|v:${e.variante_produit_id ?? ""}` : `t:${normaliserNomElement(e.nom)}`;
+    // Chantier 204 — la marque dite (tous formats) distingue aussi la ligne.
+    const marqueId = relie && !e.variante_produit_id ? (e.marque_id ?? null) : null;
+    const cle = relie ? `p:${e.produit_id}|v:${e.variante_produit_id ?? ""}|m:${marqueId ?? ""}` : `t:${normaliserNomElement(e.nom)}`;
     const qty = Number(e.quantite) > 0 ? Number(e.quantite) : 1;
     const groupe = groupes.get(cle);
     if (groupe) { groupe.ids.push(e.id); groupe.item.qty += qty; continue; }
@@ -161,6 +163,7 @@ export function regrouperPourCaddie(elements) {
       item: relie
         ? { product: e.produit_nom, format: "", brand: "", qty, checked: false,
             produit_id: e.produit_id, variante_produit_id: e.variante_produit_id ?? null,
+            marque_id: marqueId, marque_nom: marqueId ? (e.marque_dite ?? null) : null,
             marque_pref: e.marque_pref === "mdd" ? "mdd" : "nationale" }
         : { product: e.nom, format: "", brand: "", qty, checked: false },
     });

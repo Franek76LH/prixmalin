@@ -111,7 +111,7 @@ import BlocCandidatsTicket from "./components/BlocCandidatsTicket";
 import { CLES_TESTEURS, estTesteurDeConfiance } from "./lib/accesTesteurs";
 import { compterAchats } from "./lib/habitudesAchat";
 import { lireMemoire, choixARetenir } from "./lib/memoireListe";
-import { choisirVarianteDite, compterAchatsVariantes } from "./lib/marqueDite";
+import { choisirVarianteDite, compterAchatsVariantes, memeMarque } from "./lib/marqueDite";
 import { construireCarteSuggestion, compterAConfirmerParJour, jourArchive } from "./lib/suggestionsRattachement";
 import CarteSuggestion from "./components/CarteSuggestion";
 // Chantier 112 — un ticket scanné produit TOUJOURS une archive : on ne
@@ -234,6 +234,21 @@ function LightboxPhoto({ offLarge, onClose }) {
   );
 }
 
+
+// Chantier 204 — lecture de Ma liste avec la marque « tous formats ». Filet :
+// si la base refusait la lecture avec la marque (champ absent, cache de schéma
+// en retard), on relit comme avant le chantier : la liste ne se bloque jamais.
+const SELECT_LISTE_BASE = `id, texte_libre, libelle_saisi, quantite, format_selectionne, statut, produit_id, variante_produit_id, marque_pref,
+  produit:produits(id, nom_reference),
+  variante:variantes_produit(id, libelle, quantite_nette, unite_quantite, nombre_unites, marques(nom, est_mdd))`;
+async function lireListeCourses(utilisateurId) {
+  const avecMarque = await supabase.from('liste_courses')
+    .select(`${SELECT_LISTE_BASE}, marque_id, marque_ligne:marques!liste_courses_marque_id_fkey(id, nom)`)
+    .eq('utilisateur_id', utilisateurId).order('cree_le');
+  if (!avecMarque.error) return avecMarque;
+  console.error('[liste] lecture avec la marque refusée, lecture simple :', avecMarque.error);
+  return supabase.from('liste_courses').select(SELECT_LISTE_BASE).eq('utilisateur_id', utilisateurId).order('cree_le');
+}
 
 function isStale(d){ return d && (Date.now()-new Date(d))/86400000 > STALE_DAYS; }
 function daysAgo(d){ return d ? Math.floor((Date.now()-new Date(d))/86400000) : null; }
@@ -6492,6 +6507,8 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
             if (p.magasin_id == null) return false;
             // Préférence marque de l'article (même règle que le post-filtre).
             if (!offreAutorisee(p, marquePrefItem)) return false;
+            // Chantier 204 — « cette marque, tous formats » : seulement les offres de la marque dite.
+            if (item.marque_nom && !memeMarque(p.nom_marque, item.marque_nom)) return false;
             if (!dansZoneAvecCoords(p)) return false; // Chantier 82 — hors zone si magasin sans coords
             if (!bonneCategorie(p.magasin_id)) return false; // Chantier 83 — catégorie sélectionnée
             if (p.observe_le && new Date(p.observe_le) < new Date(cutoffISO)) return false;
@@ -8614,19 +8631,23 @@ function MicroTab({ onAdd, setTab, onTaper = null, achats = null, achatsVariante
         try {
           const { data: fiche } = await supabase.from('produits').select('sous_categorie_id').eq('id', e.produit_id).maybeSingle();
           let requete = supabase.from('variantes_produit')
-            .select('id, libelle, quantite_nette, unite_quantite, produit_id, marques(nom, est_mdd), produits!inner(nom_reference, actif, sous_categorie_id)')
+            .select('id, libelle, quantite_nette, unite_quantite, produit_id, marques(id, nom, est_mdd), produits!inner(nom_reference, actif, sous_categorie_id)')
             .eq('actif', true).eq('produits.actif', true).limit(2000);
           requete = fiche?.sous_categorie_id ? requete.eq('produits.sous_categorie_id', fiche.sous_categorie_id) : requete.eq('produit_id', e.produit_id);
           const { data, error } = await requete;
           if (error || !Array.isArray(data)) return;
           const trouvee = choisirVarianteDite(dit, { produit_id: e.produit_id, produit_nom: e.produit_nom },
             data.map(v => ({ id: v.id, libelle: v.libelle, quantite_nette: v.quantite_nette, unite_quantite: v.unite_quantite,
-              produit_id: v.produit_id, produit_nom: v.produits?.nom_reference ?? null, marque: v.marques?.nom ?? null, est_mdd: v.marques?.est_mdd ?? null })),
+              produit_id: v.produit_id, produit_nom: v.produits?.nom_reference ?? null, marque: v.marques?.nom ?? null, marque_id: v.marques?.id ?? null, est_mdd: v.marques?.est_mdd ?? null })),
             { achatsVariantes: achatsVariantesRef.current });
           if (!trouvee) return;
           setElementsListe(prev => prev.map(x =>
             (x.id === e.id && x.nom === e.nom && x.produit_id === e.produit_id && x.statut_resolution === "resolu" && !x.variante_produit_id)
-              ? { ...x, produit_id: trouvee.produit_id, produit_nom: trouvee.produit_nom, variante_produit_id: trouvee.variante.id, marque_dite: trouvee.marque } : x));
+              ? (trouvee.variante
+                ? { ...x, produit_id: trouvee.produit_id, produit_nom: trouvee.produit_nom, variante_produit_id: trouvee.variante.id, marque_dite: trouvee.marque, marque_id: null }
+                // Chantier 204 — « cette marque, tous formats »
+                : { ...x, produit_id: trouvee.produit_id, produit_nom: trouvee.produit_nom, marque_dite: trouvee.marque, marque_id: trouvee.marque_id })
+              : x));
         } catch { /* panne réseau : la ligne reste sur sa fiche */ }
       })();
     }
@@ -8881,7 +8902,7 @@ function MicroTab({ onAdd, setTab, onTaper = null, achats = null, achatsVariante
     // correspondre à un tout autre produit (statut « à relier »).
     if (nom) {
       setElementsListe(prev => prev.map(e => e.id === editionId
-        ? { ...e, nom, confiance: "haute", statut_resolution: "a_relier", produit_id: null, variante_produit_id: null, produit_nom: null, suggestions: [], liaison_cherchee: false, marque_dite: null, marque_a_preciser: false }
+        ? { ...e, nom, confiance: "haute", statut_resolution: "a_relier", produit_id: null, variante_produit_id: null, produit_nom: null, suggestions: [], liaison_cherchee: false, marque_dite: null, marque_id: null, marque_a_preciser: false }
         : e));
       lierAutomatiquement([{ id: editionId, nom }]); // Chantier 122 — nouveau nom, nouvelle recherche
     }
@@ -8907,6 +8928,7 @@ function MicroTab({ onAdd, setTab, onTaper = null, achats = null, achatsVariante
           // chercher. Fiche choisie dans « Autre… » : l'utilisateur a déjà tout réglé.
           marque_a_preciser:   !!liaison.aPreciser,
           marque_dite:         null,
+          marque_id:           null,
           quantite:            (liaison.qty && liaison.qty !== 1) ? liaison.qty : e.quantite,
           confiance:           "haute", // choix humain = validé
         }
@@ -10660,12 +10682,7 @@ export default function App() {
         const [list, prices, arcs, favs, refs, circs, prof, lignesTicketResolues] = await Promise.all([
           // LEGACY - shopping_list conservé temporairement
           // supabase.from('shopping_list').select('id, items').order('id').limit(1),
-          supabase.from('liste_courses')
-            .select(`id, texte_libre, libelle_saisi, quantite, format_selectionne, statut, produit_id, variante_produit_id, marque_pref,
-              produit:produits(id, nom_reference),
-              variante:variantes_produit(id, libelle, quantite_nette, unite_quantite, nombre_unites, marques(nom, est_mdd))`)
-            .eq('utilisateur_id', session?.user?.id)
-            .order('cree_le'),
+          lireListeCourses(session?.user?.id),
           supabase.from('price_db').select('*'),
           supabase.from('archives').select('*').order('date'),
           supabase.from('favorites').select('id, items').order('id').limit(1),
@@ -10776,12 +10793,7 @@ export default function App() {
   // };
 
   const chargerListe = async () => {
-    const { data, error } = await supabase.from('liste_courses')
-      .select(`id, texte_libre, libelle_saisi, quantite, format_selectionne, statut, produit_id, variante_produit_id, marque_pref,
-        produit:produits(id, nom_reference),
-        variante:variantes_produit(id, libelle, quantite_nette, unite_quantite, nombre_unites, marques(nom, est_mdd))`)
-      .eq('utilisateur_id', session?.user?.id)
-      .order('cree_le');
+    const { data, error } = await lireListeCourses(session?.user?.id);
     if (error) {
       console.error("Erreur rechargement liste_courses :", error);
       throw error;
@@ -10798,7 +10810,7 @@ export default function App() {
   // une ligne dans le comparateur : produit_id + variante_produit_id (Core) ;
   // repli sur le texte normalisé pour un article libre sans produit_id.
   const cleArticle = (it) => it?.produit_id != null
-    ? `p:${it.produit_id}|v:${it.variante_produit_id ?? ''}`
+    ? `p:${it.produit_id}|v:${it.variante_produit_id ?? ''}|m:${(!it.variante_produit_id && it.marque_id) || ''}`
     : `t:${normName(it?.product || '')}`;
 
   const addItem = async (item) => {
@@ -10842,6 +10854,9 @@ export default function App() {
       libelle_saisi:       libelle_saisi,
       // Chantier 84 — préférence marque de l'article (défaut 'nationale' à l'ajout).
       marque_pref:         item.marque_pref === 'mdd' ? 'mdd' : 'nationale',
+      // Chantier 204 — « cette marque, tous formats » (seulement sans format
+      // précis) ; le champ n'est envoyé que s'il est rempli.
+      ...((produit_id && !item.variante_produit_id && item.marque_id) ? { marque_id: item.marque_id } : {}),
     };
 
     // Phase 1 : insertion — seule cette phase déclenche un rollback de l'optimiste.
@@ -10890,6 +10905,9 @@ export default function App() {
           format_selectionne:  null,
           produit_id:          updated.produit_id,
           variante_produit_id: updated.variante_produit_id ?? null,
+          // Chantier 204 — une marque « tous formats » n'a de sens que sans
+          // format précis ; envoyé seulement pour une ligne qui en porte une.
+          ...(updated.marque_id || previous?.marque_id ? { marque_id: updated.variante_produit_id ? null : (updated.marque_id ?? null) } : {}),
         }
       : {
           texte_libre:         (updated.product || '').trim() || null,

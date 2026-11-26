@@ -48,9 +48,11 @@ export function mapperLigneListeCourses(row) {
     ? formatVariante(row.variante)
     : (row.format_selectionne || '');
 
+  // Chantier 204 — « cette marque, tous formats » (marque dite au micro).
+  const marqueNom = !row.variante_produit_id ? (row.marque_ligne?.nom ?? null) : null;
   const formatDisplay = row.variante_produit_id && row.variante
     ? etiquetteMarqueEtFormat(row.variante)
-    : (row.format_selectionne || (row.produit_id ? 'Format indifférent' : ''));
+    : (row.format_selectionne || (row.produit_id ? (marqueNom ? `${marqueNom} · tous formats` : 'Format indifférent') : ''));
 
   return {
     id:                  row.id,
@@ -68,6 +70,8 @@ export function mapperLigneListeCourses(row) {
     // Chantier 84 — préférence marque PAR ARTICLE ('nationale' | 'mdd').
     // NULL en base => traité comme 'nationale' (défaut) à la lecture.
     marque_pref:         row.marque_pref === 'mdd' ? 'mdd' : 'nationale',
+    marque_id:           marqueNom ? (row.marque_id ?? null) : null,
+    marque_nom:          marqueNom,
     produit:             row.produit ?? null,
     variante:            row.variante ?? null,
   };
