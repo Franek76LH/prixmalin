@@ -89,6 +89,7 @@ import ChoixMagasinAnnuaire from "./components/v2/ChoixMagasinAnnuaire";
 import PastilleNutriScore from "./components/v2/PastilleNutriScore";
 import CarteNutriCaddie from "./components/v2/CarteNutriCaddie";
 import CarteMemePrixMeilleureNote from "./components/v2/CarteMemePrixMeilleureNote";
+import { moisSiPrixAncien, mentionPrixAncien, phrasePrixAnciens } from "./lib/anciennetePrix";
 import SuggestionsCatalogue from "./components/v2/SuggestionsCatalogue";
 import { resumeNutri, lettreNutri, COULEURS_NUTRI } from "./lib/nutriScoreCore";
 import { classerMagasinsComparables, ETAT_INSUFFISANT as CLASSEMENT_INSUFFISANT } from "./lib/classementHonnete";
@@ -6827,7 +6828,9 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
     const detail = aVerifier
       ? MENTION_PRIX_A_VERIFIER
       : [item.qty > 1 ? `${p.price.toFixed(2)} € l'unité` : null, fmtUnitPrice(p.price, item.format) || null].filter(Boolean).join(' · ');
-    return { id: item.id, nom: nomArticle(item), sousTitre, manquant: false, total: p.price * item.qty, detail, aVerifier, marqueMagasin: utiliserCore && p?.est_mdd === true };
+    // Chantier 198 — prix de plus de 6 mois : on le dit sur la ligne.
+    const ancien = mentionPrixAncien(moisSiPrixAncien(p.date));
+    return { id: item.id, nom: nomArticle(item), sousTitre, manquant: false, total: p.price * item.qty, detail, aVerifier, ancien, marqueMagasin: utiliserCore && p?.est_mdd === true };
   }) : [];
   const alternativesGagnant = bestAffiche ? analysisAffichee
     .filter(({ byStore }) => !byStore[bestAffiche.id] && Object.keys(byStore).length > 0)
@@ -7116,6 +7119,7 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
           total={bestAffiche.total} aPrixAVerifier={bestAffiche.aPrixAVerifier === true}
           etiquette={etiquetteAffiche} miseEnAvant={estMoinsCherAffiche} avertissement={avertissementAffiche}
           lignes={lignesGagnant} alternatives={alternativesGagnant}
+          prixAnciens={phrasePrixAnciens(lignesGagnant.filter(l => l.ancien).length)}
           economie={verdict.economie > 0.05 && verdict.reference
             ? `${verdict.economie.toFixed(2).replace('.', ',')} € de moins que chez ${verdict.reference.name}, sur les ${verdict.nbCommuns} produit${verdict.nbCommuns>1?"s":""} que les deux vendent`
             : null}

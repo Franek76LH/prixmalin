@@ -11,6 +11,8 @@ export default function ResultatComparaison({
   // sans eux, comportement d'avant.
   etiquette = null, miseEnAvant = null, avertissement = null,
   lignes = [], alternatives = [], economie = null, dernierReleve = null, lienItineraire = '#', onValider,
+  // Chantier 198 — phrase « N prix ont plus de 6 mois » (ou null).
+  prixAnciens = null,
 }) {
   const manquants = Math.max(0, nbArticles - trouves);
   const vert = miseEnAvant ?? complet;
@@ -47,6 +49,9 @@ export default function ResultatComparaison({
           {avertissement && (
             <div style={{ fontFamily: T.police, fontSize: 12.5, color: '#9A3412', background: '#FFF1E6', borderRadius: 10, padding: '8px 10px', marginTop: 10, fontWeight: 800 }}>{avertissement}</div>
           )}
+          {prixAnciens && (
+            <div style={{ fontFamily: T.police, fontSize: 12.5, color: '#7A5B00', background: T.jaunePale, borderRadius: 10, padding: '8px 10px', marginTop: 10 }}>🕰️ {prixAnciens}</div>
+          )}
           {economie && (
             <div style={{ fontFamily: T.police, fontSize: 13, color: T.vert, fontWeight: 800, marginTop: 10 }}>{economie}</div>
           )}
@@ -72,6 +77,7 @@ export default function ResultatComparaison({
                 <div style={{ textAlign: 'right', flexShrink: 0 }}>
                   <div style={{ fontFamily: T.police, fontWeight: 900, fontSize: 15, color: T.texte }}>{euros(l.total)}</div>
                   {l.detail && <div style={{ fontFamily: T.police, fontSize: 11, color: l.aVerifier ? '#B45309' : T.texteLeger, fontWeight: l.aVerifier ? 800 : 500, marginTop: 1 }}>{l.detail}</div>}
+                  {l.ancien && <div style={{ fontFamily: T.police, fontSize: 11, color: '#B45309', fontWeight: 800, marginTop: 1 }}>{l.ancien}</div>}
                 </div>
               )}
             </div>
