@@ -38,6 +38,7 @@ import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adapt
 import { classerMagasinsPourPanier, calculerEconomiePotentielle } from "./lib/classementPanierCore";
 import ClassementPanierShadow from "./components/dev/ClassementPanierShadow";
 import AdminRejetsCorePanel from "./components/admin/AdminRejetsCorePanel";
+import PrixAVerifierSheet from "./components/admin/PrixAVerifierSheet";
 // Chantier "Scan code-barres", bout 1 — BarcodeDetector natif absent d'iOS
 // Safari, on utilise @zxing/browser (getUserMedia + décodage JS, éprouvé sur
 // iOS). Shadow François uniquement, voir estFrancois plus bas. Chantier 101 —
@@ -10432,6 +10433,8 @@ export default function App() {
     ouvrirHistoriqueTickets(r?.ticket ?? null);
   };
   const [showPropositionsCodesBarres, setShowPropositionsCodesBarres] = useState(false);
+  // Chantier 200 — prix de ticket aberrants mis de côté (écran admin).
+  const [showPrixAVerifier, setShowPrixAVerifier] = useState(false);
   const handleFlash = () => { setScanSepare(false); setShowScanChoix(true); };
   const handleFlashConfirmed = () => { setShowScanChoix(false); setAutoOpenCamera(true); setTab("prices"); };
   // Chantier 79 (ajustement) — "Reprendre" depuis l'accueil : bascule sur
@@ -12172,7 +12175,7 @@ export default function App() {
             feuilles admin (400) : elle masquait l'en-tête et le bandeau de
             résultat du scan. On la retire tant qu'une de ces deux feuilles est
             ouverte (elle y est inutile, chaque feuille a sa croix de fermeture). */}
-        {isAdmin && !showAValider && !showValidationScan && !showPropositionsCodesBarres && (
+        {isAdmin && !showAValider && !showValidationScan && !showPropositionsCodesBarres && !showPrixAVerifier && (
           /* Chantier 160 — la pastille était en haut à GAUCHE, pile sur la
              flèche « retour » de l'en-tête (et sur le logo de l'accueil) :
              vérifié au banc le 20/11. Elle passe en haut à droite, où l'en-tête
@@ -12196,6 +12199,9 @@ export default function App() {
                 <button onClick={()=>{ setShowPropositionsCodesBarres(true); setAdminOutilsOuverts(false); }} style={{ padding:"6px 10px", borderRadius:8, border:"none", background:"rgba(0,0,0,0.55)", color:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:10, cursor:"pointer" }}>
                   🏷️ Codes-barres à valider
                 </button>
+                <button onClick={()=>{ setShowPrixAVerifier(true); setAdminOutilsOuverts(false); }} style={{ padding:"6px 10px", borderRadius:8, border:"none", background:"rgba(0,0,0,0.55)", color:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:10, cursor:"pointer" }}>
+                  💰 Prix à vérifier
+                </button>
                 <button onClick={()=>{ setShowValidationScan(true); setAdminOutilsOuverts(false); }} style={{ padding:"6px 10px", borderRadius:8, border:"none", background:"rgba(0,0,0,0.55)", color:"#fff", fontFamily:"'Nunito',sans-serif", fontWeight:800, fontSize:10, cursor:"pointer", display:"flex", alignItems:"center", gap:5 }}>
                   🧾 Validation scan
                   {pendingScanCount > 0 && (
@@ -12215,6 +12221,7 @@ export default function App() {
         {/* Chantier 106 Lot A — file des codes-barres proposés, derrière isAdmin
             comme les autres écrans admin. */}
         {showPropositionsCodesBarres && isAdmin && <PropositionsCodesBarresSheet onClose={()=>setShowPropositionsCodesBarres(false)}/>}
+        {showPrixAVerifier && isAdmin && <PrixAVerifierSheet onClose={()=>setShowPrixAVerifier(false)}/>}
         {/* Chantier 106 Lot A — parcours de contribution. Même garde que la
             carte d'accueil qui l'ouvre : flag global OU administrateur.
             estAdmin gouverne le seul bouton « proposer quand même » du
