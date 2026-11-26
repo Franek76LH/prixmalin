@@ -250,6 +250,26 @@ async function lireListeCourses(utilisateurId) {
   return supabase.from('liste_courses').select(SELECT_LISTE_BASE).eq('utilisateur_id', utilisateurId).order('cree_le');
 }
 
+// Chantier 157 / 204 / 206 — la marque dite : variantes de tout le rayon de
+// la fiche (la marque peut être rangée sous une fiche voisine), puis
+// choisirVarianteDite. Rend null si rien ne s'impose ou en cas de panne.
+async function chercherMarqueDite(dit, fiche, achatsVariantes) {
+  if (!dit?.trim() || !fiche?.produit_id) return null;
+  try {
+    const { data: f } = await supabase.from('produits').select('sous_categorie_id').eq('id', fiche.produit_id).maybeSingle();
+    let requete = supabase.from('variantes_produit')
+      .select('id, libelle, quantite_nette, unite_quantite, produit_id, marques(id, nom, est_mdd), produits!inner(nom_reference, actif, sous_categorie_id)')
+      .eq('actif', true).eq('produits.actif', true).limit(2000);
+    requete = f?.sous_categorie_id ? requete.eq('produits.sous_categorie_id', f.sous_categorie_id) : requete.eq('produit_id', fiche.produit_id);
+    const { data, error } = await requete;
+    if (error || !Array.isArray(data)) return null;
+    return choisirVarianteDite(dit, { produit_id: fiche.produit_id, produit_nom: fiche.produit_nom },
+      data.map(v => ({ id: v.id, libelle: v.libelle, quantite_nette: v.quantite_nette, unite_quantite: v.unite_quantite,
+        produit_id: v.produit_id, produit_nom: v.produits?.nom_reference ?? null, marque: v.marques?.nom ?? null, marque_id: v.marques?.id ?? null, est_mdd: v.marques?.est_mdd ?? null })),
+      { achatsVariantes: achatsVariantes || {} });
+  } catch { return null; }
+}
+
 function isStale(d){ return d && (Date.now()-new Date(d))/86400000 > STALE_DAYS; }
 function daysAgo(d){ return d ? Math.floor((Date.now()-new Date(d))/86400000) : null; }
 // Chantier 115 — l'enseigne se lit désormais dans la table `enseignes`
@@ -8629,17 +8649,7 @@ function MicroTab({ onAdd, setTab, onTaper = null, achats = null, achatsVariante
       // rangée sous une fiche voisine (« bière Leffe » -> Bière blonde).
       (async () => {
         try {
-          const { data: fiche } = await supabase.from('produits').select('sous_categorie_id').eq('id', e.produit_id).maybeSingle();
-          let requete = supabase.from('variantes_produit')
-            .select('id, libelle, quantite_nette, unite_quantite, produit_id, marques(id, nom, est_mdd), produits!inner(nom_reference, actif, sous_categorie_id)')
-            .eq('actif', true).eq('produits.actif', true).limit(2000);
-          requete = fiche?.sous_categorie_id ? requete.eq('produits.sous_categorie_id', fiche.sous_categorie_id) : requete.eq('produit_id', e.produit_id);
-          const { data, error } = await requete;
-          if (error || !Array.isArray(data)) return;
-          const trouvee = choisirVarianteDite(dit, { produit_id: e.produit_id, produit_nom: e.produit_nom },
-            data.map(v => ({ id: v.id, libelle: v.libelle, quantite_nette: v.quantite_nette, unite_quantite: v.unite_quantite,
-              produit_id: v.produit_id, produit_nom: v.produits?.nom_reference ?? null, marque: v.marques?.nom ?? null, marque_id: v.marques?.id ?? null, est_mdd: v.marques?.est_mdd ?? null })),
-            { achatsVariantes: achatsVariantesRef.current });
+          const trouvee = await chercherMarqueDite(dit, { produit_id: e.produit_id, produit_nom: e.produit_nom }, achatsVariantesRef.current);
           if (!trouvee) return;
           setElementsListe(prev => prev.map(x =>
             (x.id === e.id && x.nom === e.nom && x.produit_id === e.produit_id && x.statut_resolution === "resolu" && !x.variante_produit_id)
@@ -12023,10 +12033,23 @@ export default function App() {
     });
     return () => { annule = true; };
   }, [utilisateurConnecte, nbArchives]);
-  const relierArticle = (item, proposition) => { retenirChoix(item.product, proposition); return updateItem({
-    id: item.id, product: proposition.produit_nom, qty: item.qty,
-    produit_id: proposition.produit_id, variante_produit_id: null,
-  }); };
+  // Chantier 206 — un mot tapé dans Ma liste qui nomme une marque (« bière
+  // 8.6 ») : en le reliant, la ligne garde cette marque (un format s'il n'y en
+  // a qu'un, sinon « cette marque, tous formats »), comme au micro. Recherche
+  // bornée à 3 s ; sinon, ou si rien ne s'impose, on relie comme avant.
+  const relierArticle = async (item, proposition) => {
+    retenirChoix(item.product, proposition);
+    const base = { id: item.id, product: proposition.produit_nom, qty: item.qty, produit_id: proposition.produit_id, variante_produit_id: null };
+    const dit = (item.product || '').trim();
+    const trouvee = dit && normName(dit) !== normName(proposition.produit_nom)
+      ? await Promise.race([chercherMarqueDite(dit, proposition, achatsVariantes), new Promise(r => setTimeout(() => r(null), 3000))])
+      : null;
+    if (!trouvee) return updateItem(base);
+    const fiche = { produit_id: trouvee.produit_id, product: trouvee.produit_nom || base.product };
+    return updateItem(trouvee.variante
+      ? { ...base, ...fiche, variante_produit_id: trouvee.variante.id }
+      : { ...base, ...fiche, marque_id: trouvee.marque_id });
+  };
 
   const handleLogout = async () => { await supabase.auth.signOut(); };
 
