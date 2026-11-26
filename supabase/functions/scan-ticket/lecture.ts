@@ -41,6 +41,10 @@ export const VERSION_LECTURE = "articles-avec-remise";
 // ── Consignes ajoutées (après le texte v13, avant le catalogue) ────────────
 // L'exigence de ne rien oublier (RÈGLE ABSOLUE v13) reste en place, juste
 // au-dessus : ces règles l'équilibrent, elles ne la remplacent pas.
+// v18 (26/11) — « JUST FOUR CLASSI » lu « Jus d'orange » (ticket Utile, 19 et 20/11).
+export const CONSIGNE_MOT_ENTIER = `
+UN MOT N'EST PAS L'ABRÉVIATION D'UN AUTRE (v18, 26/11) : ne développe une abréviation que si c'est un vrai raccourci (lettres retirées : "LT" -> lait, "ECR" -> écrémé). Un mot ENTIER qui ressemble au début d'un autre mot n'en est pas l'abréviation : "JUST" n'est PAS "jus". Les mots d'un nom de marque ou de gamme ne décrivent pas le produit. Exemple ANCRÉ : "JUST FOUR CLASSI" = frites surgelées « Juste au four » classiques, JAMAIS un jus de fruits. Si tu ne reconnais pas le produit derrière un nom de gamme, laisse "name" vide/brut et mets confiance="faible".`;
+
 export const CONSIGNES_ANTI_INVENTION = `
 NE JAMAIS INVENTER DE LIGNE (aussi grave qu'en oublier une) :
 - Chaque objet de "products" correspond à UNE ligne article RÉELLEMENT IMPRIMÉE et LISIBLE sur l'image. N'ajoute JAMAIS un article que tu ne vois pas écrit, même s'il te paraît probable pour ce type de magasin (pain, viennoiserie, boisson…), et jamais pour « compléter » un total.
@@ -63,7 +67,7 @@ Exemple : "CARTE 7,28" est un paiement par carte bancaire, PAS un produit.
 ADRESSE ET DATE — RECOPIÉES, JAMAIS DEVINÉES :
 - "address" : uniquement l'adresse IMPRIMÉE sur le ticket, recopiée telle quelle. Ne la complète JAMAIS avec ce que tu sais ou supposes du magasin ou de l'enseigne : aucune rue, aucun code postal, aucune ville déduits. Si aucune adresse n'est imprimée lisiblement : chaîne vide "".
 - "address" ne contient QUE le numéro, la rue, le code postal et la ville DU MAGASIN : l'adresse imprimée juste sous le nom du magasin, en haut du ticket. N'y mets JAMAIS le nom ou le numéro du magasin ("MAGASIN …", "N°…"), ni l'adresse de la société exploitante ou du siège (bloc qui suit une raison sociale, "SAS", "SARL", "EXPLOITATION", ou accompagné du SIRET / de la TVA intracommunautaire).
-- "date" : uniquement la date IMPRIMÉE du passage en caisse (voir la règle DATE). Si elle n'est pas lisible telle quelle : null. N'utilise jamais la date du jour ni une date supposée.`;
+- "date" : uniquement la date IMPRIMÉE du passage en caisse (voir la règle DATE). Si elle n'est pas lisible telle quelle : null. N'utilise jamais la date du jour ni une date supposée.${CONSIGNE_MOT_ENTIER}`;
 
 // ── Remise imprimée sous un article — TOUS les scans (chantier 148, 18/11) ──
 // Constat sur le ticket Carrefour de François (18/11, scan photo) : le lecteur

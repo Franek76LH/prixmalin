@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import {
-  construirePromptTicket, construireCorpsOpenRouter, CONSIGNES_ANTI_INVENTION, FOURNISSEUR, MODELE,
+  construirePromptTicket, construireCorpsOpenRouter, CONSIGNES_ANTI_INVENTION, CONSIGNE_MOT_ENTIER, FOURNISSEUR, MODELE,
   dimensionsJpeg, infosImages, lireImagesRequete, lireTicket,
   CONSIGNE_REMISE_DE_LIGNE, CONSIGNE_LIBELLE_REMISE_IMPORT, normaliserRemisesDeLigne, VERSION_LECTURE, CONSIGNE_ARTICLES_AVEC_REMISE,
 } from './lecture.ts';
@@ -263,7 +263,8 @@ describe('verifierOrientation — deux questions en ordres opposés', () => {
 // chantier 121 (commit 11857fc), AVANT l'ajout : si l'une d'elles change, le
 // texte envoyé pour un scan photo a changé, et ce n'était pas voulu.
 describe('import de ticket (chantier 120) — sans effet sur le scan photo', () => {
-  const empreinte = (t: string) => createHash('sha256').update(t).digest('hex');
+  // v18 : la consigne « mot entier » est le seul ajout voulu depuis ; on la retire avant de comparer.
+  const empreinte = (t: string) => createHash('sha256').update(t.replace(CONSIGNE_MOT_ENTIER, '')).digest('hex');
   const refs = [{ nom: 'Lait demi-écrémé', categorie: 'Crèmerie' }, { nom: 'Pâtes', categorie: 'Épicerie' }];
 
   it('scan photo, consigne de remise retirée : texte identique au caractère près à celui du chantier 121', () => {
@@ -274,7 +275,7 @@ describe('import de ticket (chantier 120) — sans effet sur le scan photo', () 
     const corps = construireCorpsOpenRouter({ images: ['AAAA'], isMulti: false, refProducts: refs });
     const texte = corps.messages[0].content.at(-1).text as string;
     expect(texte.split(CONSIGNE_REMISE_DE_LIGNE)).toHaveLength(2);
-    corps.messages[0].content.at(-1).text = texte.replace(CONSIGNE_REMISE_DE_LIGNE, '').replace(CONSIGNE_ARTICLES_AVEC_REMISE, '');
+    corps.messages[0].content.at(-1).text = texte.replace(CONSIGNE_REMISE_DE_LIGNE, '').replace(CONSIGNE_ARTICLES_AVEC_REMISE, '').replace(CONSIGNE_MOT_ENTIER, '');
     expect(empreinte(JSON.stringify(corps))).toBe('5fb3c662d1a4ff1cafdf737384f835db6742eff9fb61fa1135bad72af0cf1bf6');
   });
 
@@ -421,5 +422,15 @@ describe('section « Articles avec Remise » (chantier 167)', () => {
     expect(c).toMatch(/ne le mets JAMAIS dans price ni dans total/);
     expect(c).toMatch(/Ne fusionne JAMAIS/);
     expect(c).toMatch(/"\*" entre deux nombres/);
+  });
+});
+
+describe('v18 — un mot entier n\'est pas une abréviation (JUST FOUR CLASSI)', () => {
+  it('la consigne part dans le scan photo ET dans l\'import', () => {
+    for (const consignesImport of [false, true]) {
+      const p = construirePromptTicket({ nbImages: 1, isMulti: false, consignesImport });
+      expect(p).toContain('"JUST" n\'est PAS "jus"');
+      expect(p).toContain('"JUST FOUR CLASSI" = frites surgelées');
+    }
   });
 });

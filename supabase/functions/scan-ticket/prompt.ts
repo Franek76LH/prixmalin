@@ -28,11 +28,6 @@ export const CONSIGNE_V14_CHAMPS =
 // crédités sur la carte, 0,43 €) et le Leclerc (« Bon immédiat 1,80 » réglé
 // APRÈS le total) sortaient avec un total_remises faux, donc une fausse
 // alerte du contrôle de cohérence — dès la v13 pour le Netto.
-// v18 (chantier 194, 26/11) — « JUST FOUR CLASSI » lu « Jus d'orange » sur
-// un ticket Utile (20/11) : un mot entier n'est pas l'abréviation d'un autre.
-export const CONSIGNE_MOT_ENTIER = `UN MOT N'EST PAS UNE ABRÉVIATION D'UN AUTRE : ne développe une abréviation que si c'est un vrai raccourci (lettres retirées : "LT" -> lait, "ECR" -> écrémé). Un mot ENTIER qui ressemble au début d'un autre mot n'en est pas l'abréviation : "JUST" n'est PAS "jus". Les mots d'un nom de marque ou de gamme ne décrivent pas le produit. Exemple ANCRÉ : "JUST FOUR CLASSI" = frites surgelées « Juste au four » classiques, JAMAIS un jus de fruits. Si tu ne reconnais pas le produit derrière un nom de gamme, laisse "name" vide/brut et mets confiance="faible".
-`;
-
 export const CONSIGNE_V14_REMISES =
   `
   - Une remise RÉDUIT ce que le client paie. Les AVANTAGES DE FIDÉLITÉ crédités sur une carte ou une cagnotte ("AVANTAGES PRODUITS", "TOTAL AVANTAGES DU JOUR", "SOLDE DISPONIBLE", "… € crédités sur votre compte", "Détails de vos avantages fidélité") ne réduisent PAS le montant payé aujourd'hui : ce ne sont PAS des remises. Ne les compte ni dans "total_remises" ni dans le "remise" d'une ligne, même quand ils répètent le nom d'un article. Indice sûr : si le total payé est égal à la somme des lignes article, aucune remise n'a été déduite et "total_remises" vaut 0.
@@ -96,7 +91,7 @@ CONFIANCE (champ "confiance", obligatoire, valeur "haute" ou "faible") :
 - Mets "haute" UNIQUEMENT quand le rattachement du "name" est franc : le libellé du ticket correspond clairement à un produit (idéalement une entrée du catalogue de référence), sans ambiguïté.
 - Mets "faible" dès qu'il n'y a PAS de correspondance franche : libellé trop vague, abréviation ambiguë, ou tu dois deviner. Ne force JAMAIS une devinette pour éviter "faible" : dans le doute, c'est "faible".
 NE PAS FORCER UN RATTACHEMENT (règle la plus importante) : si AUCUN produit du catalogue ne correspond franchement au libellé du ticket, tu NE forces PAS un rapprochement approximatif. Dans ce cas : laisse "name" VIDE (ou recopie le libellé brut simplement normalisé) et mets confiance="faible". Rattacher FAUX est PIRE que ne pas rattacher : mieux vaut une ligne non rattachée et signalée "faible" qu'un faux rattachement silencieux. Exemple : "DRP LOW CERISE PET 1.5L" est un sirop — il ne doit SURTOUT PAS devenir "eau de source plate" juste parce que ce serait la moins mauvaise entrée du catalogue ; laisse "name" vide/brut et confiance="faible".
-${consignesV14 ? CONSIGNE_MOT_ENTIER : ""}NE JAMAIS INVENTER D'ATTRIBUT : n'ajoute JAMAIS au "name" une caractéristique qui n'est pas ÉCRITE LITTÉRALEMENT dans le libellé du ticket. Exemples d'attributs à ne pas inférer : plate vs gazeuse, entier vs demi-écrémé vs écrémé, nature vs aromatisé, bio, etc.
+NE JAMAIS INVENTER D'ATTRIBUT : n'ajoute JAMAIS au "name" une caractéristique qui n'est pas ÉCRITE LITTÉRALEMENT dans le libellé du ticket. Exemples d'attributs à ne pas inférer : plate vs gazeuse, entier vs demi-écrémé vs écrémé, nature vs aromatisé, bio, etc.
 - Exemple ANCRÉ (EAU GAZEUSE) : un "G" ISOLÉ dans un libellé d'eau, séparé du reste (pas collé à un nombre), signifie EAU GAZEUSE. "EAU MINERALE NATURELLE G 6X1L" = eau minérale GAZEUSE (le "G" = Gazeuse), format 6×1 L -> name du type "Eau minérale gazeuse". À l'inverse, "EAU MINERALE NATURELLE 6X1L" SANS "G", ou "CRISTALINE", = eau PLATE. Quand tu vois un "G" isolé après un libellé d'eau, traite-la comme gazeuse ; si tu hésites entre plate et gazeuse, mets confiance="faible" plutôt que de deviner.
 - Règle générale : si l'attribut n'est pas dans le texte, soit tu l'omets, soit (si l'omettre rend le rattachement incertain) tu mets confiance="faible". Jamais d'invention.
 FORMAT STRUCTURÉ : en plus du champ "format" (texte brut recopié, ex "6X1L", "125G"), décompose-le en trois champs :
