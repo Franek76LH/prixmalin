@@ -3079,7 +3079,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                     const cat = categorieMagasin || devinerCategorieMagasin(storeNameEdit);
                     const opts = [
                       { id:'grande_surface', label:'🛒 Grande surface' },
-                      { id:'proximite',      label:'🏪 Proximité' },
+                      { id:'proximite',      label:'🏪 Petite surface' },
                     ];
                     return (
                       <div style={{ marginBottom:16 }}>
