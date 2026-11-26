@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 vi.mock('./supabase', () => ({ supabase: {} }));
-import { emojiArticleListe, emojiCategorieDevinee, cleProduitsListe, auSingulier, EMOJI_PAR_DEFAUT } from './iconeListe';
+import { emojiArticleListe, emojiCategorieDevinee, cleProduitsListe, auSingulier, varianteHabituelleParProduit, variantePourPhoto, EMOJI_PAR_DEFAUT } from './iconeListe';
 
 describe('Chantier 224 — icône de repli de « Ma liste »', () => {
   const rayons = new Map([[12, { categorie_slug: 'produits-laitiers-oeufs' }], [7, { categorie_slug: 'boissons-non-alcoolisees' }]]);
@@ -53,5 +53,27 @@ describe('Chantier 224 — icône de repli de « Ma liste »', () => {
   it('chantier 226 — sauces (mayonnaise…) en pot, pas en boîte de conserve', () => {
     const r = new Map([['m', { categorie_slug: 'epicerie-salee', sous_categorie_nom: 'Sauces & condiments' }]]);
     expect(emojiArticleListe({ produit_id: 'm' }, r)).toBe('🫙');
+  });
+
+  it('chantier 227 — format le plus acheté pour une ligne « Format indifférent »', () => {
+    const lignes = [
+      { produit_id: 'mayo', variante_produit_id: 'maille' },
+      { produit_id: 'mayo', variante_produit_id: 'amora' },
+      { produit_id: 'mayo', variante_produit_id: 'maille' },
+      { produit_id: 'pain', variante_produit_id: 'b' },
+      { produit_id: 'pain', variante_produit_id: 'a' },
+      { produit_id: 'riz', variante_produit_id: null },
+      null,
+    ];
+    expect(varianteHabituelleParProduit(lignes)).toEqual({ mayo: 'maille', pain: 'a' });
+    expect(varianteHabituelleParProduit(null)).toEqual({});
+  });
+
+  it('chantier 227 — la variante choisie passe avant le format habituel', () => {
+    const hab = { mayo: 'maille' };
+    expect(variantePourPhoto({ produit_id: 'mayo', variante_produit_id: 'amora' }, hab)).toBe('amora');
+    expect(variantePourPhoto({ produit_id: 'mayo' }, hab)).toBe('maille');
+    expect(variantePourPhoto({ produit_id: 'ketchup' }, hab)).toBe(null);
+    expect(variantePourPhoto({ product: 'truc' }, null)).toBe(null);
   });
 });

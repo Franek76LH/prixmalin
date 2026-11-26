@@ -82,3 +82,36 @@ export function cleProduitsListe(items) {
   const ids = [...new Set((items || []).map(i => i?.produit_id).filter(id => id != null).map(String))];
   return ids.sort().join(',');
 }
+
+// Chantier 227 — ligne « Format indifférent » (produit sans variante précise) :
+// on montre la photo du format que la personne achète le plus souvent (ses
+// propres lignes de ticket). lignes : [{ produit_id, variante_produit_id }].
+// Rend { [produit_id]: variante_produit_id }. Égalité → identifiant le plus
+// petit, pour que l'image ne change pas d'un affichage à l'autre.
+export function varianteHabituelleParProduit(lignes) {
+  const compte = new Map(); // produit -> Map(variante -> n)
+  for (const l of Array.isArray(lignes) ? lignes : []) {
+    const p = l?.produit_id, v = l?.variante_produit_id;
+    if (typeof p !== 'string' || !p || typeof v !== 'string' || !v) continue;
+    if (!compte.has(p)) compte.set(p, new Map());
+    const m = compte.get(p);
+    m.set(v, (m.get(v) || 0) + 1);
+  }
+  const res = {};
+  for (const [p, m] of compte) {
+    let meilleure = null, n = 0;
+    for (const [v, c] of m) {
+      if (c > n || (c === n && v < meilleure)) { meilleure = v; n = c; }
+    }
+    if (meilleure) res[p] = meilleure;
+  }
+  return res;
+}
+
+// Variante dont on montre la photo pour une ligne de la liste : la variante
+// choisie si la ligne en a une, sinon le format habituel du produit, sinon rien.
+export function variantePourPhoto(item, habituelles) {
+  if (item?.variante_produit_id) return item.variante_produit_id;
+  const p = item?.produit_id;
+  return (p != null && habituelles && habituelles[p]) || null;
+}

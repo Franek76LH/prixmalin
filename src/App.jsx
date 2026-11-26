@@ -18,7 +18,7 @@ import { nomComposeVariante, formatEtiquetteVariante } from "./lib/nomProduit";
 import { transcrireAudioListe, normaliserNomElement, comptesParNom, fusionnerParNom, demanderRapprochementListe, regrouperPourCaddie } from "./lib/microVocal";
 import { fusionnerPropositions, ficheARelierSeule } from "./lib/rapprochementIA";
 // Chantier « Courses » Lot 1 — session de courses figée (shadow estFrancois).
-import { emojiArticleListe, cleProduitsListe } from "./lib/iconeListe";
+import { emojiArticleListe, cleProduitsListe, varianteHabituelleParProduit, variantePourPhoto } from "./lib/iconeListe";
 import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession, ajouterNoteSession, supprimerNoteSession, cloreSession, idsCaddieASupprimer, articlesNonAchetesASupprimer, construireBilanCourses, doitRattacherTicketSession, chargerMarquesVariantes, calculerTotalPanier, articlesAAcheter, remplacerArticleSession, annulerRemplacementSession, changerVarianteArticleSession } from "./lib/sessionCoursesCore";
 import { articlesSessionEnItems } from "./lib/memePrixMeilleureNote";
 // Chantier 91 Lot 5 — rapprochement liste / cochés / ticket.
@@ -5469,7 +5469,7 @@ function EditItemSheet({ item, onClose, onSave }) {
 }
 
 // ── LIST TAB ──────────────────────────────────────────────────────────────────
-function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites, saveFavorites, onSetMarquePref, itemsReportes = [], onReactiverReporte, onSupprimerReporte, liaisonsProposees = {}, onRelier, onDicter = null, onOuvrirFavoris = null }) {
+function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites, saveFavorites, onSetMarquePref, itemsReportes = [], onReactiverReporte, onSupprimerReporte, liaisonsProposees = {}, onRelier, onDicter = null, onOuvrirFavoris = null, variantesHabituelles = null }) {
   const [showFavModal, setShowFavModal] = useState(false);
   const [editItem,     setEditItem]     = useState(null);
   // Chantier 224 — rayon de chaque produit de la liste, pour le dessin de
@@ -5533,7 +5533,7 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
       <ListeCourses
         items={items} itemsReportes={itemsReportes} nbFavoris={favorites.length}
         vignette={(item) => (
-          <PhotoProduit varianteId={item.variante_produit_id} taille="thumb" radius={10}
+          <PhotoProduit varianteId={variantePourPhoto(item, variantesHabituelles)} taille="thumb" radius={10}
             fallback={<div aria-hidden="true" style={{ width:"100%", height:"100%", borderRadius:10, background:"#F5F5F7", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20 }}>{emojiArticleListe(item, rayonsListe, guessCategory)}</div>} />
         )}
         onCocher={toggleCheck} onModifier={setEditItem} onSupprimer={removeItem} onMarque={onSetMarquePref}
@@ -11842,13 +11842,14 @@ export default function App() {
   // {} = rien à lire ou lecture en échec (on fait alors comme avant).
   const [achatsHabituels, setAchatsHabituels] = useState(null);
   const [achatsVariantes, setAchatsVariantes] = useState({}); // par variante : départage les formats d'une marque dite
+  const [variantesHabituelles, setVariantesHabituelles] = useState({}); // Chantier 227 : photo du format habituel dans « Ma liste »
   const idPourAchats = session?.user?.id ?? null;
   const nbArchivesPourAchats = archives.length;
   useEffect(() => {
     if (!idPourAchats) return;
     let annule = false;
     supabase.from('lignes_ticket').select('produit_id, variante_produit_id').not('produit_id', 'is', null).limit(5000)
-      .then(({ data, error }) => { if (!annule) { setAchatsHabituels(error ? {} : compterAchats(data)); setAchatsVariantes(error ? {} : compterAchatsVariantes(data)); } },
+      .then(({ data, error }) => { if (!annule) { setAchatsHabituels(error ? {} : compterAchats(data)); setAchatsVariantes(error ? {} : compterAchatsVariantes(data)); setVariantesHabituelles(error ? {} : varianteHabituelleParProduit(data)); } },
         () => { if (!annule) setAchatsHabituels({}); });
     return () => { annule = true; };
   }, [idPourAchats, nbArchivesPourAchats]);
@@ -12043,7 +12044,7 @@ export default function App() {
               progression={calculerProgression(sessionCoursesActive.articles)} magasin={sessionCoursesActive.magasin?.nom ?? null}/>
           )}
           {loaded && tab==="courses" && sessionCoursesAccessible && sessionCoursesActive && <CoursesTab session={sessionCoursesActive} onChangerEtat={changerEtatArticleSession} onAjouterNote={ajouterNoteCourses} onSupprimerNote={supprimerNoteCourses} onRemplacer={remplacerArticleCourses} onAnnulerRemplacement={annulerRemplacementCourses} onChangerVariante={changerVarianteArticleCourses} onTerminer={demanderTerminerCourses} onPasserEnCaisse={()=>setCaisseCourses(true)} syncEchec={syncCoursesEchec}/>}
-          {loaded && tab==="list"      && <ListTab onDicter={accesAvance ? ()=>setTab("micro") : null} onOuvrirFavoris={()=>setShowFavorisSheet(true)} liaisonsProposees={liaisonsProposees} onRelier={relierArticle}      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} onSetMarquePref={setMarquePrefItem} itemsReportes={itemsReportes} onReactiverReporte={reactiverReporte} onSupprimerReporte={supprimerReporte}/>}
+          {loaded && tab==="list"      && <ListTab variantesHabituelles={variantesHabituelles} onDicter={accesAvance ? ()=>setTab("micro") : null} onOuvrirFavoris={()=>setShowFavorisSheet(true)} liaisonsProposees={liaisonsProposees} onRelier={relierArticle}      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} onSetMarquePref={setMarquePrefItem} itemsReportes={itemsReportes} onReactiverReporte={reactiverReporte} onSupprimerReporte={supprimerReporte}/>}
           {loaded && tab==="catalog"   && <CatalogTab   focusRecherche={modeCatalogue==="recherche"} items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab} onDicter={accesAvance ? ()=>setTab("micro") : null}/>}
           {/* Chantier 160 — des courses en cours : on peut y revenir d'ici. */}
           {loaded && tab==="compare" && sessionCoursesAccessible && sessionCoursesActive && (
