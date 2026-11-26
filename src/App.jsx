@@ -18,6 +18,7 @@ import { nomComposeVariante, formatEtiquetteVariante } from "./lib/nomProduit";
 import { transcrireAudioListe, normaliserNomElement, comptesParNom, fusionnerParNom, demanderRapprochementListe, regrouperPourCaddie } from "./lib/microVocal";
 import { fusionnerPropositions, ficheARelierSeule } from "./lib/rapprochementIA";
 // Chantier « Courses » Lot 1 — session de courses figée (shadow estFrancois).
+import { emojiArticleListe, cleProduitsListe } from "./lib/iconeListe";
 import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession, ajouterNoteSession, supprimerNoteSession, cloreSession, idsCaddieASupprimer, articlesNonAchetesASupprimer, construireBilanCourses, doitRattacherTicketSession, chargerMarquesVariantes, calculerTotalPanier, articlesAAcheter, remplacerArticleSession, annulerRemplacementSession, changerVarianteArticleSession } from "./lib/sessionCoursesCore";
 import { articlesSessionEnItems } from "./lib/memePrixMeilleureNote";
 // Chantier 91 Lot 5 — rapprochement liste / cochés / ticket.
@@ -5471,6 +5472,18 @@ function EditItemSheet({ item, onClose, onSave }) {
 function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites, saveFavorites, onSetMarquePref, itemsReportes = [], onReactiverReporte, onSupprimerReporte, liaisonsProposees = {}, onRelier, onDicter = null, onOuvrirFavoris = null }) {
   const [showFavModal, setShowFavModal] = useState(false);
   const [editItem,     setEditItem]     = useState(null);
+  // Chantier 224 — rayon de chaque produit de la liste, pour le dessin de
+  // repli quand on n'a pas la photo (rechargé seulement si les produits changent).
+  const [rayonsListe, setRayonsListe] = useState(() => new Map());
+  const cleRayonsListe = cleProduitsListe(items);
+  useEffect(() => {
+    if (!cleRayonsListe) return;
+    let annule = false;
+    chargerRayonsProduits(cleRayonsListe.split(','))
+      .then(m => { if (!annule) setRayonsListe(m); })
+      .catch(() => { /* silencieux : dessin deviné ou panier */ });
+    return () => { annule = true; };
+  }, [cleRayonsListe]);
 
   // Chantier 83 (finition) — l'ajout d'un produit se fait UNIQUEMENT via le
   // Catalogue (recherche unique). Le formulaire in-line et son toast local ont
@@ -5521,7 +5534,7 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
         items={items} itemsReportes={itemsReportes} nbFavoris={favorites.length}
         vignette={(item) => (
           <PhotoProduit varianteId={item.variante_produit_id} taille="thumb" radius={10}
-            fallback={<div style={{ width:"100%", height:"100%", borderRadius:10, background:C.grayLight }} />} />
+            fallback={<div aria-hidden="true" style={{ width:"100%", height:"100%", borderRadius:10, background:"#F5F5F7", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20 }}>{emojiArticleListe(item, rayonsListe, guessCategory)}</div>} />
         )}
         onCocher={toggleCheck} onModifier={setEditItem} onSupprimer={removeItem} onMarque={onSetMarquePref}
         onRetirerPris={() => items.filter(i => i.checked).forEach(i => onRemove(i.id))}

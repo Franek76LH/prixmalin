@@ -1,0 +1,73 @@
+// Chantier 224 — petite icône de chaque ligne de « Ma liste ».
+// Règle (décision de François du 26/11/2026, option « mélange ») : la vraie
+// photo du produit quand on l'a (PhotoProduit, inchangé), sinon le dessin du
+// rayon. Ce module ne choisit QUE le dessin de repli, sans aucun appel réseau.
+//
+// Ordre : 1) sous-catégorie puis rayon réel du produit (base : produits → sous_categories →
+// categories) ; 2) pour une ligne tapée sans produit relié, le rayon deviné
+// sur le nom (guessCategory de App.jsx, passé en argument) ; 3) panier 🧺.
+import { emojiRayon } from './sessionCoursesCore';
+
+export const EMOJI_PAR_DEFAUT = '🧺';
+
+// Libellés renvoyés par guessCategory (App.jsx) → même dessin que le rayon réel.
+const EMOJI_CATEGORIE_DEVINEE = {
+  'Produits laitiers, œufs & fromages': '🥛',
+  'Boissons alcoolisées': '🍷',
+  'Boissons non alcoolisées': '🥤',
+  'Fruits et légumes': '🥦',
+  'Poissons & fruits de mer': '🐟',
+  'Viandes & charcuterie': '🥩',
+  'Légumes surgelés': '❄️',
+  'Hygiène & Maison': '🧴',
+  'Épicerie sucrée & petit déjeuner': '🍫',
+  'Épicerie salée': '🧂',
+};
+
+// Dessin plus précis par sous-catégorie (le rayon « Épicerie salée » couvre
+// 6 produits sur 10 : un seul 🧂 pour tous serait peu parlant).
+const EMOJI_SOUS_CATEGORIE = {
+  'Bières': '🍺', 'Vins': '🍷', 'Spiritueux & apéritifs': '🥃', 'Champagnes & effervescents': '🍾',
+  'Café, thé & chaud': '☕', 'Sodas & colas': '🥤', 'Boissons végétales': '🥛', 'Eaux': '💧', 'Jus de fruits': '🧃',
+  'Nettoyants ménagers': '🧽', 'Essuie-tout & papier': '🧻',
+  'Conserves': '🥫', 'Chips & tuiles': '🥔', 'Fruits secs & graines': '🥜', 'Pâtes': '🍝',
+  'Biscuits & crackers apéritifs': '🥨', 'Sauces & condiments': '🥫', 'Riz, semoules & céréales': '🍚',
+  'Soufflés & snacks apéritifs': '🥨', 'Olives, tapenades & dips': '🫒', 'Huiles, vinaigres & assaisonnements': '🫙',
+  'Farines & préparations culinaires': '🌾', 'Légumes secs': '🫘', 'Apéritif salé': '🥨',
+  'Chocolat & confiserie': '🍫', 'Petit déjeuner & boulangerie industrielle': '🍞', 'Biscuits & gâteaux': '🍪',
+  'Compotes & fruits transformés': '🍎', 'Sucre & aides pâtisserie': '🧁',
+  'Fruits frais': '🍎', 'Légumes frais': '🥕', 'Salades & herbes': '🥬', "Légumes prêts à l'emploi": '🥗',
+  'Hygiène corporelle': '🧴', 'Soin du visage & dents': '🪥',
+  'Plats cuisinés': '🥘', 'Traiteur & snacking': '🥪',
+  'Poisson pané & transformé': '🐟', 'Fruits de mer & coquillages': '🦐', 'Poisson frais': '🐟',
+  'Fromages': '🧀', 'Yaourts & desserts lactés': '🥛', 'Lait': '🥛', 'Beurre & crème': '🧈', 'Œufs': '🥚',
+  'Surgelés salés': '❄️', 'Glaces & desserts glacés': '🍨',
+  'Charcuterie': '🥓', 'Bœuf': '🥩', 'Volaille': '🍗', 'Porc': '🥩', 'Autres viandes': '🥩',
+};
+
+export function emojiSousCategorie(nom) {
+  return EMOJI_SOUS_CATEGORIE[nom] || null;
+}
+
+export function emojiCategorieDevinee(nomCategorie) {
+  return EMOJI_CATEGORIE_DEVINEE[nomCategorie] || null;
+}
+
+// item : ligne de la liste ; rayons : Map produit_id → rayon (chargerRayonsProduits) ;
+// deviner : (nom) → libellé de catégorie (facultatif).
+export function emojiArticleListe(item, rayons, deviner = null) {
+  const rayon = item?.produit_id != null && rayons?.get ? rayons.get(item.produit_id) : null;
+  if (rayon) return emojiSousCategorie(rayon.sous_categorie_nom) || emojiRayon(rayon);
+  if (deviner && item?.product) {
+    const e = emojiCategorieDevinee(deviner(item.product));
+    if (e) return e;
+  }
+  return EMOJI_PAR_DEFAUT;
+}
+
+// Clé stable des produits de la liste : sert à ne recharger les rayons que
+// quand l'ensemble des produits change (pas à chaque coche).
+export function cleProduitsListe(items) {
+  const ids = [...new Set((items || []).map(i => i?.produit_id).filter(id => id != null).map(String))];
+  return ids.sort().join(',');
+}
