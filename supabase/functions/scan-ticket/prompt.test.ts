@@ -118,3 +118,14 @@ describe('sortie : champs v14 garantis, le reste intact', () => {
     expect(normaliserSortieV14({ products: [], captures_peut_etre_incompletes: true }).captures_peut_etre_incompletes).toBe(true);
   });
 });
+
+describe('v18 — un mot entier n\'est pas une abréviation (JUST FOUR CLASSI)', () => {
+  it('la consigne est dans le prompt en service, avant la règle des attributs', () => {
+    const p = construirePromptTicket({ nbImages: 1, refProducts: CATALOGUE, multi: false });
+    expect(p).toContain('"JUST" n\'est PAS "jus"');
+    expect(p.indexOf('JUST FOUR CLASSI')).toBeLessThan(p.indexOf("NE JAMAIS INVENTER D'ATTRIBUT"));
+  });
+  it('le mode ancien (v13) reste inchangé', () => {
+    expect(construirePromptTicket({ nbImages: 1, refProducts: CATALOGUE, multi: false, consignesV14: false })).not.toContain('JUST FOUR');
+  });
+});
