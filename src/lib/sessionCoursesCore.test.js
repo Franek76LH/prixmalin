@@ -32,6 +32,7 @@ import {
   abandonnerSessionsActivesSupabase,
   chargerSessionActiveSupabase,
   choisirSessionLaPlusRecente,
+  changerVarianteArticleSession,
 } from './sessionCoursesCore';
 
 const RAYON_EPICERIE = {
@@ -745,5 +746,32 @@ describe('Chantier 182 — Remplacé par…', () => {
     expect(s.articles).toHaveLength(2);
     expect(s.articles.find(x => x.cle === 'a').remplace_par).toBeUndefined();
     expect(annulerRemplacementSession(base, 'a', 't')).toBe(base);
+  });
+});
+
+describe('chantier 196 — changerVarianteArticleSession', () => {
+  const art = (o) => ({ cle: 'k', type: 'caddie', etat: 'a_prendre', produit_id: 'chips', variante_produit_id: 'lays', variante_liste: 'lays', nom_reference: 'Chips nature', nom_marque: "Lay's", est_mdd: false, format_libelle: '150 g', prix_prevu: 2.07, nom_affiche: "Chips nature Lay's 150 g", ...o });
+  const alt = { variante_produit_id: 'mdd', produit_id: 'chips', est_mdd: true, nom_marque: "Pom'Lisse", quantite_nette: 350, unite_quantite: 'g', prix: 1.74 };
+  it('prend le format proposé, son prix, sans nommer la marque distributeur', () => {
+    const s = { articles: [art(), art({ cle: 'autre' })] };
+    const r = changerVarianteArticleSession(s, 'k', alt, '2026-11-26T11:40:00Z');
+    const a = r.articles[0];
+    expect(a.variante_produit_id).toBe('mdd');
+    expect(a.variante_liste).toBe('mdd');
+    expect(a.nom_marque).toBeNull();
+    expect(a.format_libelle).toBe('350 g');
+    expect(a.prix_prevu).toBe(1.74);
+    expect(a.nom_affiche).toBe('Chips nature 350 g');
+    expect(r.articles[1]).toBe(s.articles[1]);
+    expect(r.modifie_le).toBe('2026-11-26T11:40:00Z');
+  });
+  it('un format indifférent le reste ; rien pour un article coché, une note ou une autre fiche', () => {
+    expect(changerVarianteArticleSession({ articles: [art({ variante_liste: null })] }, 'k', alt, 'x').articles[0].variante_liste).toBeNull();
+    for (const o of [{ etat: 'au_caddie' }, { type: 'note' }, { produit_id: 'autre' }]) {
+      const s = { articles: [art(o)] };
+      expect(changerVarianteArticleSession(s, 'k', alt, 'x')).toBe(s);
+    }
+    const s = { articles: [art()] };
+    expect(changerVarianteArticleSession(s, 'absent', alt, 'x')).toBe(s);
   });
 });

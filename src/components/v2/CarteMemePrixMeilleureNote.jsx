@@ -24,7 +24,9 @@ function etiquetteAlternative(alt) {
   return [marque, format].filter(Boolean).join(' · ');
 }
 
-export default function CarteMemePrixMeilleureNote({ items = [], onRemplacer, chargeur = chargerRelevesPourListe }) {
+// Chantier 196 — aussi dans Mes courses : `magasinId` limite aux prix du
+// magasin où l'on est, `onPrendre(proposition)` remplace `onRemplacer(item)`.
+export default function CarteMemePrixMeilleureNote({ items = [], onRemplacer, onPrendre = null, magasinId = null, chargeur = chargerRelevesPourListe, style = null }) {
   const cle = useMemo(() => (items || []).filter(i => i && !i.checked && i.variante_produit_id).map(i => `${i.produit_id}:${i.variante_produit_id}`).sort().join(','), [items]);
   const [releves, setReleves] = useState(null);
   const [refus, setRefus] = useState(() => lireRefus());
@@ -39,14 +41,15 @@ export default function CarteMemePrixMeilleureNote({ items = [], onRemplacer, ch
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cle, chargeur]);
   if (!releves || releves.length === 0) return null;
-  const propositions = trouverAlternatives(items, releves, { refus });
+  const propositions = trouverAlternatives(items, releves, { refus, magasinId });
   if (propositions.length === 0) return null;
 
   const refuser = (p) => setRefus(new Set(ajouterRefus(`${p.actuel.variante_produit_id}>${p.alternative.variante_produit_id}`)));
   const prendre = async (p) => {
-    if (!onRemplacer || enCours) return;
+    if ((!onRemplacer && !onPrendre) || enCours) return;
     setEnCours(p.item.id);
     try {
+      if (onPrendre) { await onPrendre(p); return; }
       const alt = p.alternative;
       const format = formatFormatStructure(alt) || '';
       await onRemplacer({
@@ -59,10 +62,10 @@ export default function CarteMemePrixMeilleureNote({ items = [], onRemplacer, ch
   };
 
   return (
-    <div role="group" aria-label="Même prix, meilleure note" style={{ background: T.carte, borderRadius: T.rayon, boxShadow: T.ombre, padding: '14px 14px 10px', marginBottom: 16 }}>
+    <div role="group" aria-label="Même prix, meilleure note" style={{ background: T.carte, borderRadius: T.rayon, boxShadow: T.ombre, padding: '14px 14px 10px', marginBottom: 16, ...(style || {}) }}>
       <div style={{ fontFamily: T.police, fontWeight: 900, fontSize: 15, color: T.texte }}>🥗 Même prix, meilleure note</div>
       <div style={{ fontFamily: T.police, fontSize: 12.5, color: T.texteDoux, marginTop: 2, marginBottom: 6 }}>
-        Dans le même rayon, pas plus cher au kilo, et mieux noté.
+        {magasinId ? 'Ici, dans le même rayon : pas plus cher au kilo, et mieux noté.' : 'Dans le même rayon, pas plus cher au kilo, et mieux noté.'}
       </div>
       {propositions.map((p, i) => {
         const famille = p.actuel.famille;

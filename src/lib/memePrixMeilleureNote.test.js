@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { preparerReleves, trouverAlternatives, libelleMarque, ageReleve, formaterParUnite, lireRefus, ajouterRefus } from './memePrixMeilleureNote';
+import { preparerReleves, trouverAlternatives, libelleMarque, ageReleve, formaterParUnite, lireRefus, ajouterRefus, articlesSessionEnItems } from './memePrixMeilleureNote';
 
 const r = (o) => ({ produit_id: 'chips', magasin_id: 'm1', nom_enseigne: 'Leclerc', unite_quantite: 'g', quantite_fiable: true, observe_le: '2026-07-01T10:00:00Z', ...o });
 
@@ -93,5 +93,22 @@ describe('memePrixMeilleureNote', () => {
     const casse = { getItem: () => { throw new Error('x'); }, setItem: () => { throw new Error('x'); } };
     expect(lireRefus(casse).size).toBe(0);
     expect(() => ajouterRefus('a>b', casse)).not.toThrow();
+  });
+});
+
+describe('chantier 196 — en magasin', () => {
+  it('ne garde que les prix du magasin des courses', () => {
+    const releves = preparerReleves([...RELEVES, ...RELEVES.map(x => ({ ...x, magasin_id: 'm2', nom_enseigne: 'Lidl' }))]);
+    const ici = trouverAlternatives([item()], releves, { magasinId: 'm2' });
+    expect(ici).toHaveLength(1);
+    expect(ici[0].alternative.magasin_id).toBe('m2');
+    expect(trouverAlternatives([item()], releves, { magasinId: 'm3' })).toEqual([]);
+  });
+
+  it('ne prend que les articles du caddie encore à prendre', () => {
+    const a = (o) => ({ cle: 'k', type: 'caddie', etat: 'a_prendre', produit_id: 'chips', variante_produit_id: 'lays150', nom_reference: 'Chips nature', nom_marque: "Lay's", est_mdd: false, format_libelle: '150 g', ...o });
+    const items = articlesSessionEnItems([a(), a({ cle: 'n', type: 'note' }), a({ cle: 'c', etat: 'au_caddie' }), a({ cle: 'i', etat: 'introuvable' }), a({ cle: 'v', variante_produit_id: null })]);
+    expect(items).toEqual([{ id: 'k', produit_id: 'chips', variante_produit_id: 'lays150', checked: false, product: 'Chips nature', formatDisplay: "Lay's · 150 g" }]);
+    expect(articlesSessionEnItems([a({ est_mdd: true, nom_marque: 'Eco+' })])[0].formatDisplay).toBe('150 g');
   });
 });

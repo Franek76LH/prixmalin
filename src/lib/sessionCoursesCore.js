@@ -532,3 +532,28 @@ export function annulerRemplacementSession(session, cle, modifieLeISO) {
     });
   return { ...session, articles: suivants, modifie_le: modifieLeISO };
 }
+
+// Chantier 196 — « Même prix, meilleure note » en magasin : l'article prend le
+// format proposé (même fiche), avec son prix relevé dans CE magasin. Un format
+// précis demandé dans la liste suit le changement (le bilan ne le signalera
+// donc pas comme « autre format »). Article introuvable, coché, note libre ou
+// absent : session inchangée (même référence).
+export function changerVarianteArticleSession(session, cle, alt, modifieLeISO) {
+  if (!session || !alt?.variante_produit_id) return session;
+  const articles = session.articles || [];
+  const cible = articles.find(a => a.cle === cle);
+  if (!cible || cible.type !== 'caddie' || cible.etat !== 'a_prendre') return session;
+  if (alt.produit_id && cible.produit_id && alt.produit_id !== cible.produit_id) return session;
+  const estMdd = alt.est_mdd === true;
+  const suivant = {
+    ...cible,
+    variante_produit_id: alt.variante_produit_id,
+    variante_liste: cible.variante_liste ? alt.variante_produit_id : cible.variante_liste,
+    nom_marque: estMdd ? null : (alt.nom_marque ?? null),
+    est_mdd: estMdd,
+    format_libelle: formatConcret(formatFormatStructure(alt) ?? ''),
+    prix_prevu: Number.isFinite(Number(alt.prix)) ? Number(alt.prix) : cible.prix_prevu,
+  };
+  suivant.nom_affiche = assemblerNomArticle(suivant);
+  return { ...session, articles: articles.map(a => (a.cle === cle ? suivant : a)), modifie_le: modifieLeISO };
+}

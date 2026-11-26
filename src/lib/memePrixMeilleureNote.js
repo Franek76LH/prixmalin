@@ -62,7 +62,9 @@ export function libelleMarque(alt) {
 
 // items : lignes de Ma liste. releves : sortie de preparerReleves.
 // refus : Set de clés `${varianteActuelle}>${varianteProposee}` écartées.
-export function trouverAlternatives(items, releves, { tolerance = TOLERANCE_PRIX, max = MAX_PROPOSITIONS, refus = new Set() } = {}) {
+// magasinId (chantier 196, Mes courses) : ne compare QUE les prix du magasin
+// où l'on fait ses courses.
+export function trouverAlternatives(items, releves, { tolerance = TOLERANCE_PRIX, max = MAX_PROPOSITIONS, refus = new Set(), magasinId = null } = {}) {
   const parVariante = new Map();
   for (const r of releves || []) {
     if (!parVariante.has(r.variante_produit_id)) parVariante.set(r.variante_produit_id, []);
@@ -79,6 +81,7 @@ export function trouverAlternatives(items, releves, { tolerance = TOLERANCE_PRIX
     const miens = parVariante.get(vId) || [];
     let meilleure = null;
     for (const actuel of miens) {
+      if (magasinId && actuel.magasin_id !== magasinId) continue;
       for (const cand of releves) {
         if (cand.produit_id !== actuel.produit_id || cand.magasin_id !== actuel.magasin_id) continue;
         if (cand.variante_produit_id === vId || dejaDansLaListe.has(cand.variante_produit_id)) continue;
@@ -143,4 +146,15 @@ export function ajouterRefus(cle, stockage = globalThis.localStorage) {
   s.add(cle);
   try { stockage?.setItem(CLE_REFUS, JSON.stringify([...s].slice(-200))); } catch { /* sans effet */ }
   return s;
+}
+
+// Chantier 196 — articles de la session de courses (Mes courses) vus comme des
+// lignes de liste : seuls les articles du caddie encore « à prendre » comptent.
+export function articlesSessionEnItems(articles) {
+  return (articles || [])
+    .filter(a => a && a.type === 'caddie' && a.etat === 'a_prendre' && a.variante_produit_id && a.produit_id)
+    .map(a => ({
+      id: a.cle, produit_id: a.produit_id, variante_produit_id: a.variante_produit_id, checked: false,
+      product: a.nom_reference, formatDisplay: [a.est_mdd ? null : a.nom_marque, a.format_libelle].filter(Boolean).join(' · '),
+    }));
 }

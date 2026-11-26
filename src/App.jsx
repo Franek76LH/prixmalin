@@ -18,7 +18,8 @@ import { nomComposeVariante, formatEtiquetteVariante } from "./lib/nomProduit";
 import { transcrireAudioListe, normaliserNomElement, comptesParNom, fusionnerParNom, demanderRapprochementListe, regrouperPourCaddie } from "./lib/microVocal";
 import { fusionnerPropositions, ficheARelierSeule } from "./lib/rapprochementIA";
 // Chantier « Courses » Lot 1 — session de courses figée (shadow estFrancois).
-import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession, ajouterNoteSession, supprimerNoteSession, cloreSession, idsCaddieASupprimer, articlesNonAchetesASupprimer, construireBilanCourses, doitRattacherTicketSession, chargerMarquesVariantes, calculerTotalPanier, articlesAAcheter, remplacerArticleSession, annulerRemplacementSession } from "./lib/sessionCoursesCore";
+import { chargerRayonsProduits, construireArticlesSession, construireSessionCourses, grouperParRayon, calculerProgression, emojiRayon, appliquerEtatArticle, sauvegarderSessionSupabase, abandonnerSessionsActivesSupabase, chargerSessionActiveSupabase, choisirSessionLaPlusRecente, genererIdSession, ajouterNoteSession, supprimerNoteSession, cloreSession, idsCaddieASupprimer, articlesNonAchetesASupprimer, construireBilanCourses, doitRattacherTicketSession, chargerMarquesVariantes, calculerTotalPanier, articlesAAcheter, remplacerArticleSession, annulerRemplacementSession, changerVarianteArticleSession } from "./lib/sessionCoursesCore";
+import { articlesSessionEnItems } from "./lib/memePrixMeilleureNote";
 // Chantier 91 Lot 5 — rapprochement liste / cochés / ticket.
 import { rapprocherSessionTicket, appliquerRapprochementSession, deciderAchatArticle, construireNormaliseur, textesARapprocher } from "./lib/rapprochementCoursesCore";
 // Chantier 92 Lot 6 — favoris Core (par format) & récurrents. Distinct des
@@ -9466,7 +9467,7 @@ function LigneArticleCourses({ article, variante, onCocher, onIntrouvable, onRes
   );
 }
 
-function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, onRemplacer = null, onAnnulerRemplacement = null, onTerminer, onPasserEnCaisse, syncEchec = false }) {
+function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, onRemplacer = null, onAnnulerRemplacement = null, onChangerVariante = null, onTerminer, onPasserEnCaisse, syncEchec = false }) {
   const F = "'Nunito',sans-serif";
   // « Dans le caddie » repliée par défaut — hooks déclarés AVANT le early
   // return (règle des Hooks : ordre stable entre rendus).
@@ -9726,6 +9727,12 @@ function CoursesTab({ session, onChangerEtat, onAjouterNote, onSupprimerNote, on
 
       {/* Chantier 180 — Nutri-Score des courses prévues (seulement s'il y a
           assez de produits notés : rien en magasin sinon). */}
+      {/* Chantier 196 — « Même prix, meilleure note » en magasin : prix de CE
+          magasin seulement, articles encore à prendre. Invisible sinon. */}
+      {onChangerVariante && session?.magasin?.magasin_id && (
+        <CarteMemePrixMeilleureNote items={articlesSessionEnItems(articles)} magasinId={session.magasin.magasin_id}
+          onPrendre={(p)=>onChangerVariante(p.item.id, { ...p.alternative })} style={{ marginTop:16, marginBottom:0 }} />
+      )}
       {prog.total > 0 && <div style={{ marginTop:16 }}><CarteNutriCaddie articles={articles.filter(a => a.type !== 'note')} titre="Nutri-Score de tes courses" /></div>}
 
       {/* Lot 6 — clôture explicite, en fin de liste. Vert quand tout est pris,
@@ -11179,6 +11186,11 @@ export default function App() {
     appliquerSessionCourses(ajouterNoteSession(sessionCourses, texte, new Date().toISOString(), genererIdSession(), produit));
   };
 
+  // Chantier 196 — « Prendre celui-ci » (même prix, meilleure note) en magasin.
+  const changerVarianteArticleCourses = (cle, alt) => {
+    appliquerSessionCourses(changerVarianteArticleSession(sessionCourses, cle, alt, new Date().toISOString()));
+  };
+
   // Chantier 182 — « Remplacé par… » sur un article introuvable.
   const remplacerArticleCourses = (cle, texte, produit = null) => {
     appliquerSessionCourses(remplacerArticleSession(sessionCourses, cle, texte, new Date().toISOString(), genererIdSession(), produit));
@@ -12100,7 +12112,7 @@ export default function App() {
             <BasculeCourses ecran={tab} setTab={setTab} nbListe={items.filter(i=>!i.checked).length}
               progression={calculerProgression(sessionCoursesActive.articles)} magasin={sessionCoursesActive.magasin?.nom ?? null}/>
           )}
-          {loaded && tab==="courses" && sessionCoursesAccessible && sessionCoursesActive && <CoursesTab session={sessionCoursesActive} onChangerEtat={changerEtatArticleSession} onAjouterNote={ajouterNoteCourses} onSupprimerNote={supprimerNoteCourses} onRemplacer={remplacerArticleCourses} onAnnulerRemplacement={annulerRemplacementCourses} onTerminer={demanderTerminerCourses} onPasserEnCaisse={()=>setCaisseCourses(true)} syncEchec={syncCoursesEchec}/>}
+          {loaded && tab==="courses" && sessionCoursesAccessible && sessionCoursesActive && <CoursesTab session={sessionCoursesActive} onChangerEtat={changerEtatArticleSession} onAjouterNote={ajouterNoteCourses} onSupprimerNote={supprimerNoteCourses} onRemplacer={remplacerArticleCourses} onAnnulerRemplacement={annulerRemplacementCourses} onChangerVariante={changerVarianteArticleCourses} onTerminer={demanderTerminerCourses} onPasserEnCaisse={()=>setCaisseCourses(true)} syncEchec={syncCoursesEchec}/>}
           {loaded && tab==="list"      && <ListTab onDicter={accesAvance ? ()=>setTab("micro") : null} onOuvrirFavoris={()=>setShowFavorisSheet(true)} liaisonsProposees={liaisonsProposees} onRelier={relierArticle}      items={items} onAdd={addItem} onUpdate={updateItem} onToggle={toggleCheck} onRemove={removeItem} setTab={setTab} favorites={favorites} saveFavorites={saveFavorites} onSetMarquePref={setMarquePrefItem} itemsReportes={itemsReportes} onReactiverReporte={reactiverReporte} onSupprimerReporte={supprimerReporte}/>}
           {loaded && tab==="catalog"   && <CatalogTab   focusRecherche={modeCatalogue==="recherche"} items={items} onAdd={addItem} onUpdate={updateItem} onRemove={removeItem} setTab={setTab} onDicter={accesAvance ? ()=>setTab("micro") : null}/>}
           {/* Chantier 160 — des courses en cours : on peut y revenir d'ici. */}
