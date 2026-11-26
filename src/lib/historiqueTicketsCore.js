@@ -57,14 +57,6 @@ export async function chargerLignesAIdentifier(userId) {
   }
 }
 
-// Total pour la pastille de l'accueil. null = inconnu (erreur) : on n'affiche
-// rien plutôt qu'un faux zéro… ou un faux chiffre.
-export async function chargerCompteAIdentifier(userId) {
-  const { data, error } = await chargerLignesAIdentifier(userId);
-  if (error) return null;
-  return data.length;
-}
-
 // Pastille de l'accueil — le DERNIER ticket enregistré (le plus récemment
 // scanné, donc celui des courses qu'on range) et son nombre de lignes à
 // identifier. null = inconnu (erreur) : la pastille ne s'affiche pas plutôt

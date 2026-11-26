@@ -116,37 +116,3 @@ export function calculerPrixReferenceParUnite({ prix_total, quantite_nette, unit
   const unite = resolution.famille === FAMILLE_POIDS ? 'kg' : 'L';
   return { valeur: Number(prix_total) / totalCanonique, unite };
 }
-
-// #58.2.A — classe des entrées (une par magasin) selon leur prix unitaire
-// (€/kg ou €/L), du moins cher au plus cher. Pure, ne mute jamais le tableau
-// d'entrée : chaque entrée retournée est une copie. Les entrées sans
-// prixUnitaire exploitable vont dans nonComparables (triées par prixBrut),
-// jamais mêlées au classement.
-export function classerParPrixUnitaire(entrees) {
-  const liste = Array.isArray(entrees) ? entrees : [];
-
-  const comparables = [];
-  const nonComparables = [];
-  liste.forEach((entree) => {
-    if (Number.isFinite(entree.prixUnitaire)) {
-      comparables.push({ ...entree });
-    } else {
-      nonComparables.push({ ...entree });
-    }
-  });
-
-  comparables.sort((a, b) => a.prixUnitaire - b.prixUnitaire);
-  nonComparables.sort((a, b) => a.prixBrut - b.prixBrut);
-
-  let rangCourant = 0;
-  let dernierPrixUnitaire = null;
-  const classes = comparables.map((entree, index) => {
-    if (dernierPrixUnitaire === null || entree.prixUnitaire !== dernierPrixUnitaire) {
-      rangCourant = index + 1;
-      dernierPrixUnitaire = entree.prixUnitaire;
-    }
-    return { ...entree, rang: rangCourant, estMoinsCher: rangCourant === 1 };
-  });
-
-  return { classes, nonComparables };
-}

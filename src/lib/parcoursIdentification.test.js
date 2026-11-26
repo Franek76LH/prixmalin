@@ -386,7 +386,7 @@ describe('cas « aucune info » : seconde lecture identique obligatoire avant de
 // ── « Pas de code-barres (vrac, boucherie…) » ──────────────────────────────
 // Constat iPhone : après avoir passé le rumsteck, la pastille affichait encore
 // « 3 produits à scanner » — banane, chou-fleur, rumsteck n'auront jamais de code.
-import { estAIdentifier, compterAIdentifier, compterAIdentifierParTicket, ticketComplet, marquerSansCodeBarres, resumeDernierTicket } from './scanDepuisHistorique';
+import { estAIdentifier, compterAIdentifier, compterAIdentifierParTicket, marquerSansCodeBarres, resumeDernierTicket } from './scanDepuisHistorique';
 
 describe('lignes « sans code-barres » : hors de tous les compteurs', () => {
   const marquer = () => vi.fn().mockResolvedValue({ data: { succes: true, sans_code_barres: true }, error: null });
@@ -404,8 +404,6 @@ describe('lignes « sans code-barres » : hors de tous les compteurs', () => {
     const reconnues = Array.from({ length: 17 }, (_, i) => ({ id: `r${i}`, statut_validation_produit: 'valide' }));
     const vrac = [RUMSTECK, BANANE, CHOU].map(l => ({ ...l, sans_code_barres: true }));
     expect(compterAIdentifier([...reconnues, ...vrac])).toBe(0);
-    expect(ticketComplet([...reconnues, ...vrac])).toBe(true);
-    expect(ticketComplet([...reconnues, ...vrac.slice(1), RUMSTECK])).toBe(false);
     // et l'écran plein s'ouvre directement sur « Ticket complet »
     const p = creerParcoursIdentification({ lignes: [...reconnues, ...vrac], deps: deps() });
     expect(p.etat().phase).toBe(PHASE_FIN);

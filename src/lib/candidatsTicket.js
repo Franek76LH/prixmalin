@@ -23,9 +23,9 @@
 // on ne la recrée pas : elle renvoie déjà ses résultats TRIÉS.
 export const RPC_CANDIDATS_TICKET = 'rechercher_candidats_ticket';
 
-// Les deux colonnes, nommées ici une bonne fois pour toutes.
+// La colonne du vrai texte imprimé, nommée ici une bonne fois pour toutes
+// (à ne pas confondre avec libelle_brut, la reformulation OCR).
 export const COLONNE_TEXTE_CAISSE = 'libelle_ticket'; // le vrai texte imprimé
-export const COLONNE_LIBELLE_OCR = 'libelle_brut';    // la reformulation OCR
 
 // Combien de fiches au maximum dans le bloc du haut. Au-delà, ce n'est plus
 // une aide : c'est une deuxième liste à dépouiller.

@@ -69,11 +69,6 @@ export function motsUtiles(texte) {
   return motsBruts(texte).map(m => racine(sansAccents(m)));
 }
 
-// Terme envoyé à la recherche en base : mots utiles séparés par une espace.
-export function termeDeRecherche(texte) {
-  return motsUtiles(texte).join(' ');
-}
-
 // À quel point deux mots sont « le même mot », de 0 à 1.
 //   1    : identiques ;
 //   0,95 : seul le pluriel change (« yaourts » / « yaourt ») ;

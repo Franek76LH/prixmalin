@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
-  motsUtiles, termeDeRecherche, ressemblance, deciderLiaison, proposerLiaison,
+  motsUtiles, ressemblance, deciderLiaison, proposerLiaison,
   LIAISON_RELIE, LIAISON_SUGGESTIONS, LIAISON_A_RELIER, MAX_SUGGESTIONS, SEUIL_MEME_NOM,
 } from './liaisonAutoListe';
 
@@ -13,7 +13,6 @@ describe('nettoyage du nom entendu', () => {
     expect(motsUtiles("de l'huile d'olive")).toEqual(['huile', 'olive']);
     expect(motsUtiles('Œufs')).toEqual(['oeuf']);
     expect(motsUtiles('du riz')).toEqual(['riz']);
-    expect(termeDeRecherche('des yaourts nature')).toBe('yaourt nature');
   });
   it('vide ou absent -> aucun mot', () => {
     expect(motsUtiles('')).toEqual([]);

@@ -3,7 +3,6 @@ import { readFileSync } from 'node:fs';
 import {
   RPC_CANDIDATS_TICKET,
   COLONNE_TEXTE_CAISSE,
-  COLONNE_LIBELLE_OCR,
   texteDeCaisse,
   argumentsCandidatsTicket,
   enseigneEstResolue,
@@ -26,7 +25,7 @@ import {
 
 // Le cas réel du ticket Carrefour Bonneveine du 19/08.
 const LIGNE_PENNE = {
-  [COLONNE_LIBELLE_OCR]: 'Pâtes',                 // ce que l'OCR a compris
+  libelle_brut: 'Pâtes',                 // ce que l'OCR a compris
   [COLONNE_TEXTE_CAISSE]: '4x1KG PENNE RIGATE B', // ce que la caisse a imprimé
 };
 
@@ -39,8 +38,8 @@ describe('texteDeCaisse — on lit le ticket, pas la relecture de l\'OCR', () =>
   it('NE SE REPLIE JAMAIS sur libelle_brut quand le texte de caisse manque', () => {
     // Le repli serait le pire des mondes : la recherche « marcherait » et
     // proposerait Coquillettes, sans que rien ne signale la dégradation.
-    expect(texteDeCaisse({ [COLONNE_LIBELLE_OCR]: 'Pâtes' })).toBeNull();
-    expect(texteDeCaisse({ [COLONNE_LIBELLE_OCR]: 'Plat cuisiné' })).toBeNull();
+    expect(texteDeCaisse({ libelle_brut: 'Pâtes' })).toBeNull();
+    expect(texteDeCaisse({ libelle_brut: 'Plat cuisiné' })).toBeNull();
   });
 
   it('un texte de caisse vide ou blanc vaut absent, pas une recherche à vide', () => {
@@ -57,7 +56,6 @@ describe('texteDeCaisse — on lit le ticket, pas la relecture de l\'OCR', () =>
 
   it('les deux colonnes sont bien celles de lignes_ticket, aux noms trompeurs', () => {
     expect(COLONNE_TEXTE_CAISSE).toBe('libelle_ticket');
-    expect(COLONNE_LIBELLE_OCR).toBe('libelle_brut');
   });
 });
 

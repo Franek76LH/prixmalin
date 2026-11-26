@@ -44,11 +44,6 @@ export function estAIdentifier(ligne) {
   return etatLigne(ligne) !== ETAT_RECONNU && !estSansCodeBarres(ligne);
 }
 
-// Ticket complet = plus rien à identifier (lignes reconnues ou sans code-barres).
-export function ticketComplet(lignes) {
-  return compterAIdentifier(lignes) === 0;
-}
-
 export function compterAIdentifier(lignes) {
   return (lignes || []).filter(estAIdentifier).length;
 }

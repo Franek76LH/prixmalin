@@ -39,20 +39,6 @@ export const CATEGORY_META = [
   { id:"autres",            name:"Autres",                              emoji:"📦", color:"#95A5A6" },
 ];
 
-
-export const PRODUCT_SUGGESTIONS = [
-  { name:"Lait demi-écrémé", format:"1L" },
-  { name:"Pâtes spaghetti",  format:"500g" },
-  { name:"Beurre doux",      format:"250g" },
-  { name:"Oeufs",            format:"x6" },
-  { name:"Cola Zéro",        format:"1L" },
-  { name:"Riz long grain",   format:"1kg" },
-  { name:"Jambon",           format:"4 tranches" },
-  { name:"Yaourt nature",    format:"x4" },
-  { name:"Farine T55",       format:"1kg" },
-  { name:"Sucre en poudre",  format:"1kg" },
-];
-
 // Chantier 197 (26/11/2026, demande de François) : un prix reste utilisé par le
 // comparateur pendant 12 mois après son relevé (au lieu de 6), le temps que la
 // base se nourrisse de tickets récents. Remettre 180 pour revenir à 6 mois.
