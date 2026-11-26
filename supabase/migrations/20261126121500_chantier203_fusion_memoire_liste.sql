@@ -1,0 +1,7 @@
+-- Chantier 203 (26/11/2026, feu vert écrit de François à 12h09) — APPLIQUÉ EN PROD via MCP Supabase.
+-- fusionner_fiches re-pointe aussi memoire_liste (mémoire personnelle de la liste, chantier 157).
+-- Ligne ajoutée juste après « update propositions_liaison_scan set produit_id=p_survivant ... » :
+--   update memoire_liste set produit_id=p_survivant, modifie_le=now() where produit_id=any(p_sources);
+-- Méthode : pg_get_functiondef + replace (motif unique vérifié) + execute.
+-- Ancienne version : table _sauv_fonction_fusionner_203 (RLS). Retour arrière : execute de sa colonne definition.
+-- Essai à blanc annulé : fusion fictive de la fiche du seul souvenir existant -> le souvenir a suivi la survivante.
