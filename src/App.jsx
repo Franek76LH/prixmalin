@@ -6839,7 +6839,8 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
       const moinsCher = Object.entries(byStore)
         .map(([sid, pr]) => ({ magasin: utiliserCore ? (pr?.nom_magasin || 'Magasin') : (STORES.find(st => st.id === sid)?.name || 'Magasin'), pr }))
         .sort((x, y) => x.pr.price - y.pr.price)[0];
-      return { id: item.id, nom: nomArticle(item), magasin: moinsCher.magasin, prix: moinsCher.pr.price * item.qty };
+      // Chantier 202 — l'âge d'un prix de plus de 6 mois est dit ici aussi.
+      return { id: item.id, nom: nomArticle(item), magasin: moinsCher.magasin, prix: moinsCher.pr.price * item.qty, ancien: mentionPrixAncien(moisSiPrixAncien(moinsCher.pr.date)) };
     }) : [];
   const validerMagasinGagnant = () => {
     // Chantier « Courses » — bascule générale 2026-08-12 : en mode

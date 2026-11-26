@@ -104,7 +104,7 @@ export default function ResultatComparaison({
               <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 16px', borderBottom: i === alternatives.length - 1 ? 'none' : `1px solid ${T.trait}` }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontFamily: T.police, fontWeight: 800, fontSize: 14, color: T.texte, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.nom}</div>
-                  <div style={{ fontFamily: T.police, fontSize: 12, color: T.texteLeger, marginTop: 1 }}>chez {a.magasin}</div>
+                  <div style={{ fontFamily: T.police, fontSize: 12, color: T.texteLeger, marginTop: 1 }}>chez {a.magasin}{a.ancien && <span style={{ color: '#B45309', fontWeight: 800 }}> · {a.ancien}</span>}</div>
                 </div>
                 <div style={{ fontFamily: T.police, fontWeight: 900, fontSize: 15, color: T.texte, flexShrink: 0 }}>{euros(a.prix)}</div>
               </div>
