@@ -87,6 +87,7 @@ import ChoixMagasinComparaison from "./components/v2/ChoixMagasinComparaison";
 import ChoixMagasinAnnuaire from "./components/v2/ChoixMagasinAnnuaire";
 import PastilleNutriScore from "./components/v2/PastilleNutriScore";
 import CarteNutriCaddie from "./components/v2/CarteNutriCaddie";
+import CarteMemePrixMeilleureNote from "./components/v2/CarteMemePrixMeilleureNote";
 import SuggestionsCatalogue from "./components/v2/SuggestionsCatalogue";
 import { resumeNutri, lettreNutri, COULEURS_NUTRI } from "./lib/nutriScoreCore";
 import { classerMagasinsComparables, ETAT_INSUFFISANT as CLASSEMENT_INSUFFISANT } from "./lib/classementHonnete";
@@ -5542,6 +5543,7 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
         onReactiverReporte={onReactiverReporte} onSupprimerReporte={onSupprimerReporte}
         onAjouter={()=>setTab("catalog")} onFavoris={()=>setShowFavModal(true)} onDicter={onDicter}
         propositions={liaisonsProposees} onRelier={onRelier}
+        encartAAcheter={<CarteMemePrixMeilleureNote items={items} onRemplacer={updateItem} />}
       />
 
       {editItem && <EditItemSheet item={editItem} onClose={()=>setEditItem(null)} onSave={updateItem}/>}

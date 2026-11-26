@@ -80,6 +80,7 @@ export default function ListeCourses({
   items = [], itemsReportes = [], nbFavoris = 0, vignette = null,
   onCocher, onModifier, onSupprimer, onMarque, onReactiverReporte, onSupprimerReporte,
   onAjouter, onFavoris, propositions = {}, onRelier, onDicter = null, onRetirerPris = null, onComparer = null,
+  encartAAcheter = null,
 }) {
   // Chantier 184 — « Retirer les articles pris » en deux appuis (le second
   // confirme, pendant 4 s) : on ne vide pas une section par erreur.
@@ -157,6 +158,8 @@ export default function ListeCourses({
           ))}
         </Section>
       )}
+      {/* Chantier 194 — « Même prix, meilleure note », juste sous ce qu'il reste à acheter. */}
+      {aAcheter.length > 0 && encartAAcheter}
       {pris.length > 0 && (
         <Section titre={`Déjà pris (${pris.length})`}>
           {pris.map((item, i) => (
