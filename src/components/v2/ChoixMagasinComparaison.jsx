@@ -5,6 +5,7 @@
 // mes courses chez… ». Présentation seule : le classement vient de
 // lib/classementHonnete.js.
 import { T } from './theme';
+import { mentionPrixAnciensMagasin } from '../../lib/anciennetePrix';
 
 const euros = (n) => `${Number(n).toFixed(2).replace('.', ',')} €`;
 
@@ -13,7 +14,8 @@ const ETIQUETTES = {
   plus_complet: { texte: 'Le plus complet', fond: '#EEF2FF', couleur: T.bleu },
 };
 
-export default function ChoixMagasinComparaison({ classement, nbArticles, choisiId, onChoisir }) {
+// Chantier 207 — anciens : Map id magasin -> nombre de prix de plus de 6 mois.
+export default function ChoixMagasinComparaison({ classement, nbArticles, choisiId, onChoisir, anciens = null }) {
   if (!classement?.magasins?.length) return null;
   const { magasins, nbCommuns, moinsCherId } = classement;
   return (
@@ -35,6 +37,7 @@ export default function ChoixMagasinComparaison({ classement, nbArticles, choisi
               ? (m.ecartCommuns ? `+${euros(m.ecartCommuns)} sur les produits communs` : `${euros(m.totalCommuns)} sur les produits communs`)
               : null,
           ].filter(Boolean).join(' · ');
+          const nbAnciens = anciens?.get?.(m.id) || 0;
           return (
             <button key={m.id} role="radio" aria-checked={choisi} onClick={() => onChoisir?.(m.id)} style={{
               width: '100%', border: 'none', borderBottom: i === magasins.length - 1 ? 'none' : `1px solid ${T.trait}`,
@@ -53,6 +56,9 @@ export default function ChoixMagasinComparaison({ classement, nbArticles, choisi
                   ))}
                 </span>
                 <span style={{ display: 'block', fontFamily: T.police, fontSize: 12, color: T.texteLeger, marginTop: 2 }}>{detail}</span>
+                {nbAnciens > 0 && (
+                  <span style={{ display: 'block', fontFamily: T.police, fontSize: 11.5, color: '#B45309', fontWeight: 800, marginTop: 1 }}>🕰️ {mentionPrixAnciensMagasin(nbAnciens)}</span>
+                )}
               </span>
               <span style={{ textAlign: 'right', flexShrink: 0 }}>
                 <span style={{ display: 'block', fontFamily: T.police, fontWeight: 900, fontSize: 16, color: T.texte }}>{euros(m.total)}</span>

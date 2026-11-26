@@ -90,7 +90,7 @@ import ChoixMagasinAnnuaire from "./components/v2/ChoixMagasinAnnuaire";
 import PastilleNutriScore from "./components/v2/PastilleNutriScore";
 import CarteNutriCaddie from "./components/v2/CarteNutriCaddie";
 import CarteMemePrixMeilleureNote from "./components/v2/CarteMemePrixMeilleureNote";
-import { moisSiPrixAncien, mentionPrixAncien, phrasePrixAnciens } from "./lib/anciennetePrix";
+import { moisSiPrixAncien, mentionPrixAncien, phrasePrixAnciens, compterPrixAnciensParMagasin } from "./lib/anciennetePrix";
 import SuggestionsCatalogue from "./components/v2/SuggestionsCatalogue";
 import { resumeNutri, lettreNutri, COULEURS_NUTRI } from "./lib/nutriScoreCore";
 import { classerMagasinsComparables, ETAT_INSUFFISANT as CLASSEMENT_INSUFFISANT } from "./lib/classementHonnete";
@@ -7146,7 +7146,8 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
           </button>
           {autresMagasinsOuverts && (
             <ChoixMagasinComparaison classement={classementMagasins} nbArticles={items.length} choisiId={bestAffiche?.id}
-              onChoisir={(id)=>{ setMagasinChoisiId(id); setAutresMagasinsOuverts(false); }} />
+              onChoisir={(id)=>{ setMagasinChoisiId(id); setAutresMagasinsOuverts(false); }}
+              anciens={compterPrixAnciensParMagasin(analysisAffichee)} />
           )}
         </>
       )}

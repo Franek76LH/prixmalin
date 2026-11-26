@@ -25,3 +25,20 @@ export function phrasePrixAnciens(nb) {
     ? '1 prix a plus de 6 mois : il a pu changer depuis.'
     : `${nb} prix ont plus de 6 mois : ils ont pu changer depuis.`;
 }
+
+// Chantier 207 — pour la liste « Voir les autres magasins » : nombre de prix
+// de plus de 6 mois par magasin (analysis = [{ byStore: { id: { date } } }]).
+export function compterPrixAnciensParMagasin(analysis, maintenantMs = Date.now()) {
+  const compte = new Map();
+  for (const { byStore } of Array.isArray(analysis) ? analysis : []) {
+    for (const [id, p] of Object.entries(byStore || {})) {
+      if (moisSiPrixAncien(p?.date, maintenantMs)) compte.set(id, (compte.get(id) || 0) + 1);
+    }
+  }
+  return compte;
+}
+
+export function mentionPrixAnciensMagasin(nb) {
+  if (!nb) return null;
+  return nb === 1 ? '1 prix de plus de 6 mois' : `${nb} prix de plus de 6 mois`;
+}
