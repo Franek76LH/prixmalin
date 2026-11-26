@@ -53,5 +53,8 @@ export const PRODUCT_SUGGESTIONS = [
   { name:"Sucre en poudre",  format:"1kg" },
 ];
 
-export const STALE_DAYS = 180;
+// Chantier 197 (26/11/2026, demande de François) : un prix reste utilisé par le
+// comparateur pendant 12 mois après son relevé (au lieu de 6), le temps que la
+// base se nourrisse de tickets récents. Remettre 180 pour revenir à 6 mois.
+export const STALE_DAYS = 365;
 export const JOURS_MOYENNE = 60;
