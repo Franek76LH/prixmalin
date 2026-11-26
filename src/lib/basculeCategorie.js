@@ -18,7 +18,8 @@ export function doitBasculer({ categorieAuto, nbMagasinsCategorie, nbMagasinsAut
 }
 
 // Chantier 216 — « Proximité » devient « Petites surfaces » à l'écran (François, 26/11).
-const libelle = (c) => (c === PROXIMITE ? 'petites surfaces' : 'grandes surfaces');
+// Chantier 223 — « Petites et moyennes surfaces » (supermarchés + supérettes).
+const libelle = (c) => (c === PROXIMITE ? 'petites et moyennes surfaces' : 'grandes surfaces');
 
 // Chantier 218 — l'utilisateur a choisi lui-même une catégorie vide : on
 // respecte son choix, mais un bouton mène à l'autre catégorie si elle a des prix.

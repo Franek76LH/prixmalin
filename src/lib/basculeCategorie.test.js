@@ -20,12 +20,12 @@ describe('bascule de catégorie (chantier 215)', () => {
   });
   it('bouton vers l\'autre catégorie (choix manuel)', () => {
     expect(libelleBoutonAutre('grande_surface', 1)).toBe('Voir les grandes surfaces (1 magasin a des prix)');
-    expect(libelleBoutonAutre('proximite', 3)).toBe('Voir les petites surfaces (3 magasins ont des prix)');
+    expect(libelleBoutonAutre('proximite', 3)).toBe('Voir les petites et moyennes surfaces (3 magasins ont des prix)');
     expect(libelleBoutonAutre('grande_surface', 0)).toBeNull();
   });
   it('phrase', () => {
-    expect(phraseBascule({ de: 'proximite', vers: 'grande_surface' })).toBe('Pas de prix en petites surfaces pour ta liste : voici les grandes surfaces.');
-    expect(phraseBascule({ de: 'grande_surface', vers: 'proximite' })).toBe('Pas de prix en grandes surfaces pour ta liste : voici les petites surfaces.');
+    expect(phraseBascule({ de: 'proximite', vers: 'grande_surface' })).toBe('Pas de prix en petites et moyennes surfaces pour ta liste : voici les grandes surfaces.');
+    expect(phraseBascule({ de: 'grande_surface', vers: 'proximite' })).toBe('Pas de prix en grandes surfaces pour ta liste : voici les petites et moyennes surfaces.');
     expect(phraseBascule(null)).toBeNull();
   });
 });

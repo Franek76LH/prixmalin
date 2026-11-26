@@ -118,6 +118,7 @@ import AValiderSheet from "./components/dev/AValiderSheet";
 // Chantier "Scan code-barres", bout 3B — console de validation admin
 import ValidationScanSheet from "./components/admin/ValidationScanSheet";
 import AVerifierScansSheet from "./components/AVerifierScansSheet";
+import { devinerCategorieMagasin as devinerCategorieMagasinCore } from "./lib/categorieMagasin";
 import { autreCategorie as categorieOpposee, doitBasculer, phraseBascule, libelleBoutonAutre } from "./lib/basculeCategorie";
 import { nbAvisAttendus } from "./lib/verificationCommunaute";
 // Chantier 106 Lot A — module de contribution aux codes-barres : parcours
@@ -2053,11 +2054,9 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
   // LOT 1 « reconnaissance magasin au scan » — heuristique de catégorie :
   // les enseignes/format de proximité -> 'proximite', sinon 'grande_surface'.
   // Sert de PRÉ-sélection (l'utilisateur peut changer d'un tap).
-  const devinerCategorieMagasin = (nom) => {
-    const t = (nom || '').toLowerCase();
-    return /express|city|contact|proximit|market|vival|utile|spar|franprix/.test(t)
-      ? 'proximite' : 'grande_surface';
-  };
+  // Chantier 223 — règle déplacée dans lib/categorieMagasin.js (hypers seuls
+  // en « grande surface », tout le reste en « petite et moyenne »).
+  const devinerCategorieMagasin = (nom, enseigne = null) => devinerCategorieMagasinCore(nom, enseigne);
 
   // LOT 1 — appel de la RPC Core. Renvoie l'objet {statut, magasin_id?, candidat?}.
   // Fire-and-forget côté erreur technique : on n'interrompt jamais le flux legacy.
@@ -2086,7 +2085,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
         p_latitude:        lat ?? null,
         p_longitude:       lng ?? null,
         p_enseigne_slug:   enseigne || null,
-        p_categorie:       categorieMagasin || devinerCategorieMagasin(nom),
+        p_categorie:       categorieMagasin || devinerCategorieMagasin(nom, enseigne),
         p_forcer_creation: extra.forcerCreation ?? false,
         p_rattacher_magasin_id: extra.rattacherMagasinId ?? null,
       });
@@ -3034,7 +3033,7 @@ function ImportTicketSheet({ onClose, onImport, refProducts = [], directCamera =
                     const cat = categorieMagasin || devinerCategorieMagasin(storeNameEdit);
                     const opts = [
                       { id:'grande_surface', label:'🛒 Grande surface' },
-                      { id:'proximite',      label:'🏪 Petite surface' },
+                      { id:'proximite',      label:'🏪 Petite ou moyenne surface' },
                     ];
                     return (
                       <div style={{ marginBottom:16 }}>
@@ -6817,7 +6816,7 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
   })();
   const categorieVideEnZone = magasinsCat.length > 0 && comptesCategorieEnZone.choisie === 0;
   const autreCategorie = categorieMagasin === 'grande_surface' ? 'proximite' : 'grande_surface';
-  const libelleCategorie = (c) => c === 'proximite' ? 'petites surfaces' : 'grandes surfaces';
+  const libelleCategorie = (c) => c === 'proximite' ? 'petites et moyennes surfaces' : 'grandes surfaces';
 
   const [lastVerified, setLastVerified] = useState(null);
   useEffect(() => {
@@ -6879,7 +6878,7 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
             Grandes surfaces
           </button>
           <button onClick={()=>setCategorieMagasin?.('proximite')} style={{ padding:"6px 14px", border:"none", cursor:"pointer", fontFamily:F, fontWeight:800, fontSize:12, background:categorieMagasin==='proximite'?C.blue:C.white, color:categorieMagasin==='proximite'?C.white:C.gray }}>
-            Petites surfaces
+            Petites et moyennes surfaces
           </button>
         </div>
         {/* Chantier 215 — dit pourquoi on n'est plus sur la catégorie par défaut. */}
@@ -6918,7 +6917,7 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
         <div style={{ background:C.orangeLight, borderRadius:14, padding:"22px 20px", textAlign:"center", border:`2px dashed ${C.orange}`, marginBottom:14 }}>
           <div style={{ fontSize:36, marginBottom:8 }}>🏪</div>
           <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:C.orange, marginBottom:6 }}>
-            {categorieMagasin === 'proximite' ? 'Aucune petite surface' : 'Aucune grande surface'} dans ta zone
+            {categorieMagasin === 'proximite' ? 'Aucune petite ou moyenne surface' : 'Aucune grande surface'} dans ta zone
           </div>
           <div style={{ fontFamily:F, fontSize:13, color:C.textLight, marginBottom:14 }}>
             Rayon actuel : {searchRadius} km.{comptesCategorieEnZone.autre>0 ? ` Il y a des ${libelleCategorie(autreCategorie)} près de toi.` : ''}
