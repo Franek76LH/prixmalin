@@ -49,4 +49,9 @@ describe('Chantier 224 — icône de repli de « Ma liste »', () => {
     expect(emojiArticleListe({ product: 'Poireaux' }, new Map(), deviner)).toBe('🥦');
     expect(emojiArticleListe({ product: 'Trucs' }, new Map(), deviner)).toBe(EMOJI_PAR_DEFAUT);
   });
+
+  it('chantier 226 — sauces (mayonnaise…) en pot, pas en boîte de conserve', () => {
+    const r = new Map([['m', { categorie_slug: 'epicerie-salee', sous_categorie_nom: 'Sauces & condiments' }]]);
+    expect(emojiArticleListe({ produit_id: 'm' }, r)).toBe('🫙');
+  });
 });

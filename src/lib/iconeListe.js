@@ -31,7 +31,7 @@ const EMOJI_SOUS_CATEGORIE = {
   'Café, thé & chaud': '☕', 'Sodas & colas': '🥤', 'Boissons végétales': '🥛', 'Eaux': '💧', 'Jus de fruits': '🧃',
   'Nettoyants ménagers': '🧽', 'Essuie-tout & papier': '🧻',
   'Conserves': '🥫', 'Chips & tuiles': '🥔', 'Fruits secs & graines': '🥜', 'Pâtes': '🍝',
-  'Biscuits & crackers apéritifs': '🥨', 'Sauces & condiments': '🥫', 'Riz, semoules & céréales': '🍚',
+  'Biscuits & crackers apéritifs': '🥨', 'Sauces & condiments': '🫙', 'Riz, semoules & céréales': '🍚',
   'Soufflés & snacks apéritifs': '🥨', 'Olives, tapenades & dips': '🫒', 'Huiles, vinaigres & assaisonnements': '🫙',
   'Farines & préparations culinaires': '🌾', 'Légumes secs': '🫘', 'Apéritif salé': '🥨',
   'Chocolat & confiserie': '🍫', 'Petit déjeuner & boulangerie industrielle': '🍞', 'Biscuits & gâteaux': '🍪',
