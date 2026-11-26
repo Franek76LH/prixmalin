@@ -33,10 +33,6 @@ import { agregerPoints, calculerNiveau, progressionBadge, detecterNouveauxBadges
 // Chantier 95 Lot 11 — sollicitation « relève le prix » pendant les courses.
 import { diagnostiquerPrix, doitSolliciter, doitProposerSollicitation, marquerSollicitationPrix, fileACompleter, chargerPrixPourDiagnostic } from "./lib/sollicitationPrixCore";
 import { capturerEvenement } from "./lib/posthog";
-import ShadowCompareDiagnostic from "./components/dev/ShadowCompareDiagnostic";
-import { construirePanierEtMagasins, resoudreIdentiteMagasin } from "./lib/adaptateurPanierPrix";
-import { classerMagasinsPourPanier, calculerEconomiePotentielle } from "./lib/classementPanierCore";
-import ClassementPanierShadow from "./components/dev/ClassementPanierShadow";
 import AdminRejetsCorePanel from "./components/admin/AdminRejetsCorePanel";
 import PrixAVerifierSheet from "./components/admin/PrixAVerifierSheet";
 // Chantier "Scan code-barres", bout 1 — BarcodeDetector natif absent d'iOS
@@ -142,9 +138,7 @@ import { chargerMagasinsCoreActifs, chargerFrequencesMagasins, classerMagasins a
 // #56.6 — realized_saving Core scopé à un ticket, réutilise #56.5.B
 import { calculerRealizedSavingTicket } from "./lib/economiesCoreConfirmees";
 // #56.4 — vrai moteur Core (produits/prix/magasins via la vue prix_comparables),
-// pour le mode debug admin de CompareTab. Distinct du pipeline #58.2
-// (adaptateurPanierPrix/classementPanierCore, lui basé sur price_db legacy),
-// qui n'est ni touché ni réutilisé ici.
+// pour le mode debug admin de CompareTab.
 import {
   construireCiblesComparaison,
   chargerPrixComparables,
@@ -6258,128 +6252,10 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
       .then(({data})=> setStoresGeo(data || []));
   }, []);
 
-  // #58.2.B étape 2 — interrupteur dev uniquement (défaut : vue actuelle,
-  // inchangée). N'existe pas en prod : voir le rendu du toggle plus bas,
-  // gardé par import.meta.env.DEV.
-  const [vueDev, setVueDev] = useState('actuelle');
-
-  // Calcul shadow : uniquement en DEV, et uniquement quand la nouvelle vue
-  // est effectivement affichée (pas de calcul superflu sur "Vue actuelle").
-  // Ne réimplémente ni le matching produit/prix, ni le filtre de fraîcheur,
-  // ni le filtre de distance : réutilise itemMatchesPrice et reproduit à
-  // l'identique les conditions déjà inline dans `analysis` ci-dessous (même
-  // STALE_DAYS, même distanceKm) — même principe que ShadowCompareDiagnostic.
-  const shadowPanier = useMemo(() => {
-    if (!import.meta.env.DEV || vueDev !== 'nouvelle') return null;
-
-    const storeMap = Object.fromEntries(storesGeo.map(s => [s.id, s]));
-    const cutoff = Date.now() - STALE_DAYS * 86400000;
-    const estRecentShadow = (prix) => new Date(prix.date).getTime() >= cutoff;
-    const estDansRayonShadow = (prix, geo) => {
-      if (!userPos) return false; // Chantier 81 — jamais de prix sans point
-      if (!prix.store_id) return true; // prix sans magasin : rien à filtrer
-      if (!geo?.latitude || !geo?.longitude) return false; // Chantier 82 — magasin sans coords → hors zone
-      if (distanceKm(userPos.lat, userPos.lng, geo.latitude, geo.longitude) > searchRadius) return false;
-      // Chantier 84 — restriction catégorie aussi dans le diagnostic shadow.
-      return (categorieParCoords.get(cleCoords(geo.latitude, geo.longitude)) || 'grande_surface') === categorieMagasin;
-    };
-
-    const { panier, magasins } = construirePanierEtMagasins({
-      items, priceDB, magasinsGeo: storesGeo,
-      itemMatchesPrice, estRecent: estRecentShadow, estDansRayon: estDansRayonShadow,
-    });
-    const classement = classerMagasinsPourPanier(panier, magasins);
-
-    // Détail brut (prix, format) par magasin physique et par article, pour
-    // l'affichage ligne à ligne uniquement (nom/prix/ratio) — le classement
-    // ci-dessus ne porte que des agrégats. Réutilise resoudreIdentiteMagasin
-    // et les mêmes prédicats injectés : ne réévalue aucune règle de matching,
-    // de fraîcheur ou de distance, se contente de les rejouer pour lire le
-    // détail que classerMagasinsPourPanier n'expose pas.
-    const detailParMagasin = new Map();
-    items.forEach(item => {
-      priceDB.forEach(prix => {
-        if (!itemMatchesPrice(item, prix)) return;
-        if (!estRecentShadow(prix)) return;
-        const geo = prix.store_id != null ? storeMap[prix.store_id] : undefined;
-        if (!estDansRayonShadow(prix, geo)) return;
-        const identite = resoudreIdentiteMagasin(prix, geo);
-        if (!identite) return;
-        if (!detailParMagasin.has(identite.magasinId)) detailParMagasin.set(identite.magasinId, new Map());
-        const parArticle = detailParMagasin.get(identite.magasinId);
-        const existant = parArticle.get(item.id);
-        if (!existant || prix.price < existant.price) parArticle.set(item.id, prix);
-      });
-    });
-
-    const construireLigne = (magasinId, articleId) => {
-      const item = items.find(i => i.id === articleId);
-      const rawEntry = detailParMagasin.get(magasinId)?.get(articleId);
-      const libelle = panier.find(a => a.articleId === articleId)?.libelle ?? item?.product ?? '';
-      const qty = Number(item?.qty) || 1;
-      return {
-        articleId,
-        libelle,
-        total: rawEntry ? rawEntry.price * qty : null,
-        // Chantier 104 — même règle que la carte magasin : pas de €/kg calculé
-        // sur une quantité inventée, la mention prend sa place.
-        ratioLabel: !rawEntry
-          ? null
-          : (!prixEstFiable(rawEntry) ? MENTION_PRIX_A_VERIFIER : fmtUnitPrice(rawEntry.price, item?.format)),
-      };
-    };
-
-    // Adresse du magasin physique — même source que le bouton "Y aller" :
-    // l'adresse la plus récente parmi les lignes de prix rattachées à ce
-    // magasin (detailParMagasin), null si aucune n'en porte.
-    const trouverAdresseMagasin = (magasinId) => {
-      const entries = Array.from(detailParMagasin.get(magasinId)?.values() ?? []);
-      const adresseEntree = entries
-        .filter(p => p?.store_address?.trim())
-        .sort((a, b) => new Date(b.date) - new Date(a.date))[0];
-      return adresseEntree ? adresseEntree.store_address : null;
-    };
-
-    const construireMapsUrlShadow = (magasinNom, adresse) => {
-      const query = `${magasinNom}${adresse ? ' ' + adresse : ''}`;
-      return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
-    };
-
-    // #58.2.D — économie potentielle, décomposée par magasin : coût du
-    // panier au prix moyen de la zone (déjà filtrée par estDansRayonShadow
-    // ci-dessus, en amont de `magasins`) moins le coût réel de chaque
-    // magasin retenu. Fonction pure, aucune logique de matching/filtre
-    // réévaluée ici.
-    const { economieTotale, economiePrincipal, economieAppoint } = calculerEconomiePotentielle(panier, magasins, classement);
-
-    const adressePrincipal = classement.principal ? trouverAdresseMagasin(classement.principal.magasinId) : null;
-    const adresseAppoint = classement.appoint ? trouverAdresseMagasin(classement.appoint.magasinId) : null;
-
-    return {
-      totalArticles: items.length,
-      economieTotale,
-      economiePrincipal,
-      economieAppoint,
-      principal: classement.principal ? {
-        ...classement.principal,
-        lignes: classement.principal.articlesTrouves.map(id => construireLigne(classement.principal.magasinId, id)),
-        adresse: adressePrincipal,
-        mapsUrl: construireMapsUrlShadow(classement.principal.magasinNom, adressePrincipal),
-      } : null,
-      appoint: classement.appoint ? {
-        ...classement.appoint,
-        lignes: classement.appoint.articlesTrouves.map(id => construireLigne(classement.appoint.magasinId, id)),
-        adresse: adresseAppoint,
-        mapsUrl: construireMapsUrlShadow(classement.appoint.magasinNom, adresseAppoint),
-      } : null,
-      nonTrouves: classement.nonTrouves,
-    };
-  }, [items, priceDB, storesGeo, userPos, searchRadius, vueDev, categorieParCoords, categorieMagasin]);
-
   // #56.4 — vrai pipeline Core (produits/prix/magasins via prix_comparables),
   // uniquement quand utiliserCore est vrai. Séquence reprise à l'identique
-  // de ShadowCompareDiagnostic.jsx (mêmes fonctions, même ordre, même garde
-  // d'annulation) : on ne réinvente aucune logique de matching/agrégation.
+  // de l'ancien diagnostic de développement (supprimé au chantier 219) : on
+  // ne réinvente aucune logique de matching/agrégation.
   const [coreResultat,   setCoreResultat]   = useState(null);
   // Chantier 215 — bascule automatique de catégorie : la catégorie choisie
   // d'office (règle des 6 articles) n'a aucun prix pour la liste, mais l'autre
@@ -7033,25 +6909,7 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
         </div>
       )}
 
-      {/* #58.2.B étape 2 — interrupteur dev uniquement, n'existe pas en prod */}
-      {import.meta.env.DEV && (
-        <div style={{ display:"flex", gap:8, marginBottom:14 }}>
-          <button
-            onClick={()=>setVueDev('actuelle')}
-            style={{ flex:1, padding:"8px 10px", borderRadius:10, border:`2px solid ${vueDev==='actuelle'?C.blue:C.grayLight}`, background:vueDev==='actuelle'?C.blue:"#fff", fontFamily:F, fontWeight:800, fontSize:12, color:vueDev==='actuelle'?C.white:C.textLight, cursor:"pointer" }}
-          >
-            Vue actuelle
-          </button>
-          <button
-            onClick={()=>setVueDev('nouvelle')}
-            style={{ flex:1, padding:"8px 10px", borderRadius:10, border:`2px solid ${vueDev==='nouvelle'?C.green:C.grayLight}`, background:vueDev==='nouvelle'?C.green:"#fff", fontFamily:F, fontWeight:800, fontSize:12, color:vueDev==='nouvelle'?C.white:C.textLight, cursor:"pointer" }}
-          >
-            🧪 Nouvelle vue (classement)
-          </button>
-        </div>
-      )}
-
-      {vueDev === 'actuelle' && !(utiliserCore && coreChargement) && (
+      {!(utiliserCore && coreChargement) && (
         <>
       {/* Chantier 83 — aucun magasin de la catégorie choisie dans la zone :
           message clair + bascule vers l'autre catégorie / élargir le rayon
@@ -7167,9 +7025,6 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
         </>
       )}
 
-      {import.meta.env.DEV && vueDev === 'nouvelle' && shadowPanier && (
-        <ClassementPanierShadow resultat={shadowPanier} />
-      )}
       </>
       )}
     </div>
@@ -12188,7 +12043,6 @@ export default function App() {
             </div>
           )}
           {loaded && tab==="compare"   && <CompareTab liaisonsProposees={liaisonsProposees} onRelier={relierArticle}   items={itemsAAcheter} nbDejaPris={items.length - itemsAAcheter.length} priceDB={priceDB} onValidate={handleValidate} setTab={setTab} searchRadius={searchRadius} setSearchRadius={setSearchRadius} userPos={userPos} setUserPos={setUserPos} zoneLabel={zoneLabel} setZoneLabel={setZoneLabel} zonePrete={zonePrete} userId={session?.user?.id} isAdmin={isAdmin} modeCoreActif={modeCoreActif} coreActifGlobal={coreActifGlobal} categorieMagasin={categorieMagasin} setCategorieMagasin={setCategorieChoix} categorieAuto={categorieChoix === null} sessionCoursesAccessible={sessionCoursesAccessible}/>}
-          {loaded && tab==="compare"   && import.meta.env.DEV && <ShadowCompareDiagnostic items={items} priceDB={priceDB} searchRadius={searchRadius} userPos={userPos}/>}
           {loaded && tab==="prices"    && <PricesTab    onAnnulerScanAuto={()=>revenirA(ecranRetour("prices", originesEcran) || "home")}
             coursesActives={!scanCaisse && !scanSepare && sessionCoursesAccessible && sessionCoursesActive?.id ? { sessionId: sessionCoursesActive.id, magasin: sessionCoursesActive.magasin } : null}
             onRattacherCourses={(promesse)=>{ const id = sessionCoursesActive?.id; if (id) rattacherTicketScanSession(promesse, { sessionId: id }); }} priceDB={priceDB} setPriceDB={savePriceDB} archives={archives} updateArchive={updateArchive} coreActifGlobal={coreActifGlobal} estFrancois={estFrancois} userId={session?.user?.id} autoOpenCamera={autoOpenCamera} onAutoOpenConsumed={()=>setAutoOpenCamera(false)} autoResumeScan={autoResumeScan} onAutoResumeConsumed={()=>setAutoResumeScan(false)} initialScanResult={autoImportResult} onInitialScanConsumed={()=>setAutoImportResult(null)} magasinSession={scanCaisse?.magasin ?? null} onImportSession={rattacherTicketScanSession} onScanSessionFerme={()=>definirScanCaisse(null)} onCompleterTicket={scanApresTicketAccessible ? completerDernierTicket : null} onVoirTicketExistant={()=>setTab("archive")} notifierPoints={profilVisible} onEchecEcritureCore={setEchecEcritureCore} onTicketValidated={(id,store)=>{ setScanSepare(false); setShowRating({id,store}); }} onCreateArchive={async newArc=>{
