@@ -9271,20 +9271,27 @@ function MicroTab({ onAdd, setTab, onTaper = null, achats = null, achatsVariante
                 <div style={{ fontFamily:F, fontSize:13, color:"#555", lineHeight:1.5, marginBottom:6 }}>
                   <span style={{ color:C.green, fontWeight:800 }}>{bilanLiaison.ok}</span> produit{bilanLiaison.ok > 1 ? "s" : ""} relié{bilanLiaison.ok > 1 ? "s" : ""} au catalogue
                 </div>
-                {(bilanLiaison.todo + bilanLiaison.ko) > 0 && (
-                  <div style={{ fontFamily:F, fontSize:13, color:"#555", lineHeight:1.5, marginBottom:6 }}>
-                    <span style={{ color:"#B45309", fontWeight:800 }}>{bilanLiaison.todo + bilanLiaison.ko}</span> partiront en <strong>texte libre</strong> (non reliés ou introuvables) — tu pourras les préciser plus tard dans Ma liste.
-                  </div>
-                )}
+                {/* Chantier 205 — un article sans fiche n'a pas de prix au comparateur :
+                    on le dit clairement, avec les noms, et on propose de les relier d'abord. */}
+                {(bilanLiaison.todo + bilanLiaison.ko) > 0 && (() => {
+                  const sansFiche = elementsListe.filter(e => (e.statut_resolution ?? "a_relier") !== "resolu").map(e => e.nom).filter(Boolean);
+                  const n = bilanLiaison.todo + bilanLiaison.ko;
+                  const noms = sansFiche.slice(0, 4).map(x => `« ${x} »`).join(", ") + (sansFiche.length > 4 ? "…" : "");
+                  return (
+                    <div style={{ fontFamily:F, fontSize:13, color:"#7A3E00", lineHeight:1.5, marginBottom:8, background:"#FFF4E5", border:"1px solid #F5C98B", borderRadius:10, padding:"9px 11px" }}>
+                      ⚠️ <strong>{n} article{n > 1 ? "s" : ""} sans produit</strong>{noms ? ` : ${noms}` : ""}. {n > 1 ? "Ils iront" : "Il ira"} dans ta liste en texte libre, <strong>sans prix au comparateur</strong>. Tu pourras {n > 1 ? "les" : "le"} relier plus tard dans Ma liste.
+                    </div>
+                  );
+                })()}
                 <div style={{ fontFamily:F, fontSize:12, color:"#999", marginBottom:16 }}>
                   Les quantités et tes préférences de marque sont conservées.
                 </div>
                 <div style={{ display:"flex", gap:8 }}>
                   <button onClick={lancerAjoutCaddie} style={{ flex:1, padding:"12px", border:"none", borderRadius:10, background:C.green, fontFamily:F, fontWeight:900, fontSize:14, color:"#fff", cursor:"pointer" }}>
-                    Ajouter
+                    {(bilanLiaison.todo + bilanLiaison.ko) > 0 ? "Ajouter quand même" : "Ajouter"}
                   </button>
                   <button onClick={() => setConfirmAjout(false)} style={{ padding:"12px 16px", border:"1.5px solid #eee", borderRadius:10, background:"#fff", fontFamily:F, fontWeight:800, fontSize:14, color:"#333", cursor:"pointer" }}>
-                    Annuler
+                    {(bilanLiaison.todo + bilanLiaison.ko) > 0 ? "Les relier d'abord" : "Annuler"}
                   </button>
                 </div>
               </div>
