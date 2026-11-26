@@ -5475,6 +5475,9 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
   // Chantier 224 — rayon de chaque produit de la liste, pour le dessin de
   // repli quand on n'a pas la photo (rechargé seulement si les produits changent).
   const [rayonsListe, setRayonsListe] = useState(() => new Map());
+  // Chantier 228 — toucher la vignette d'un produit l'affiche en grand (même
+  // visionneuse que la fiche produit ; seulement s'il y a une vraie photo).
+  const [photoAgrandie, setPhotoAgrandie] = useState(null);
   const cleRayonsListe = cleProduitsListe(items);
   useEffect(() => {
     if (!cleRayonsListe) return;
@@ -5533,7 +5536,7 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
       <ListeCourses
         items={items} itemsReportes={itemsReportes} nbFavoris={favorites.length}
         vignette={(item) => (
-          <PhotoProduit varianteId={variantePourPhoto(item, variantesHabituelles)} taille="thumb" radius={10}
+          <PhotoProduit varianteId={variantePourPhoto(item, variantesHabituelles)} taille="thumb" radius={10} onAgrandir={setPhotoAgrandie}
             fallback={<div aria-hidden="true" style={{ width:"100%", height:"100%", borderRadius:10, background:"#F5F5F7", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20 }}>{emojiArticleListe(item, rayonsListe, guessCategory)}</div>} />
         )}
         onCocher={toggleCheck} onModifier={setEditItem} onSupprimer={removeItem} onMarque={onSetMarquePref}
@@ -5546,6 +5549,7 @@ function ListTab({ items, onAdd, onUpdate, onToggle, onRemove, setTab, favorites
       />
 
       {editItem && <EditItemSheet item={editItem} onClose={()=>setEditItem(null)} onSave={updateItem}/>}
+      {photoAgrandie && <LightboxPhoto offLarge={photoAgrandie} onClose={()=>setPhotoAgrandie(null)} />}
 
       {/* Modal favoris */}
       {showFavModal && (
