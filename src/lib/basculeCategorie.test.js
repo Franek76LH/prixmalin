@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { autreCategorie, doitBasculer, phraseBascule } from './basculeCategorie';
+import { autreCategorie, doitBasculer, phraseBascule, libelleBoutonAutre } from './basculeCategorie';
 
 describe('bascule de catégorie (chantier 215)', () => {
   it('cas du pain de mie : proximité vide, grandes surfaces avec un prix → bascule', () => {
@@ -17,6 +17,11 @@ describe('bascule de catégorie (chantier 215)', () => {
   it('autre catégorie', () => {
     expect(autreCategorie('proximite')).toBe('grande_surface');
     expect(autreCategorie('grande_surface')).toBe('proximite');
+  });
+  it('bouton vers l\'autre catégorie (choix manuel)', () => {
+    expect(libelleBoutonAutre('grande_surface', 1)).toBe('Voir les grandes surfaces (1 magasin a des prix)');
+    expect(libelleBoutonAutre('proximite', 3)).toBe('Voir les petites surfaces (3 magasins ont des prix)');
+    expect(libelleBoutonAutre('grande_surface', 0)).toBeNull();
   });
   it('phrase', () => {
     expect(phraseBascule({ de: 'proximite', vers: 'grande_surface' })).toBe('Pas de prix en petites surfaces pour ta liste : voici les grandes surfaces.');

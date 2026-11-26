@@ -20,6 +20,14 @@ export function doitBasculer({ categorieAuto, nbMagasinsCategorie, nbMagasinsAut
 // Chantier 216 — « Proximité » devient « Petites surfaces » à l'écran (François, 26/11).
 const libelle = (c) => (c === PROXIMITE ? 'petites surfaces' : 'grandes surfaces');
 
+// Chantier 218 — l'utilisateur a choisi lui-même une catégorie vide : on
+// respecte son choix, mais un bouton mène à l'autre catégorie si elle a des prix.
+export function libelleBoutonAutre(categorie, nbMagasins) {
+  const n = Number(nbMagasins) || 0;
+  if (!categorie || n <= 0) return null;
+  return `Voir les ${libelle(categorie)} (${n} magasin${n > 1 ? 's ont' : ' a'} des prix)`;
+}
+
 export function phraseBascule(bascule) {
   if (!bascule?.de || !bascule?.vers) return null;
   const vers = libelle(bascule.vers);

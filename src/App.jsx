@@ -122,7 +122,7 @@ import AValiderSheet from "./components/dev/AValiderSheet";
 // Chantier "Scan code-barres", bout 3B — console de validation admin
 import ValidationScanSheet from "./components/admin/ValidationScanSheet";
 import AVerifierScansSheet from "./components/AVerifierScansSheet";
-import { autreCategorie as categorieOpposee, doitBasculer, phraseBascule } from "./lib/basculeCategorie";
+import { autreCategorie as categorieOpposee, doitBasculer, phraseBascule, libelleBoutonAutre } from "./lib/basculeCategorie";
 import { nbAvisAttendus } from "./lib/verificationCommunaute";
 // Chantier 106 Lot A — module de contribution aux codes-barres : parcours
 // utilisateur depuis l'accueil, et file de validation côté François.
@@ -6433,6 +6433,9 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
   // d'office (règle des 6 articles) n'a aucun prix pour la liste, mais l'autre
   // en a → on montre l'autre et on le dit. { de, vers } ou null.
   const [basculeAuto, setBasculeAuto] = useState(null);
+  // Chantier 218 — catégorie choisie à la main et vide : l'autre a-t-elle des
+  // prix ? { categorie, nb } ou null (sert au bouton sous « Aucun prix »).
+  const [autreAvecPrix, setAutreAvecPrix] = useState(null);
   const [coreChargement, setCoreChargement] = useState(false);
   const [coreErreur,     setCoreErreur]     = useState(null);
   // Chantier 177 — magasin choisi par l'utilisateur (null = le moins cher
@@ -6597,6 +6600,15 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
             if (!annule) { setBasculeAuto({ de: categorieMagasin, vers: autreCat }); setCategorieMagasin(autreCat); }
           }
         }
+        // Chantier 218 — choix manuel (ou rien ailleurs) : on ne bascule pas,
+        // mais on regarde si l'autre catégorie a des prix, pour le proposer.
+        let autreDispo = null;
+        if (resultat.classement.length === 0 && categorieParMagasin.size > 0) {
+          const autreCat = categorieOpposee(categorieMagasin);
+          const nbAutre = calculerPour(autreCat).classement.length;
+          if (nbAutre > 0) autreDispo = { categorie: autreCat, nb: nbAutre };
+        }
+        if (!annule) setAutreAvecPrix(autreDispo);
         if (!annule) setCoreResultat(resultat);
       } catch (err) {
         if (!annule) { setCoreErreur(err?.message || 'Erreur inconnue'); setCoreResultat(null); }
@@ -7134,6 +7146,12 @@ function CompareTab({ items, nbDejaPris = 0, priceDB, onValidate, setTab, search
           <div style={{ fontSize:40, marginBottom:10 }}>💰</div>
           <div style={{ fontFamily:F, fontWeight:900, fontSize:15, color:C.orange, marginBottom:6 }}>Aucun prix correspondant</div>
           <div style={{ fontFamily:F, fontSize:13, color:C.textLight }}>Pas encore de prix relevé pour ta liste dans ta zone. Scanne ton prochain ticket : ses prix serviront à toute la communauté.</div>
+          {/* Chantier 218 — l'autre catégorie a des prix : on y mène en un appui. */}
+          {utiliserCore && autreAvecPrix && autreAvecPrix.categorie !== categorieMagasin && (
+            <button onClick={()=>setCategorieMagasin?.(autreAvecPrix.categorie)} style={{ marginTop:14, padding:"11px 16px", border:"none", borderRadius:12, background:C.blue, color:"#fff", fontFamily:F, fontWeight:800, fontSize:13.5, cursor:"pointer" }}>
+              {libelleBoutonAutre(autreAvecPrix.categorie, autreAvecPrix.nb)}
+            </button>
+          )}
         </div>
       )}
 
