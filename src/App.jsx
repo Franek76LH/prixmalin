@@ -121,6 +121,8 @@ const MESSAGE_ARCHIVE_MANQUANTE = "Ton ticket est enregistré, mais il n'appara�
 import AValiderSheet from "./components/dev/AValiderSheet";
 // Chantier "Scan code-barres", bout 3B — console de validation admin
 import ValidationScanSheet from "./components/admin/ValidationScanSheet";
+import AVerifierScansSheet from "./components/AVerifierScansSheet";
+import { nbAvisAttendus } from "./lib/verificationCommunaute";
 // Chantier 106 Lot A — module de contribution aux codes-barres : parcours
 // utilisateur depuis l'accueil, et file de validation côté François.
 import ContributionCodeBarresSheet from "./components/ContributionCodeBarresSheet";
@@ -10069,6 +10071,23 @@ export default function App() {
   useEffect(() => onNeedRefresh(() => setNeedRefresh(true)), []);
 
   const [tab, setTabBrut]       = useState("home");
+  // Chantier 214 (143-C) — « Produits à vérifier » pour les membres de
+  // confiance (testeurs, Contributeur+), hors admin (François a son écran
+  // « 🧾 Validation scan »). La base décide qui peut lire la file : en cas de
+  // refus ou de file vide, l'entrée n'apparaît pas.
+  const [showAVerifier, setShowAVerifier] = useState(false);
+  const [aVerifier, setAVerifier] = useState({ visible: false, nb: 0 });
+  // Chantier 214 (143-C) — file « Produits à vérifier », relue à l'ouverture de « Moi ».
+  useEffect(() => {
+    if (!idPourReglageScan || isAdmin || tab !== 'moi') return;
+    let annule = false;
+    supabase.rpc('lister_propositions_scan_a_verifier').then(({ data, error }) => {
+      if (annule) return;
+      const liste = !error && Array.isArray(data) ? data : [];
+      setAVerifier({ visible: liste.length > 0, nb: nbAvisAttendus(liste) });
+    }, () => { if (!annule) setAVerifier({ visible: false, nb: 0 }); });
+    return () => { annule = true; };
+  }, [idPourReglageScan, isAdmin, tab, showAVerifier]);
   // Chantier 136 — la page de garde (tickets qui glissent) s'affiche à chaque
   // ouverture de l'app, barre du bas visible. Le moindre changement d'écran —
   // une icône du bas, le scan, « C'est parti » — la referme jusqu'à la
@@ -12153,7 +12172,8 @@ export default function App() {
           {loaded && tab==="moi"       && <EcranMoi pseudo={pseudo} email={session?.user?.email} archives={archives} setTab={setTab} version={__APP_VERSION__} nbBaisses={alertesBaisse(evolutionPrix).length}
             onProfil={profilVisible ? ()=>setShowProfilSheet(true) : null} onCercle={()=>setShowCircleSheet(true)} invitationsEnAttente={invitationsEnAttente}
             onStats={()=>setShowStatsSheet(true)} onMesPrix={()=>setShowMesPrixSheet(true)} onFavoris={()=>setShowFavorisSheet(true)} onAide={()=>setShowFaqSheet(true)}
-            onDeconnexion={handleLogout} estAdmin={isAdmin}/>}
+            onDeconnexion={handleLogout} estAdmin={isAdmin}
+            onAVerifier={aVerifier.visible && !isAdmin ? ()=>setShowAVerifier(true) : null} nbAVerifier={aVerifier.nb}/>}
           {/* Chantier « Micro » Lot 1 — même mécanique shadow que rejets (#56.3b) :
               jamais rendu pour un autre utilisateur, même si tab="micro" traîne en state.
               Lot 5 : onAdd = le addItem OFFICIEL du caddie (même chemin que le Catalogue). */}
@@ -12267,6 +12287,7 @@ export default function App() {
             admin ; le drapeau est explicite pour que l'ouverture du scan à tous
             se règle ici, sans toucher au composant. */}
         {showAValider && isAdmin && <AValiderSheet onClose={()=>setShowAValider(false)} estAdmin={isAdmin}/>}
+        {showAVerifier && !isAdmin && <AVerifierScansSheet onClose={()=>setShowAVerifier(false)} onCountChange={(n)=>setAVerifier(a=>({ ...a, nb:n }))}/>}
         {showValidationScan && isAdmin && <ValidationScanSheet onClose={()=>setShowValidationScan(false)} onCountChange={setPendingScanCount}/>}
         {/* Chantier 106 Lot A — file des codes-barres proposés, derrière isAdmin
             comme les autres écrans admin. */}

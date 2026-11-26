@@ -40,6 +40,9 @@ export default function EcranMoi({
   pseudo, email, archives = [], setTab, version, nbBaisses = 0,
   onProfil = null, onCercle, invitationsEnAttente = 0, onStats, onMesPrix, onFavoris, onAide, onDeconnexion,
   estAdmin = false,
+  // Chantier 214 (143-C) — membres de confiance : produits scannés par d'autres
+  // à confirmer. null = rien à montrer (pas membre de confiance, ou file vide).
+  onAVerifier = null, nbAVerifier = 0,
 }) {
   // Chantier 160 — même carte et même phrase que l'accueil : « estimées »,
   // avec la référence du calcul (jamais « confirmées »).
@@ -78,6 +81,12 @@ export default function EcranMoi({
         <Ligne pastille="🏷️" libelle="Prix que j'ai relevés" detail="Tous tes prix, ticket par ticket" onClick={onMesPrix} />
         <Ligne pastille="❤️" libelle="Mes favoris" detail="Tes produits préférés (aussi dans Ma liste → ⭐)" onClick={onFavoris} dernier />
       </Groupe>
+
+      {onAVerifier && (
+        <Groupe titre="Communauté">
+          <Ligne pastille="🔎" libelle="Produits à vérifier" detail="Confirme les scans des autres membres" onClick={onAVerifier} pastilleRouge={nbAVerifier} dernier />
+        </Groupe>
+      )}
 
       <Groupe titre="Mon compte">
         {onProfil && <Ligne pastille="🏅" libelle="Mon profil et mes badges" detail="Points, badges et tes contributions" onClick={onProfil} />}

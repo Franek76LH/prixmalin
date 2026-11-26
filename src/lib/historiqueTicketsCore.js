@@ -170,6 +170,20 @@ export async function chargerVarianteAffichage(varianteId) {
   }
 }
 
+// Chantier 214 (143-A) — le compte connecté peut-il valider ses scans lui-même ?
+// La base fait foi (peut_valider_soi_meme). true / false, ou null si on ne
+// sait pas (réseau, fonction absente) : le scan essaie alors d'écrire et la
+// base bascule d'elle-même sur la proposition (VERIFICATION_REQUISE).
+export async function chargerConfiance() {
+  try {
+    const { data, error } = await supabase.rpc('peut_valider_soi_meme');
+    if (error || typeof data !== 'boolean') return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
 // Filet « ↩ Annuler » — RPC dédiée (base), injectée dans annulerScanLigne.
 export function annulerScanLigneRpc(ligneId) {
   return supabase.rpc('annuler_scan_ligne_ticket', { p_ligne_ticket_id: ligneId });
@@ -220,6 +234,24 @@ export const depsScanLigne = {
   },
   chercherOff(ean) {
     return chercherOffPourCreation(ean);
+  },
+  // Chantier 214 (143-B) — compte sous le seuil : propositions au lieu
+  // d'écritures (fonctions de base des chantiers 210 et 211).
+  proposerLiaison({ ligneId, produitId, varianteId, code, libelleAlias }) {
+    return supabase.rpc('proposer_liaison_scan', {
+      p_ligne_ticket_id: ligneId,
+      p_produit_id: produitId,
+      p_variante_produit_id: varianteId ?? null,
+      p_code_barres: code,
+      p_libelle_alias: libelleAlias,
+    });
+  },
+  proposerCreation({ ligneId, code, off }) {
+    return supabase.rpc('proposer_creation_scan', {
+      p_ligne_ticket_id: ligneId,
+      p_code_barres: code,
+      p_off: off && typeof off === 'object' && Object.keys(off).length ? off : null,
+    });
   },
   creerDepuisCode({ ligneId, code, off }) {
     return supabase.rpc('creer_produit_depuis_code_barres', {

@@ -12,6 +12,7 @@ import { Component, useEffect, useRef, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { nomComposeVariante } from '../../lib/nomProduit';
 import RechercheProduitSheet from './RechercheProduitSheet';
+import { SuspendreCompteFenetre, ComptesSuspendusPanneau } from './SuspensionCompte';
 
 const F = "'Nunito',sans-serif";
 
@@ -45,7 +46,7 @@ function messageErreurRpc(error) {
   return error?.message || "Action impossible, réessaie.";
 }
 
-function PropositionCard({ p, enCours, erreurAction, onConfirmer, onRefuser, onAssigner }) {
+function PropositionCard({ p, enCours, erreurAction, onConfirmer, onRefuser, onAssigner, onSuspendre }) {
   // Réutilise le helper d'affichage produit du bout 1 (nomComposeVariante),
   // à partir des colonnes à plat renvoyées par la RPC (elle ne peut pas
   // renvoyer les objets imbriqués marques/produits d'un embed PostgREST
@@ -68,6 +69,12 @@ function PropositionCard({ p, enCours, erreurAction, onConfirmer, onRefuser, onA
     <div style={{ background: '#fff', borderRadius: 14, padding: '14px 16px', marginBottom: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
       <div style={{ fontFamily: F, fontSize: 11, color: '#999' }}>
         {formatDateFr(p.cree_le)} · proposé par {p.propose_par_pseudo || 'un utilisateur'}
+        {/* Chantier 214 (143-E) — le filet, pour François seul (écran admin). */}
+        {p.propose_par && onSuspendre && (
+          <button onClick={onSuspendre} style={{ marginLeft: 8, background: 'none', border: 'none', padding: 0, color: '#999', fontFamily: F, fontSize: 11, fontWeight: 800, textDecoration: 'underline', cursor: 'pointer' }}>
+            ⏸️ Mettre ce compte en pause
+          </button>
+        )}
       </div>
       <div style={{ fontFamily: F, fontWeight: 900, fontSize: 14, color: '#1a1a1a', marginTop: 4 }}>
         « {p.libelle_ticket || '(libellé vide)'} »
@@ -127,6 +134,9 @@ export default function ValidationScanSheet({ onClose, onCountChange }) {
   const [message, setMessage] = useState(null);
   // Chantier 101 — proposition dont on est en train de choisir le produit.
   const [assignationPour, setAssignationPour] = useState(null);
+  // Chantier 214 (143-E) — compte à mettre en pause, et liste des comptes en pause.
+  const [suspensionPour, setSuspensionPour] = useState(null);
+  const [voirSuspendus, setVoirSuspendus] = useState(false);
   const monte = useRef(true);
   useEffect(() => () => { monte.current = false; }, []);
 
@@ -243,7 +253,10 @@ export default function ValidationScanSheet({ onClose, onCountChange }) {
             {propositions.length} en attente
           </div>
         </div>
-        <button onClick={onClose} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: 99, width: 30, height: 30, color: '#fff', fontSize: 15, cursor: 'pointer' }}>✕</button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button onClick={() => setVoirSuspendus(true)} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: 99, padding: '6px 10px', color: '#fff', fontFamily: F, fontWeight: 800, fontSize: 11, cursor: 'pointer' }}>⏸️ Comptes en pause</button>
+          <button onClick={onClose} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: 99, width: 30, height: 30, color: '#fff', fontSize: 15, cursor: 'pointer' }}>✕</button>
+        </div>
       </div>
 
       {message && (
@@ -274,6 +287,7 @@ export default function ValidationScanSheet({ onClose, onCountChange }) {
               onConfirmer={() => confirmer(p)}
               onRefuser={() => refuser(p)}
               onAssigner={() => setAssignationPour(p)}
+              onSuspendre={() => setSuspensionPour({ id: p.propose_par, pseudo: p.propose_par_pseudo })}
             />
           </LigneErrorBoundary>
         ))}
@@ -289,6 +303,15 @@ export default function ValidationScanSheet({ onClose, onCountChange }) {
           reste donc muet sur cet écran ; il faudrait pour l'obtenir ajouter
           enseigne_id à cette RPC. Sans enseigneId, le comportement est celui
           d'avant, rien n'est cassé. */}
+      {suspensionPour && (
+        <SuspendreCompteFenetre
+          compteId={suspensionPour.id}
+          pseudo={suspensionPour.pseudo}
+          onClose={() => setSuspensionPour(null)}
+          onFait={(texte) => { setSuspensionPour(null); afficherMessage(texte); charger({ avecSpinner: false, conserverSiErreur: true }); }}
+        />
+      )}
+      {voirSuspendus && <ComptesSuspendusPanneau onClose={() => setVoirSuspendus(false)} onMessage={afficherMessage} />}
       {assignationPour && (
         <RechercheProduitSheet
           titre={assignationPour.produit_id ? 'Changer le produit' : 'Assigner le produit'}

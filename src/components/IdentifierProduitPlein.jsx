@@ -14,7 +14,7 @@ import {
   creerParcoursIdentification, PHRASE_ENGAGEMENT, AVERTISSEMENT_AUCUNE_INFO, doubleLectureRequise, avertissementLigneDifferente,
   PHASE_CAMERA, PHASE_RECHERCHE, PHASE_VERIFICATION, PHASE_REFUS, PHASE_ECRITURE, PHASE_SUCCES, PHASE_FIN,
 } from '../lib/parcoursIdentification';
-import { DUREE_ANNULATION_MS, SOURCE_BASE, SOURCE_OFF, SCAN_POIDS_VARIABLE, SCAN_ARCHIVE, RECHERCHE_INCONNU } from '../lib/scanDepuisHistorique';
+import { DUREE_ANNULATION_MS, SOURCE_BASE, SOURCE_OFF, SCAN_POIDS_VARIABLE, SCAN_ARCHIVE, RECHERCHE_INCONNU, MESSAGE_PROPOSE, DETAIL_PROPOSE } from '../lib/scanDepuisHistorique';
 
 const F = "'Nunito',sans-serif";
 const FOND = '#121417';
@@ -98,10 +98,10 @@ function ChoixRayon({ rayons, actuel = null, onChoisir, onFermer }) {
   );
 }
 
-export default function IdentifierProduitPlein({ lignes, ligneDepartId, deps, onFermer, onRetourAccueil }) {
+export default function IdentifierProduitPlein({ lignes, ligneDepartId, deps, confiance = null, onFermer, onRetourAccueil }) {
   const [etat, setEtat] = useState(null);
   // Un seul parcours pour toute la vie de l'écran (initialisation paresseuse).
-  const [p] = useState(() => creerParcoursIdentification({ lignes, ligneDepartId, deps, onChange: (x) => setEtat(x) }));
+  const [p] = useState(() => creerParcoursIdentification({ lignes, ligneDepartId, deps, confiance, onChange: (x) => setEtat(x) }));
   const e = etat || p.etat();
   const [imageFigee, setImageFigee] = useState(null);
   const [erreurCamera, setErreurCamera] = useState(null);
@@ -294,8 +294,16 @@ export default function IdentifierProduitPlein({ lignes, ligneDepartId, deps, on
   } else if (e.phase === PHASE_SUCCES) {
     corps = (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, textAlign: 'center' }}>
-        <div style={{ width: 130, height: 130, borderRadius: '50%', background: VERT, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 74, color: '#fff', animation: 'c119-pop 0.5s ease-out both', boxShadow: '0 10px 30px rgba(0,179,65,0.45)' }}>✓</div>
-        <div style={{ fontFamily: F, fontWeight: 900, fontSize: 18, color: '#fff' }}>{e.annulable?.libelle || 'Enregistré'}</div>
+        <div style={{ width: 130, height: 130, borderRadius: '50%', background: VERT, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: e.propose ? 64 : 74, color: '#fff', animation: 'c119-pop 0.5s ease-out both', boxShadow: '0 10px 30px rgba(0,179,65,0.45)' }}>{e.propose ? '🙏' : '✓'}</div>
+        {e.propose ? (
+          <>
+            <div style={{ fontFamily: F, fontWeight: 900, fontSize: 20, color: '#fff' }}>{MESSAGE_PROPOSE}</div>
+            <div style={{ fontFamily: F, fontWeight: 800, fontSize: 15, color: '#fff' }}>{e.propose.libelle}</div>
+            <div style={{ fontFamily: F, fontSize: 13.5, color: GRIS_TEXTE, lineHeight: 1.45, maxWidth: 300 }}>{DETAIL_PROPOSE}</div>
+          </>
+        ) : (
+          <div style={{ fontFamily: F, fontWeight: 900, fontSize: 18, color: '#fff' }}>{e.annulable?.libelle || 'Enregistré'}</div>
+        )}
       </div>
     );
   } else if (e.phase === PHASE_FIN) {
@@ -304,7 +312,8 @@ export default function IdentifierProduitPlein({ lignes, ligneDepartId, deps, on
         <div style={{ fontSize: 58 }}>{e.complet ? '🎉' : '👍'}</div>
         <div style={{ fontFamily: F, fontWeight: 900, fontSize: 24, color: '#fff' }}>{e.complet ? 'Ticket complet 🎉' : 'C\'est tout pour ce ticket'}</div>
         <div style={{ fontFamily: F, fontSize: 15, color: GRIS_TEXTE, lineHeight: 1.45 }}>
-          {e.confirmes} produit{e.confirmes > 1 ? 's' : ''} confirmé{e.confirmes > 1 ? 's' : ''}
+          {(e.confirmes > 0 || !e.proposes) && <>{e.confirmes} produit{e.confirmes > 1 ? 's' : ''} confirmé{e.confirmes > 1 ? 's' : ''}</>}
+          {e.proposes > 0 && <>{e.confirmes > 0 && <br />}{e.proposes} produit{e.proposes > 1 ? 's' : ''} envoyé{e.proposes > 1 ? 's' : ''} pour vérification 🙏</>}
           {e.sansCode > 0 && <><br />{e.sansCode} sans code-barres (vrac, boucherie…)</>}
           {e.passees > 0 && <><br />{e.passees} ligne{e.passees > 1 ? 's' : ''} non marquée{e.passees > 1 ? 's' : ''} — elle{e.passees > 1 ? 's restent' : ' reste'} à identifier dans « Mes tickets »</>}
         </div>

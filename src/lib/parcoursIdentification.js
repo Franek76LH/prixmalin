@@ -72,6 +72,9 @@ export function fileDepuis(lignes, ligneDepartId) {
 
 export function creerParcoursIdentification({
   lignes, ligneDepartId = null, deps, onChange = () => {},
+  // Chantier 214 (143-B) — false : compte sous le seuil de confiance, ses
+  // « ✓ C'est bien ça » deviennent des propositions (rien d'écrit au catalogue).
+  confiance = null,
   attendre = (ms) => new Promise(r => setTimeout(r, ms)),
   journal = console,
 }) {
@@ -82,6 +85,7 @@ export function creerParcoursIdentification({
     recherche: null,
     message: null,
     confirmes: 0,
+    proposes: 0,           // chantier 214 : envoyés pour vérification (débutant), restent à identifier en base
     passees: 0,            // lignes laissées SANS marquage (RPC en échec) : restent à identifier
     sansCode: 0,           // lignes marquées « Pas de code-barres » : sortent des compteurs
     refus: 0,
@@ -106,8 +110,9 @@ export function creerParcoursIdentification({
   // déjà confirmées + laissées sans marquage). Une ligne marquée « Pas de
   // code-barres » en sort : elle n'est plus à identifier.
   const position = () => {
-    const total = file.length + etat.confirmes + etat.passees;
-    return { rang: Math.min(Math.max(1, etat.confirmes + etat.passees + 1), Math.max(1, total)), total };
+    const faites = etat.confirmes + etat.passees + etat.proposes;
+    const total = file.length + faites;
+    return { rang: Math.min(Math.max(1, faites + 1), Math.max(1, total)), total };
   };
   let marquageEnCours = false;
 
@@ -115,7 +120,7 @@ export function creerParcoursIdentification({
   // (aucune ligne passée laissée en attente).
   const avancer = () => {
     if (file.length === 0) {
-      return publier({ phase: PHASE_FIN, ligne: null, recherche: null, message: null, complet: etat.passees === 0, doubleLecture: null, attenteRelecture: false });
+      return publier({ phase: PHASE_FIN, ligne: null, recherche: null, message: null, complet: etat.passees === 0 && etat.proposes === 0, doubleLecture: null, attenteRelecture: false });
     }
     return publier({ phase: PHASE_CAMERA, ligne: file[0], recherche: null, message: null, doubleLecture: null, attenteRelecture: false });
   };
@@ -196,9 +201,22 @@ export function creerParcoursIdentification({
       publier({ phase: PHASE_ECRITURE, message: null });
       let r;
       try {
-        r = await ecrireScanLigne({ ligne, recherche, deps });
+        r = await ecrireScanLigne({ ligne, recherche, deps, confiance });
       } catch {
         r = { ecrit: false, message: 'Enregistrement impossible, réessaie.' };
+      }
+      // Chantier 214 — proposition envoyée : la ligne sort de la file comme un
+      // succès, mais sans fenêtre d'annulation (aucun prix n'a été écrit).
+      if (r?.propose === true) {
+        file = file.filter(l => l.id !== ligne.id);
+        const libelle = libelleProduitCree({ variante: r.variante || recherche.variante, off: recherche.off, ligne })
+          || recherche.fiche?.nom || titreLigneInconnue(ligne);
+        publier({ phase: PHASE_SUCCES, proposes: etat.proposes + 1, annulable: null, propose: { libelle }, dernierResultat: r });
+        const v = version;
+        await attendre(DUREE_SUCCES_MS);
+        if (v !== version || etat.phase !== PHASE_SUCCES) return etat;
+        publier({ propose: null });
+        return avancer();
       }
       if (!r?.ecrit) {
         // Rien d'écrit : retour sur la même fiche, avec le message.

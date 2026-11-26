@@ -237,6 +237,24 @@ export const SCAN_INDISPONIBLE = 'indisponible';
 export const SCAN_ERREUR = 'erreur';
 export const SCAN_CODE_VIDE = 'code_vide';
 export const SCAN_DEJA_RECONNUE = 'deja_reconnue';
+// Chantier 214 (143-B) — compte sous le seuil de confiance : rien n'est écrit
+// dans le catalogue, une PROPOSITION part pour vérification (2 avis, 143-C).
+export const SCAN_PROPOSE = 'propose';
+export const SCAN_SUSPENDU = 'suspendu';
+export const MESSAGE_PROPOSE = 'Merci, ton scan sera vérifié';
+export const DETAIL_PROPOSE = 'Le prix comptera dès qu\'il sera confirmé par la communauté.';
+export const MESSAGE_SUSPENDU = 'Tes scans sont en pause pour le moment. Écris-nous depuis « Nous contacter » si tu penses que c\'est une erreur.';
+export const MESSAGE_NON_AUTORISE = 'Cette ligne ne peut pas être enregistrée depuis ton compte.';
+
+// Code d'erreur métier levé par la base (raise exception '<CODE>') : on le
+// cherche dans le message, le détail ou l'indice. null si aucun code connu.
+export const CODES_CONFIANCE = ['VERIFICATION_REQUISE', 'COMPTE_SUSPENDU', 'NON_AUTORISE', 'NOT_AUTHORIZED'];
+export function codeErreurConfiance(error) {
+  if (!error) return null;
+  const texte = typeof error === 'string' ? error : [error.message, error.details, error.hint, error.code].filter(Boolean).join(' ');
+  for (const c of CODES_CONFIANCE) if (texte.includes(c)) return c === 'NOT_AUTHORIZED' ? 'NON_AUTORISE' : c;
+  return null;
+}
 
 // Chemin suivi par un scan RÉUSSI (tous écrivent un rattachement + un prix,
 // donc tous doivent offrir « ↩ Annuler ») :
@@ -430,14 +448,72 @@ export async function rechercherScanLigne({ ligne, codeBrut, deps, photoPourConn
   return { statut: RECHERCHE_INCONNU, ecrit: false, code, off, rayon, rayonChoisi: null, rangementEnCours, fiche: ficheVerification({ statut: RECHERCHE_INCONNU, off, ligne, rayon }) };
 }
 
+// Chantier 214 (143-B) — envoi d'une proposition au lieu d'une écriture.
+// deps : proposerLiaison (produit connu), proposerCreation (produit inconnu).
+// Rend toujours un résultat (jamais d'exception) ; ecrit = false : aucun prix
+// n'est créé, donc pas de fenêtre « ↩ Annuler ».
+export async function proposerScanLigne({ ligne, recherche, deps }) {
+  const r = recherche || {};
+  const code = r.code;
+  if (!ligne?.id || (r.statut !== RECHERCHE_CONNU && r.statut !== RECHERCHE_INCONNU)) {
+    return { statut: SCAN_ERREUR, message: 'Rien à envoyer, rescanne le code.', ecrit: false, code };
+  }
+  const libelleAlias = String(ligne.libelle_ticket || '').trim() || null;
+  let rep;
+  try {
+    if (r.statut === RECHERCHE_CONNU) {
+      if (typeof deps?.proposerLiaison !== 'function') throw new Error('proposerLiaison absent');
+      const v = r.variante || {};
+      rep = await deps.proposerLiaison({ ligneId: ligne.id, produitId: v.produit_id, varianteId: v.id, code: codePourCreation(code), libelleAlias });
+    } else {
+      if (typeof deps?.proposerCreation !== 'function') throw new Error('proposerCreation absent');
+      const rangement = r.rangement !== undefined ? r.rangement : await (r.rangementEnCours || null);
+      rep = await deps.proposerCreation({ ligneId: ligne.id, code: codePourCreation(code), off: offPourCreation(r.off || {}, r.rayonChoisi, rangement) });
+    }
+  } catch (e) {
+    rep = { error: e || true };
+  }
+  if (rep?.error) {
+    const c = codeErreurConfiance(rep.error);
+    if (c === 'COMPTE_SUSPENDU') return { statut: SCAN_SUSPENDU, message: MESSAGE_SUSPENDU, ecrit: false, code };
+    if (c === 'NON_AUTORISE') return { statut: SCAN_ERREUR, message: MESSAGE_NON_AUTORISE, ecrit: false, code };
+    return {
+      statut: estFonctionAbsente(rep.error) ? SCAN_INDISPONIBLE : SCAN_ERREUR,
+      message: estFonctionAbsente(rep.error) ? MESSAGE_INDISPONIBLE : 'Envoi impossible pour le moment, réessaie.',
+      ecrit: false, code,
+    };
+  }
+  return {
+    statut: SCAN_PROPOSE, message: MESSAGE_PROPOSE, ecrit: false, propose: true, code,
+    off: r.off || {}, variante: r.statut === RECHERCHE_CONNU ? (r.variante || null) : null,
+    propositionId: typeof rep?.data === 'string' ? rep.data : null,
+  };
+}
+
+// Erreur d'écriture → résultat lisible. La base refuse un débutant
+// (VERIFICATION_REQUISE) : on bascule alors sur la proposition, sans rien
+// montrer de technique. null = erreur ordinaire (traitée par l'appelant).
+async function issueRefusConfiance({ error, ligne, recherche, deps }) {
+  const c = codeErreurConfiance(error);
+  if (c === 'VERIFICATION_REQUISE') return proposerScanLigne({ ligne, recherche, deps });
+  if (c === 'COMPTE_SUSPENDU') return { statut: SCAN_SUSPENDU, message: MESSAGE_SUSPENDU, ecrit: false, code: recherche?.code };
+  if (c === 'NON_AUTORISE') return { statut: SCAN_ERREUR, message: MESSAGE_NON_AUTORISE, ecrit: false, code: recherche?.code };
+  return null;
+}
+
 // TEMPS 2 — écriture, uniquement sur une recherche RÉUSSIE (connu/inconnu).
-// deps : relier, creerDepuisCode. Toute autre recherche -> rien n'est écrit.
-export async function ecrireScanLigne({ ligne, recherche, deps }) {
+// deps : relier, creerDepuisCode (+ proposerLiaison, proposerCreation pour un
+// débutant). confiance === false (compte sous le seuil, connu d'avance) : on
+// propose directement, sans essai d'écriture. Sinon on écrit, et un refus
+// VERIFICATION_REQUISE de la base bascule aussi sur la proposition.
+// Toute autre recherche -> rien n'est écrit.
+export async function ecrireScanLigne({ ligne, recherche, deps, confiance = null }) {
   const r = recherche || {};
   const code = r.code;
   if (!ligne?.id || (r.statut !== RECHERCHE_CONNU && r.statut !== RECHERCHE_INCONNU)) {
     return { statut: SCAN_ERREUR, message: 'Rien à enregistrer, rescanne le code.', ecrit: false, code };
   }
+  if (confiance === false) return proposerScanLigne({ ligne, recherche: r, deps });
   const libelleAlias = String(ligne.libelle_ticket || '').trim() || null;
 
   if (r.statut === RECHERCHE_CONNU) {
@@ -449,6 +525,8 @@ export async function ecrireScanLigne({ ligne, recherche, deps }) {
       rep = { error: e || true };
     }
     if (rep?.error) {
+      const refus = await issueRefusConfiance({ error: rep.error, ligne, recherche: r, deps });
+      if (refus) return refus;
       return {
         statut: estFonctionAbsente(rep.error) ? SCAN_INDISPONIBLE : SCAN_ERREUR,
         message: estFonctionAbsente(rep.error) ? MESSAGE_INDISPONIBLE : 'Le rattachement a échoué, réessaie.',
@@ -472,6 +550,8 @@ export async function ecrireScanLigne({ ligne, recherche, deps }) {
     rep = { error: e || true };
   }
   if (rep?.error) {
+    const refus = await issueRefusConfiance({ error: rep.error, ligne, recherche: { ...r, rangement: r.rangement !== undefined ? r.rangement : await (r.rangementEnCours || null) }, deps });
+    if (refus) return refus;
     return {
       statut: estFonctionAbsente(rep.error) ? SCAN_INDISPONIBLE : SCAN_ERREUR,
       message: estFonctionAbsente(rep.error) ? MESSAGE_INDISPONIBLE : 'Création impossible pour le moment, réessaie.',
@@ -499,10 +579,10 @@ export async function ecrireScanLigne({ ligne, recherche, deps }) {
 }
 
 // 118 — scan ET écriture d'un seul tenant (recherche puis écriture, sans pause).
-export async function traiterScanLigne({ ligne, codeBrut, deps }) {
+export async function traiterScanLigne({ ligne, codeBrut, deps, confiance = null }) {
   const recherche = await rechercherScanLigne({ ligne, codeBrut, deps });
   if (recherche.statut !== RECHERCHE_CONNU && recherche.statut !== RECHERCHE_INCONNU) return recherche;
-  return ecrireScanLigne({ ligne, recherche, deps });
+  return ecrireScanLigne({ ligne, recherche, deps, confiance });
 }
 
 // « Créé : <nom> · <marque> · <format> » à partir de ce que la base a écrit,
@@ -625,7 +705,13 @@ export function issueScan(r, { ligne, variante = null, prix = null } = {}) {
       annulable: ligne?.id ? { ligneId: ligne.id, libelle, chemin: r.chemin ?? null } : null,
     };
   }
-  const ton = r.statut === SCAN_POIDS_VARIABLE || r.statut === SCAN_ARCHIVE ? 'attente' : 'erreur';
+  // Chantier 214 — proposition envoyée : un merci, jamais une erreur, et pas
+  // d'« ↩ Annuler » (aucun prix n'a été écrit).
+  if (r.statut === SCAN_PROPOSE) {
+    const libelle = libelleProduitCree({ variante: variante || r.variante || null, off: r.off, ligne });
+    return { retour: { ton: 'succes', titre: `🙏 ${MESSAGE_PROPOSE}`, detail: [libelle, DETAIL_PROPOSE].filter(Boolean).join(' — '), propose: true }, annulable: null };
+  }
+  const ton = r.statut === SCAN_POIDS_VARIABLE || r.statut === SCAN_ARCHIVE || r.statut === SCAN_SUSPENDU ? 'attente' : 'erreur';
   return {
     retour: { ton, titre: r.message, detail: r.code ? `Code : ${r.code}` : null, ligneId: ligne?.id ?? null },
     annulable: null,

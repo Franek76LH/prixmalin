@@ -30,6 +30,7 @@ import {
   chargerTicketsUtilisateur, chargerLignesAIdentifier, chargerDetailTicket,
   confirmerSuggestion, chargerVarianteAffichage, depsScanLigne, chargerProduitsACompleter,
   annulerScanLigneRpc, marquerLigneSansCodeBarresRpc, detacherLigneRpc,
+  chargerConfiance,
 } from '../lib/historiqueTicketsCore';
 import { motsQuiClochent, phraseMotsQuiClochent } from '../lib/motsQuiClochent';
 
@@ -86,6 +87,14 @@ const depsIdentification = {
 
 export default function HistoriqueTicketsSheet({ userId, onClose, onCompteChange, ticketInitial = null, ligneInitiale = null, onRetourAccueil = null }) {
   const [vue, setVue] = useState(ticketInitial ? 'detail' : 'liste');
+  // Chantier 214 (143-B) — règle de confiance lue une fois (la base fait foi).
+  // null = inconnu : le scan essaie d'écrire, la base bascule sur la proposition.
+  const [confiance, setConfiance] = useState(null);
+  useEffect(() => {
+    let actif = true;
+    chargerConfiance().then(c => { if (actif) setConfiance(c); });
+    return () => { actif = false; };
+  }, [userId]);
   const [tickets, setTickets] = useState(null);
   const [comptes, setComptes] = useState(() => new Map());
   const [erreurListe, setErreurListe] = useState(null);
@@ -350,6 +359,7 @@ export default function HistoriqueTicketsSheet({ userId, onClose, onCompteChange
       const r = await traiterScanLigne({
         ligne,
         codeBrut,
+        confiance,
         deps: {
           ...depsScanLigne,
           chercherOff: async (ean) => { setEnCours('Recherche sur Open Food Facts…'); return depsScanLigne.chercherOff(ean); },
@@ -377,7 +387,7 @@ export default function HistoriqueTicketsSheet({ userId, onClose, onCompteChange
     }
     // apresTraitement lit ticketOuvert : on suit sa valeur courante.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ticketOuvert]);
+  }, [ticketOuvert, confiance]);
 
   const fermerScanner = useCallback(() => { scanCibleRef.current = null; setScanOuvert(false); }, []);
 
@@ -649,6 +659,7 @@ export default function HistoriqueTicketsSheet({ userId, onClose, onCompteChange
           lignes={detail.lignes}
           ligneDepartId={identification.ligneDepartId}
           deps={depsIdentification}
+          confiance={confiance}
           onFermer={finIdentification}
           onRetourAccueil={() => { setIdentification(null); (onRetourAccueil || onClose)?.(); }}
         />
