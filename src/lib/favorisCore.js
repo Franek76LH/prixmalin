@@ -87,7 +87,7 @@ export async function chargerFavoris(utilisateurId) {
     const { data, error } = await supabase.from('favoris')
       .select(`id, produit_id, variante_produit_id, magasin_prefere_id, cree_le,
         produit:produits(id, nom_reference),
-        variante:variantes_produit(id, libelle, quantite_nette, unite_quantite, nombre_unites, marques(nom)),
+        variante:variantes_produit(id, libelle, quantite_nette, unite_quantite, nombre_unites, marques(nom, est_mdd)),
         magasin:magasins(id, nom)`)
       .eq('utilisateur_id', uid)
       .order('cree_le', { ascending: false });

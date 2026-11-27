@@ -90,14 +90,29 @@ function quantiteTotale(quantiteNette, nombreUnites) {
   return quantiteNette * (Number(nombreUnites) || 1);
 }
 
-// Deux formats sont identiques seulement si la même unité littérale est
-// utilisée des deux côtés : aucune conversion g/kg ou ml/L n'est tentée,
-// pour ne jamais déduire silencieusement une équivalence non démontrée.
+// Chantier 230 — conversions EXACTES seulement, à l'intérieur d'une même
+// famille (poids : g/kg ; volume : ml/cl/l). « 500 g » et « 0,5 kg » sont le
+// même format ; « 500 g » et « 1 kg » restent différents. Aucune autre unité
+// n'est convertie (pièce, lot…) : l'unité littérale doit alors être la même.
+const FACTEURS_UNITE = {
+  g: ['poids', 1], kg: ['poids', 1000],
+  ml: ['volume', 1], cl: ['volume', 10], l: ['volume', 1000],
+};
+
+function enBase(quantiteNette, unite, nombreUnites) {
+  const u = normUnite(unite);
+  const total = quantiteTotale(Number(quantiteNette), nombreUnites);
+  const f = FACTEURS_UNITE[u];
+  return f ? { famille: f[0], valeur: total * f[1] } : { famille: `brut:${u}`, valeur: total };
+}
+
+// Deux formats sont identiques si, ramenés à la même unité de leur famille
+// (g ou ml), ils ont exactement la même quantité totale.
 function memeFormat(cible, prix) {
-  if (normUnite(cible.unite_quantite) !== normUnite(prix.unite_quantite)) return false;
-  const totalCible = quantiteTotale(cible.quantite_nette, cible.nombre_unites);
-  const totalPrix = quantiteTotale(prix.quantite_nette, prix.nombre_unites);
-  return Math.abs(totalCible - totalPrix) < 1e-9;
+  const a = enBase(cible.quantite_nette, cible.unite_quantite, cible.nombre_unites);
+  const b = enBase(prix.quantite_nette, prix.unite_quantite, prix.nombre_unites);
+  if (a.famille !== b.famille) return false;
+  return Math.abs(a.valeur - b.valeur) < 1e-6;
 }
 
 // Fait correspondre chaque cible aux prix Core du même produit_id et du même

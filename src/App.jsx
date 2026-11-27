@@ -1046,7 +1046,9 @@ function FavorisSheet({ userId, onClose, items = [], onAdd = null, onVoirListe =
     try {
       res = await onAdd({
         id: nouvelIdArticle(), product: f.produit.nom_reference, format: '', brand: '', qty: 1, checked: false,
-        produit_id: f.produit_id, variante_produit_id: f.variante_produit_id, marque_pref: 'nationale',
+        produit_id: f.produit_id, variante_produit_id: f.variante_produit_id,
+        // Chantier 230 — un favori de marque distributeur garde sa marque au comparateur.
+        marque_pref: f.variante?.marques?.est_mdd === true ? 'mdd' : 'nationale',
       });
     } catch { res = false; }
     setAjoutes(a => ({ ...a, [f.id]: res === true ? 'ok' : res === 'duplicate' ? 'deja' : 'erreur' }));

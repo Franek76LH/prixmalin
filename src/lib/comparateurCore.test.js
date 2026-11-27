@@ -170,6 +170,34 @@ describe('faireCorrespondrePrix', () => {
     expect(resultat.correspondances).toEqual([]);
   });
 
+  it('chantier 230 : 500 g et 0,5 kg sont le même format', () => {
+    const cible = cibleBase();
+    const prix = prixBase({ quantite_nette: 0.5, unite_quantite: 'kg' });
+    const [resultat] = faireCorrespondrePrix([cible], [prix]);
+    expect(resultat.correspondances).toHaveLength(1);
+  });
+
+  it('chantier 230 : 1 L, 100 cl et 1000 ml sont le même format ; 1 L et 1 kg non', () => {
+    const cible = cibleBase({ quantite_nette: 1, unite_quantite: 'L' });
+    const prix = [
+      prixBase({ quantite_nette: 100, unite_quantite: 'cl' }),
+      prixBase({ quantite_nette: 1000, unite_quantite: 'ml' }),
+      prixBase({ quantite_nette: 1, unite_quantite: 'kg' }),
+    ];
+    const [resultat] = faireCorrespondrePrix([cible], prix);
+    expect(resultat.correspondances).toHaveLength(2);
+  });
+
+  it('chantier 230 : les unités sans conversion (pièce) restent comparées telles quelles', () => {
+    const cible = cibleBase({ quantite_nette: 6, unite_quantite: 'pièce' });
+    const prix = [
+      prixBase({ quantite_nette: 6, unite_quantite: 'pièce' }),
+      prixBase({ quantite_nette: 6, unite_quantite: 'g' }),
+    ];
+    const [resultat] = faireCorrespondrePrix([cible], prix);
+    expect(resultat.correspondances).toHaveLength(1);
+  });
+
   it('retient une correspondance quand les formats normalisés sont identiques (2×250 g == 500 g)', () => {
     const cible = cibleBase();
     const prix = prixBase({ quantite_nette: 250, nombre_unites: 2 });
